@@ -2,6 +2,20 @@ use iced::{
     button, checkbox, container, progress_bar, radio, rule, scrollable,
     slider, text_input, Color,
 };
+use crate::Spacing;
+
+pub mod consts {
+    use super::*;
+
+    pub const SPACING_VERTICAL: u16 = 4;
+    pub const SPACING_HORIZONTAL: u16 = SPACING_VERTICAL * 2;
+    pub const SPACING: Spacing = Spacing {
+        up: SPACING_VERTICAL,
+        left: SPACING_HORIZONTAL,
+        down: SPACING_VERTICAL,
+        right: SPACING_HORIZONTAL,
+    };
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Theme {
@@ -38,154 +52,141 @@ impl From<Theme> for Box<dyn text_input::StyleSheet> {
     }
 }
 
-mod dark {
-    use super::*;
+macro_rules! theme {
+    {
+        $theme_name:ident {
+            $(
+                const $field_name:ident: $field_ty:ty = $field_value:expr;
+            )*
+        }
+    } => {
+        mod $theme_name {
+            use super::*;
 
-    const TEXT_COLOR: Color = Color::WHITE;
-    const TEXT_INPUT_COLOR: Color = TEXT_COLOR;
-    const TEXT_INPUT_COLOR_PLACEHOLDER: Color = Color::from_rgb(
-        0x7F as f32 / 0xFF as f32,
-        0x7F as f32 / 0xFF as f32,
-        0x7F as f32 / 0xFF as f32,
-    );
-    const TEXT_INPUT_COLOR_SELECTION: Color = Color::from_rgb(
-        0x4F as f32 / 0xFF as f32,
-        0x4F as f32 / 0xFF as f32,
-        0x4F as f32 / 0xFF as f32,
-    );
-    const TEXT_INPUT_COLOR_BACKGROUND: Color = Color::from_rgb(
-        0x2F as f32 / 0xFF as f32,
-        0x2F as f32 / 0xFF as f32,
-        0x2F as f32 / 0xFF as f32,
-    );
-    const NODE_TITLE_COLOR_BACKGROUND: Color = Color::from_rgb(
-        0x3F as f32 / 0xFF as f32,
-        0x3F as f32 / 0xFF as f32,
-        0x3F as f32 / 0xFF as f32,
-    );
+            $(
+                const $field_name: $field_ty = $field_value;
+            )*
 
-    pub struct Container;
+            const TEXT_COLOR: Color = COLORS[9];
+            const TEXT_INPUT_COLOR: Color = TEXT_COLOR;
+            const TEXT_INPUT_COLOR_PLACEHOLDER: Color = COLORS[3];
+            const TEXT_INPUT_COLOR_SELECTION: Color = COLORS[4];
+            const TEXT_INPUT_COLOR_BACKGROUND: Color = COLORS[1];
+            const TEXT_INPUT_ACTIVE_COLOR_BORDER: Color = TEXT_INPUT_COLOR_BACKGROUND;
+            const TEXT_INPUT_HOVERED_COLOR_BORDER: Color = COLORS[4];
+            const TEXT_INPUT_FOCUSED_COLOR_BORDER: Color = COLORS[7];
+            const NODE_TITLE_COLOR_BACKGROUND: Color = COLORS[2];
 
-    impl container::StyleSheet for Container {
-        fn style(&self) -> container::Style {
-            container::Style {
-                background: NODE_TITLE_COLOR_BACKGROUND.into(),
-                text_color: TEXT_COLOR.into(),
-                ..container::Style::default()
+            pub struct Container;
+
+            impl container::StyleSheet for Container {
+                fn style(&self) -> container::Style {
+                    container::Style {
+                        background: NODE_TITLE_COLOR_BACKGROUND.into(),
+                        text_color: TEXT_COLOR.into(),
+                        ..container::Style::default()
+                    }
+                }
             }
-        }
-    }
 
-    pub struct TextInput;
+            pub struct TextInput;
 
-    impl text_input::StyleSheet for TextInput {
-        fn active(&self) -> text_input::Style {
-            text_input::Style {
-                background: TEXT_INPUT_COLOR_BACKGROUND.into(),
-                ..Default::default()
-            }
-        }
+            impl text_input::StyleSheet for TextInput {
+                fn active(&self) -> text_input::Style {
+                    text_input::Style {
+                        background: TEXT_INPUT_COLOR_BACKGROUND.into(),
+                        border_radius: 2,
+                        border_width: 1,
+                        border_color: TEXT_INPUT_ACTIVE_COLOR_BORDER,
+                        ..Default::default()
+                    }
+                }
 
-        fn focused(&self) -> text_input::Style {
-            text_input::Style {
-                background: TEXT_INPUT_COLOR_BACKGROUND.into(),
-                ..Default::default()
-            }
-        }
+                fn focused(&self) -> text_input::Style {
+                    text_input::Style {
+                        background: TEXT_INPUT_COLOR_BACKGROUND.into(),
+                        border_radius: 2,
+                        border_width: 1,
+                        border_color: TEXT_INPUT_FOCUSED_COLOR_BORDER,
+                        ..Default::default()
+                    }
+                }
 
-        fn placeholder_color(&self) -> Color {
-            TEXT_INPUT_COLOR_PLACEHOLDER
-        }
+                fn placeholder_color(&self) -> Color {
+                    TEXT_INPUT_COLOR_PLACEHOLDER
+                }
 
-        fn value_color(&self) -> Color {
-            TEXT_INPUT_COLOR
-        }
+                fn value_color(&self) -> Color {
+                    TEXT_INPUT_COLOR
+                }
 
-        fn selection_color(&self) -> Color {
-            TEXT_INPUT_COLOR_SELECTION
-        }
+                fn selection_color(&self) -> Color {
+                    TEXT_INPUT_COLOR_SELECTION
+                }
 
-        fn hovered(&self) -> text_input::Style {
-            text_input::Style {
-                background: TEXT_INPUT_COLOR_BACKGROUND.into(),
-                ..Default::default()
+                fn hovered(&self) -> text_input::Style {
+                    text_input::Style {
+                        background: TEXT_INPUT_COLOR_BACKGROUND.into(),
+                        border_radius: 2,
+                        border_width: 1,
+                        border_color: TEXT_INPUT_HOVERED_COLOR_BORDER,
+                        ..Default::default()
+                    }
+                }
             }
         }
     }
 }
 
-mod light {
-    use super::*;
-
-    const TEXT_COLOR: Color = Color::BLACK;
-    const TEXT_INPUT_COLOR: Color = TEXT_COLOR;
-    const TEXT_INPUT_COLOR_PLACEHOLDER: Color = Color::from_rgb(
-        0x7F as f32 / 0xFF as f32,
-        0x7F as f32 / 0xFF as f32,
-        0x7F as f32 / 0xFF as f32,
-    );
-    const TEXT_INPUT_COLOR_SELECTION: Color = Color::from_rgb(
-        0x4F as f32 / 0xFF as f32,
-        0x4F as f32 / 0xFF as f32,
-        0x4F as f32 / 0xFF as f32,
-    );
-    const TEXT_INPUT_COLOR_BACKGROUND: Color = Color::from_rgb(
-        0x2F as f32 / 0xFF as f32,
-        0x2F as f32 / 0xFF as f32,
-        0x2F as f32 / 0xFF as f32,
-    );
-    const NODE_TITLE_COLOR_BACKGROUND: Color = Color::from_rgb(
-        0xEE as f32 / 0xFF as f32,
-        0xEE as f32 / 0xFF as f32,
-        0xEE as f32 / 0xFF as f32,
-    );
-
-    pub struct Container;
-
-    impl container::StyleSheet for Container {
-        fn style(&self) -> container::Style {
-            container::Style {
-                background: NODE_TITLE_COLOR_BACKGROUND.into(),
-                text_color: TEXT_COLOR.into(),
-                ..container::Style::default()
-            }
-        }
+theme! {
+    dark {
+        const COLORS: [Color; 10] = [
+            rgb(0x100c06),
+            rgb(0x221f1a),
+            rgb(0x393530),
+            rgb(0x4b4641),
+            rgb(0x6e6b66),
+            rgb(0x93908b),
+            rgb(0xbfbcb8),
+            rgb(0xdbd9d6),
+            rgb(0xf0efed),
+            rgb(0xfefefd),
+        ];
     }
+}
 
-    pub struct TextInput;
-
-    impl text_input::StyleSheet for TextInput {
-        fn active(&self) -> text_input::Style {
-            text_input::Style {
-                background: TEXT_INPUT_COLOR_BACKGROUND.into(),
-                ..Default::default()
-            }
-        }
-
-        fn focused(&self) -> text_input::Style {
-            text_input::Style {
-                background: TEXT_INPUT_COLOR_BACKGROUND.into(),
-                ..Default::default()
-            }
-        }
-
-        fn placeholder_color(&self) -> Color {
-            TEXT_INPUT_COLOR_PLACEHOLDER
-        }
-
-        fn value_color(&self) -> Color {
-            TEXT_INPUT_COLOR
-        }
-
-        fn selection_color(&self) -> Color {
-            TEXT_INPUT_COLOR_SELECTION
-        }
-
-        fn hovered(&self) -> text_input::Style {
-            text_input::Style {
-                background: TEXT_INPUT_COLOR_BACKGROUND.into(),
-                ..Default::default()
-            }
-        }
+theme! {
+    light {
+        const COLORS: [Color; 10] = [
+            rgb(0xfefefd),
+            rgb(0xf0efed),
+            rgb(0xdbd9d6),
+            rgb(0xbfbcb8),
+            rgb(0x93908b),
+            rgb(0x6e6b66),
+            rgb(0x4b4641),
+            rgb(0x393530),
+            rgb(0x221f1a),
+            rgb(0x100c06),
+        ];
     }
+}
+
+/// Convert an RGBA integer (0xRRGGBBAA) into Color
+const fn rgba(rgba: u32) -> Color {
+    Color::from_rgba(
+        ((rgba >> 24) & 0xFF) as f32 / 0xFF as f32,
+        ((rgba >> 16) & 0xFF) as f32 / 0xFF as f32,
+        ((rgba >>  8) & 0xFF) as f32 / 0xFF as f32,
+        ((rgba >>  0) & 0xFF) as f32 / 0xFF as f32,
+    )
+}
+
+/// Convert an RGB integer (0xRRGGBB) into Color
+const fn rgb(rgb: u32) -> Color {
+    Color::from_rgb(
+        ((rgb >> 16) & 0xFF) as f32 / 0xFF as f32,
+        ((rgb >>  8) & 0xFF) as f32 / 0xFF as f32,
+        ((rgb >>  0) & 0xFF) as f32 / 0xFF as f32,
+    )
 }

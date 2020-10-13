@@ -1,11 +1,9 @@
 use iced_native::{Length, Point, Hasher, Event, Clipboard};
 use iced_native::{mouse, overlay, Element};
 use iced_native::widget::Widget;
-// use iced_native::renderer::Renderer;
 use iced_native::layout::{Layout, Limits, Node};
 use iced_native::widget::{Column, Row, Space};
 use iced_graphics::{Backend, Defaults, Primitive, Renderer};
-// use iced_wgpu::{Backend, Defaults, Primitive, Renderer};
 
 pub struct Spacing {
     pub right: u16,
@@ -19,7 +17,7 @@ pub struct Margin<'a, M, B: Backend + 'a> {
 }
 
 impl<'a, M: 'a, B: Backend + 'a> Margin<'a, M, B> {
-    pub fn new(element: Element<'a, M, Renderer<B>>, spacing: Spacing) -> Self {
+    pub fn new(element: impl Into<Element<'a, M, Renderer<B>>>, spacing: Spacing) -> Self {
         Self {
             child: Column::new()
                 .push(Space::with_height(Length::Units(spacing.up)))
@@ -29,7 +27,7 @@ impl<'a, M: 'a, B: Backend + 'a> Margin<'a, M, B> {
                         .push(element)
                         .push(Space::with_width(Length::Units(spacing.right)))
                 )
-                .push(Space::with_height(Length::Units(spacing.down)))
+                .push(Space::with_height(Length::Units(spacing.down))),
         }
     }
 }
