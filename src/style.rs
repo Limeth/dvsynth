@@ -9,12 +9,7 @@ pub mod consts {
 
     pub const SPACING_VERTICAL: u16 = 4;
     pub const SPACING_HORIZONTAL: u16 = SPACING_VERTICAL * 2;
-    pub const SPACING: Spacing = Spacing {
-        up: SPACING_VERTICAL,
-        left: SPACING_HORIZONTAL,
-        down: SPACING_VERTICAL,
-        right: SPACING_HORIZONTAL,
-    };
+    pub const SPACING: Spacing = Spacing::from_axes(SPACING_HORIZONTAL, SPACING_VERTICAL);
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

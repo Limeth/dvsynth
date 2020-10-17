@@ -1,5 +1,5 @@
 mod margin;
-mod pane_collection;
+mod floating_panes;
 
 pub use margin::*;
-pub use pane_collection::*;
+pub use floating_panes::*;

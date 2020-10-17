@@ -105,24 +105,9 @@ impl Application for Counter {
         iced::Element::new(
             FloatingPanes::new()
                 .push(
-                    FloatingPane::new(
+                    FloatingPane::builder(
                         Column::new()
                             .width(Length::Units(256))
-                            .push(
-                                iced::Container::new(
-                                    // Margin::new(
-                                    margin! {
-                                        element: iced::Container::new(
-                                            Text::new("Test Node - Node Type")
-                                                .size(16)
-                                        ),
-                                        spacing: consts::SPACING,
-                                    }
-                                    // )
-                                )
-                                .width(Length::Fill)
-                                .style(theme)
-                            )
                             .push(
                                 ui_field! {
                                     name: "Test Text Input",
@@ -137,10 +122,14 @@ impl Application for Counter {
                             )
                     )
                     .position([10, 20])
-                    .title(Some("First")),
+                    .title(Some("First"))
+                    .title_size(Some(16))
+                    .title_margin(consts::SPACING)
+                    .pane_style(Some(theme))
+                    .build(),
                 )
                 .push(
-                    FloatingPane::new(
+                    FloatingPane::builder(
                         Column::new()
                             .width(Length::Units(256))
                             .push(
@@ -159,8 +148,12 @@ impl Application for Counter {
                                 .style(theme)
                             )
                     )
-                    .position([20, 30])
-                    .title(Some("Second")),
+                    .position([100, 100])
+                    .title(Some("Second"))
+                    .title_size(Some(16))
+                    .title_margin(consts::SPACING)
+                    .pane_style(Some(theme))
+                    .build(),
                 )
         )
     }
