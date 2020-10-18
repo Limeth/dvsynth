@@ -1,14 +1,17 @@
 use std::hash::Hash;
 use iced_native::{self, Size, Length, Point, Hasher, Event, Clipboard, Column, Text};
-use iced_native::{mouse, overlay, Element};
+use iced_native::{overlay, Element};
+use iced_native::mouse::{self, Event as MouseEvent, Button as MouseButton};
 use iced_native::widget::{Widget, Container};
 use iced_native::layout::{Layout, Limits, Node};
 use iced_graphics::{self, Backend, Defaults, Primitive};
+use vek::Vec2;
+use ordered_float::OrderedFloat;
 use super::*;
 
 pub struct FloatingPaneBuilder<'a, M: 'a, R: 'a + WidgetRenderer> {
+    pub state: &'a mut FloatingPaneState,
     pub element: Element<'a, M, R>,
-    pub position: [i32; 2],
     pub title: Option<&'a str>,
     pub title_style: Option<<R as iced_native::widget::container::Renderer>::Style>,
     pub title_size: Option<u16>,
@@ -17,21 +20,19 @@ pub struct FloatingPaneBuilder<'a, M: 'a, R: 'a + WidgetRenderer> {
 }
 
 impl<'a, M: 'a, R: 'a + WidgetRenderer> FloatingPaneBuilder<'a, M, R> {
-    pub fn new(element: impl Into<Element<'a, M, R>>) -> Self {
+    pub fn new(
+        state: &'a mut FloatingPaneState,
+        element: impl Into<Element<'a, M, R>>,
+    ) -> Self {
         Self {
+            state,
             element: element.into(),
-            position: Default::default(),
             title: Default::default(),
             title_style: Default::default(),
             title_size: Default::default(),
             title_margin: Default::default(),
             pane_style: Default::default(),
         }
-    }
-
-    pub fn position(mut self, position: [i32; 2]) -> Self {
-        self.position = position;
-        self
     }
 
     pub fn title(mut self, title: Option<&'a str>) -> Self {
@@ -63,6 +64,7 @@ impl<'a, M: 'a, R: 'a + WidgetRenderer> FloatingPaneBuilder<'a, M, R> {
 
     pub fn build(mut self) -> FloatingPane<'a, M, R> {
         FloatingPane {
+            state: self.state,
             element_tree: {
                 let mut column = Column::<M, R>::new();
 
@@ -89,35 +91,79 @@ impl<'a, M: 'a, R: 'a + WidgetRenderer> FloatingPaneBuilder<'a, M, R> {
                     container = container.style(pane_style);
                 }
 
-                container.into()
+                container.into() // Container { Column [ title, element ] }
             },
-            position: self.position,
+        }
+    }
+}
+
+#[derive(Default, Debug)]
+pub struct GrabState {
+    pub grab_pane_position: Vec2<f32>,
+    pub grab_mouse_position: Vec2<f32>,
+}
+
+impl Hash for GrabState {
+    fn hash<H>(&self, state: &mut H) where H: std::hash::Hasher {
+        self.grab_pane_position.map(OrderedFloat::from).as_slice().hash(state);
+        self.grab_mouse_position.map(OrderedFloat::from).as_slice().hash(state);
+    }
+}
+
+#[derive(Default, Debug)]
+pub struct FloatingPaneState {
+    pub position: Vec2<f32>,
+    pub grab_state: Option<GrabState>,
+}
+
+impl Hash for FloatingPaneState {
+    fn hash<H>(&self, state: &mut H) where H: std::hash::Hasher {
+        self.position.map(OrderedFloat::from).as_slice().hash(state);
+        self.grab_state.hash(state);
+    }
+}
+
+impl FloatingPaneState {
+    pub fn with_position(position: impl Into<Vec2<f32>>) -> Self {
+        Self {
+            position: position.into(),
+            grab_state: Default::default(),
         }
     }
 }
 
 pub struct FloatingPane<'a, M: 'a, R: 'a + WidgetRenderer> {
-    pub element_tree: Element<'a, M, R>,
-    pub position: [i32; 2],
+    state: &'a mut FloatingPaneState,
+    element_tree: Element<'a, M, R>,
 }
 
 impl<'a, M: 'a, R: 'a + WidgetRenderer> FloatingPane<'a, M, R> {
-    pub fn builder(element: impl Into<Element<'a, M, R>>) -> FloatingPaneBuilder<'a, M, R> {
-        FloatingPaneBuilder::new(element)
+    pub fn builder(
+        state: &'a mut FloatingPaneState,
+        element: impl Into<Element<'a, M, R>>,
+    ) -> FloatingPaneBuilder<'a, M, R> {
+        FloatingPaneBuilder::new(state, element)
     }
 }
 
+#[derive(Default, Debug)]
+pub struct FloatingPanesState {
+    cursor_position: Vec2<f32>,
+}
+
 pub struct FloatingPanes<'a, M: 'a, R: 'a + WidgetRenderer> {
+    state: &'a mut FloatingPanesState,
     width: Length,
     height: Length,
-    max_width: u32,
-    max_height: u32,
+    max_width: u32, // TODO
+    max_height: u32, // TODO combine
     children: Vec<FloatingPane<'a, M, R>>,
 }
 
 impl<'a, M: 'a, R: 'a + WidgetRenderer> FloatingPanes<'a, M, R> {
-    pub fn new() -> Self {
+    pub fn new(state: &'a mut FloatingPanesState) -> Self {
         Self {
+            state,
             width: Length::Shrink,
             height: Length::Shrink,
             max_width: u32::MAX,
@@ -190,10 +236,7 @@ impl<'a, M: 'a, R: 'a + WidgetRenderer> Widget<M, R> for FloatingPanes<'a, M, R>
                 .map(|child| {
                     let mut node = child.element_tree.layout(renderer, &limits);
 
-                    node.move_to(Point::new(
-                        child.position[0] as f32,
-                        child.position[1] as f32,
-                    ));
+                    node.move_to(child.state.position.into_array().into());
 
                     node
                 })
@@ -221,8 +264,8 @@ impl<'a, M: 'a, R: 'a + WidgetRenderer> Widget<M, R> for FloatingPanes<'a, M, R>
         self.max_height.hash(state);
 
         for child in &self.children {
+            child.state.hash(state);
             child.element_tree.hash_layout(state);
-            child.position.hash(state);
         }
     }
 
@@ -235,8 +278,39 @@ impl<'a, M: 'a, R: 'a + WidgetRenderer> Widget<M, R> for FloatingPanes<'a, M, R>
         renderer: &R,
         clipboard: Option<&dyn Clipboard>
     ) {
+        if let Event::Mouse(MouseEvent::CursorMoved { x, y }) = &event {
+            self.state.cursor_position = [*x, *y].into();
+        }
+
+        let panes_state = &self.state;
+
         self.children.iter_mut().zip(layout.children()).for_each(
-            |(child, layout)| {
+            |(child, pane_layout)| {
+                let child_layout = pane_layout.children().nth(0).expect("Invalid UI state.");
+                let child_layout = child_layout.children().nth(1).expect("Invalid UI state.");
+                let is_on_title = pane_layout.bounds().contains(panes_state.cursor_position.into_array().into())
+                    && !child_layout.bounds().contains(panes_state.cursor_position.into_array().into());
+
+                match &event {
+                    Event::Mouse(MouseEvent::CursorMoved { x, y }) => {
+                        if let Some(grab_state) = &child.state.grab_state {
+                            child.state.position = panes_state.cursor_position.as_::<f32>()
+                                + grab_state.grab_pane_position
+                                - grab_state.grab_mouse_position;
+                        }
+                    }
+                    Event::Mouse(MouseEvent::ButtonPressed(MouseButton::Left)) if is_on_title => {
+                        child.state.grab_state = Some(GrabState {
+                            grab_mouse_position: panes_state.cursor_position,
+                            grab_pane_position: child.state.position,
+                        });
+                    }
+                    Event::Mouse(MouseEvent::ButtonReleased(MouseButton::Left)) => {
+                        child.state.grab_state = None;
+                    }
+                    _ => ()
+                }
+
                 child.element_tree.on_event(
                     event.clone(),
                     layout,
@@ -250,7 +324,7 @@ impl<'a, M: 'a, R: 'a + WidgetRenderer> Widget<M, R> for FloatingPanes<'a, M, R>
     }
 
     fn overlay(
-        &mut self, 
+        &mut self,
         layout: Layout<'_>
     ) -> Option<overlay::Element<'_, M, R>> {
         self.children
