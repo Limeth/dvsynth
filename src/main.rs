@@ -1,4 +1,13 @@
 #![feature(const_fn_floating_point_arithmetic)]
+///
+/// Task list:
+/// * write a README.md
+/// * add a license
+/// * publish on github
+/// * figure out why the text input field is not focusing
+/// * change the cursor on drag
+/// * FloatingPanes panning on drag
+///
 
 use iced::{button, window, text_input, Point, Align, VerticalAlignment, HorizontalAlignment, Length, Button, Column, Text, Application, Command, Settings};
 use style::*;
@@ -7,9 +16,13 @@ use widgets::*;
 pub mod style;
 pub mod widgets;
 
-struct Counter {
+struct ApplicationState {
     text_input_state: text_input::State,
     text_input_value: String,
+
+    floating_panes_state: FloatingPanesState,
+    floating_pane_state_0: FloatingPaneState,
+    floating_pane_state_1: FloatingPaneState,
 }
 
 #[derive(Debug, Clone)]
@@ -69,7 +82,7 @@ macro_rules! ui_field {
     }}
 }
 
-impl Application for Counter {
+impl Application for ApplicationState {
     type Executor = iced::executor::Null;
     type Message = Message;
     type Flags = (); // The data needed to initialize your Application.
@@ -79,6 +92,9 @@ impl Application for Counter {
             Self {
                 text_input_state: Default::default(),
                 text_input_value: Default::default(),
+                floating_panes_state: Default::default(),
+                floating_pane_state_0: FloatingPaneState::with_position([0.0, 0.0]),
+                floating_pane_state_1: FloatingPaneState::with_position([100.0, 100.0]),
             },
             Command::none(),
         )
@@ -103,9 +119,10 @@ impl Application for Counter {
         let theme = style::Theme::Dark;
         // We use a column: a simple vertical layout
         iced::Element::new(
-            FloatingPanes::new()
+            FloatingPanes::new(&mut self.floating_panes_state)
                 .push(
                     FloatingPane::builder(
+                        &mut self.floating_pane_state_0,
                         Column::new()
                             .width(Length::Units(256))
                             .push(
@@ -119,9 +136,8 @@ impl Application for Counter {
                                     },
                                     theme: theme,
                                 }
-                            )
+                            ),
                     )
-                    .position([10, 20])
                     .title(Some("First"))
                     .title_size(Some(16))
                     .title_margin(consts::SPACING)
@@ -130,6 +146,7 @@ impl Application for Counter {
                 )
                 .push(
                     FloatingPane::builder(
+                        &mut self.floating_pane_state_1,
                         Column::new()
                             .width(Length::Units(256))
                             .push(
@@ -146,9 +163,8 @@ impl Application for Counter {
                                 )
                                 .width(Length::Fill)
                                 .style(theme)
-                            )
+                            ),
                     )
-                    .position([100, 100])
                     .title(Some("Second"))
                     .title_size(Some(16))
                     .title_margin(consts::SPACING)
@@ -160,7 +176,7 @@ impl Application for Counter {
 }
 
 fn main() {
-    Counter::run(
+    ApplicationState::run(
         Settings {
             window: window::Settings {
                 icon: None, // TODO
