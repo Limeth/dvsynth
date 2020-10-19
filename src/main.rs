@@ -1,9 +1,6 @@
 #![feature(const_fn_floating_point_arithmetic)]
 ///
 /// Task list:
-/// * write a README.md
-/// * add a license
-/// * publish on github
 ///
 
 use iced::{button, window, text_input, Point, Align, VerticalAlignment, HorizontalAlignment, Length, Button, Column, Text, Application, Command, Settings};
