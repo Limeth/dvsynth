@@ -4,7 +4,6 @@
 /// * write a README.md
 /// * add a license
 /// * publish on github
-/// * FloatingPanes panning on drag
 ///
 
 use iced::{button, window, text_input, Point, Align, VerticalAlignment, HorizontalAlignment, Length, Button, Column, Text, Application, Command, Settings};

@@ -99,13 +99,13 @@ impl<'a, M: 'a, R: 'a + WidgetRenderer> FloatingPaneBuilder<'a, M, R> {
 
 #[derive(Default, Debug)]
 pub struct GrabState {
-    pub grab_pane_position: Vec2<f32>,
+    pub grab_element_position: Vec2<f32>,
     pub grab_mouse_position: Vec2<f32>,
 }
 
 impl Hash for GrabState {
     fn hash<H>(&self, state: &mut H) where H: std::hash::Hasher {
-        self.grab_pane_position.map(OrderedFloat::from).as_slice().hash(state);
+        self.grab_element_position.map(OrderedFloat::from).as_slice().hash(state);
         self.grab_mouse_position.map(OrderedFloat::from).as_slice().hash(state);
     }
 }
@@ -113,7 +113,7 @@ impl Hash for GrabState {
 #[derive(Default, Debug)]
 pub struct FloatingPaneState {
     pub position: Vec2<f32>,
-    pub grab_state: Option<GrabState>,
+    pub grab_state: Option<GrabState>, // to move this pane around
 }
 
 impl Hash for FloatingPaneState {
@@ -149,14 +149,22 @@ impl<'a, M: 'a, R: 'a + WidgetRenderer> FloatingPane<'a, M, R> {
 #[derive(Default, Debug)]
 pub struct FloatingPanesState {
     cursor_position: Vec2<f32>,
+    panes_offset: Vec2<f32>, // the vector to offset all floating panes by
+    grab_state: Option<GrabState>, // to pan across the pane view (via panes_offset)
+}
+
+impl Hash for FloatingPanesState {
+    fn hash<H>(&self, state: &mut H) where H: std::hash::Hasher {
+        self.panes_offset.map(OrderedFloat::from).as_slice().hash(state);
+        self.grab_state.hash(state);
+    }
 }
 
 pub struct FloatingPanes<'a, M: 'a, R: 'a + WidgetRenderer> {
     state: &'a mut FloatingPanesState,
     width: Length,
     height: Length,
-    max_width: u32, // TODO
-    max_height: u32, // TODO combine
+    extents: Vec2<u32>,
     children: Vec<FloatingPane<'a, M, R>>,
 }
 
@@ -166,8 +174,7 @@ impl<'a, M: 'a, R: 'a + WidgetRenderer> FloatingPanes<'a, M, R> {
             state,
             width: Length::Shrink,
             height: Length::Shrink,
-            max_width: u32::MAX,
-            max_height: u32::MAX,
+            extents: [u32::MAX, u32::MAX].into(),
             children: Vec::new(),
         }
     }
@@ -192,7 +199,7 @@ impl<'a, M: 'a, R: 'a + WidgetRenderer> FloatingPanes<'a, M, R> {
     ///
     /// [`Row`]: struct.Row.html
     pub fn max_width(mut self, max_width: u32) -> Self {
-        self.max_width = max_width;
+        self.extents[0] = max_width;
         self
     }
 
@@ -200,7 +207,15 @@ impl<'a, M: 'a, R: 'a + WidgetRenderer> FloatingPanes<'a, M, R> {
     ///
     /// [`Row`]: struct.Row.html
     pub fn max_height(mut self, max_height: u32) -> Self {
-        self.max_height = max_height;
+        self.extents[1] = max_height;
+        self
+    }
+
+    /// Sets the maximum width and height of the [`Row`].
+    ///
+    /// [`Row`]: struct.Row.html
+    pub fn extents(mut self, extents: Vec2<u32>) -> Self {
+        self.extents = extents;
         self
     }
 
@@ -225,13 +240,12 @@ impl<'a, M: 'a, R: 'a + WidgetRenderer> Widget<M, R> for FloatingPanes<'a, M, R>
 
     fn layout(&self, renderer: &R, limits: &Limits) -> Node {
         let limits = limits
-            .max_width(self.max_width)
-            .max_height(self.max_height)
+            .max_width(self.extents[0])
+            .max_height(self.extents[1])
             .width(self.width)
             .height(self.height);
-
-        Node::with_children(
-            Size::new(self.max_width as f32, self.max_height as f32), // FIXME
+        let mut node = Node::with_children(
+            Size::new(self.extents[0] as f32, self.extents[1] as f32),
             self.children.iter()
                 .map(|child| {
                     let mut node = child.element_tree.layout(renderer, &limits);
@@ -241,7 +255,11 @@ impl<'a, M: 'a, R: 'a + WidgetRenderer> Widget<M, R> for FloatingPanes<'a, M, R>
                     node
                 })
                 .collect::<Vec<_>>(),
-        )
+        );
+
+        node.move_to(self.state.panes_offset.into_array().into());
+
+        node
     }
 
     fn draw(
@@ -251,17 +269,17 @@ impl<'a, M: 'a, R: 'a + WidgetRenderer> Widget<M, R> for FloatingPanes<'a, M, R>
         layout: Layout<'_>,
         cursor_position: Point,
     ) -> <R as iced_native::Renderer>::Output {
-        <R as WidgetRenderer>::draw(renderer, defaults, &self.children, layout, cursor_position)
+        <R as WidgetRenderer>::draw(renderer, defaults, layout, cursor_position, self)
     }
 
     fn hash_layout(&self, state: &mut Hasher) {
         struct Marker;
         std::any::TypeId::of::<Marker>().hash(state);
 
+        self.state.hash(state);
         self.width.hash(state);
         self.height.hash(state);
-        self.max_width.hash(state);
-        self.max_height.hash(state);
+        self.extents.hash(state);
 
         for child in &self.children {
             child.state.hash(state);
@@ -283,27 +301,31 @@ impl<'a, M: 'a, R: 'a + WidgetRenderer> Widget<M, R> for FloatingPanes<'a, M, R>
         }
 
         let panes_state = &self.state;
-
-        self.children.iter_mut().zip(layout.children()).for_each(
+        // only assigned when LMB is pressed
+        let cursor_on_pane = self.children.iter_mut().zip(layout.children()).map(
             |(child, pane_layout)| {
-                let child_layout = pane_layout.children().nth(0).expect("Invalid UI state.");
-                let child_layout = child_layout.children().nth(1).expect("Invalid UI state.");
-                let is_on_title = pane_layout.bounds().contains(panes_state.cursor_position.into_array().into())
-                    && !child_layout.bounds().contains(panes_state.cursor_position.into_array().into());
+                let mut cursor_on_pane = false; // only assigned when LMB is pressed
 
                 match &event {
-                    Event::Mouse(MouseEvent::CursorMoved { x, y }) => {
+                    Event::Mouse(MouseEvent::CursorMoved { .. }) => {
                         if let Some(grab_state) = &child.state.grab_state {
                             child.state.position = panes_state.cursor_position.as_::<f32>()
-                                + grab_state.grab_pane_position
+                                + grab_state.grab_element_position
                                 - grab_state.grab_mouse_position;
                         }
                     }
-                    Event::Mouse(MouseEvent::ButtonPressed(MouseButton::Left)) if is_on_title => {
-                        child.state.grab_state = Some(GrabState {
-                            grab_mouse_position: panes_state.cursor_position,
-                            grab_pane_position: child.state.position,
-                        });
+                    Event::Mouse(MouseEvent::ButtonPressed(MouseButton::Left)) => {
+                        let child_layout = pane_layout.children().nth(0).expect("Invalid UI state.");
+                        let child_layout = child_layout.children().nth(1).expect("Invalid UI state.");
+                        cursor_on_pane = pane_layout.bounds().contains(panes_state.cursor_position.into_array().into());
+                        let cursor_on_title = cursor_on_pane && !child_layout.bounds().contains(panes_state.cursor_position.into_array().into());
+
+                        if cursor_on_title {
+                            child.state.grab_state = Some(GrabState {
+                                grab_mouse_position: panes_state.cursor_position,
+                                grab_element_position: child.state.position,
+                            });
+                        }
                     }
                     Event::Mouse(MouseEvent::ButtonReleased(MouseButton::Left)) => {
                         child.state.grab_state = None;
@@ -318,9 +340,33 @@ impl<'a, M: 'a, R: 'a + WidgetRenderer> Widget<M, R> for FloatingPanes<'a, M, R>
                     messages,
                     renderer,
                     clipboard,
-                )
+                );
+
+                cursor_on_pane
             },
-        );
+        ).fold(false, |acc, new| acc || new);
+
+        // TODO: Make it possible to bind keyboard/mouse buttons to pan regardless of whether the
+        // cursor is on top of a pane.
+        match event {
+            Event::Mouse(MouseEvent::CursorMoved { .. }) => {
+                if let Some(grab_state) = &self.state.grab_state {
+                    self.state.panes_offset = panes_state.cursor_position.as_::<f32>()
+                        + grab_state.grab_element_position
+                        - grab_state.grab_mouse_position;
+                }
+            }
+            Event::Mouse(MouseEvent::ButtonPressed(MouseButton::Left)) if !cursor_on_pane => {
+                self.state.grab_state = Some(GrabState {
+                    grab_mouse_position: self.state.cursor_position,
+                    grab_element_position: self.state.panes_offset,
+                });
+            }
+            Event::Mouse(MouseEvent::ButtonReleased(MouseButton::Left)) => {
+                self.state.grab_state = None;
+            }
+            _ => ()
+        }
     }
 
     fn overlay(
@@ -353,9 +399,9 @@ pub trait WidgetRenderer:
     fn draw<M>(
         &mut self,
         defaults: &Self::Defaults,
-        children: &[FloatingPane<'_, M, Self>],
         layout: Layout<'_>,
         cursor_position: Point,
+        element: &FloatingPanes<'_, M, Self>,
     ) -> Self::Output;
 }
 
@@ -363,14 +409,15 @@ impl<B> WidgetRenderer for iced_graphics::Renderer<B>
 where
     B: Backend + iced_graphics::backend::Text,
 {
-    fn draw<Message>(
+    fn draw<M>(
         &mut self,
         defaults: &Self::Defaults,
-        content: &[FloatingPane<'_, Message, Self>],
         layout: Layout<'_>,
         cursor_position: Point,
+        element: &FloatingPanes<'_, M, Self>,
     ) -> Self::Output {
-        let grabbing = content.iter().any(|floating_pane| floating_pane.state.grab_state.is_some());
+        let grabbing = element.state.grab_state.is_some()
+            || element.children.iter().any(|floating_pane| floating_pane.state.grab_state.is_some());
 
         let mut mouse_interaction = if grabbing {
             mouse::Interaction::Grabbing
@@ -380,7 +427,7 @@ where
 
         (
             Primitive::Group {
-                primitives: content
+                primitives: element.children
                     .iter()
                     .zip(layout.children())
                     .map(|(child, layout)| {
