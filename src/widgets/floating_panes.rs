@@ -370,7 +370,13 @@ where
         layout: Layout<'_>,
         cursor_position: Point,
     ) -> Self::Output {
-        let mut mouse_interaction = mouse::Interaction::default();
+        let grabbing = content.iter().any(|floating_pane| floating_pane.state.grab_state.is_some());
+
+        let mut mouse_interaction = if grabbing {
+            mouse::Interaction::Grabbing
+        } else {
+            mouse::Interaction::default()
+        };
 
         (
             Primitive::Group {
