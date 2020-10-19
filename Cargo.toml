@@ -18,3 +18,4 @@ iced_graphics = { path = "../iced/graphics" }
 iced_wgpu = { path = "../iced/wgpu" }
 vek = "0.12"
 ordered-float = "2"
+petgraph = "0.5"
