@@ -4,7 +4,6 @@
 /// * write a README.md
 /// * add a license
 /// * publish on github
-/// * figure out why the text input field is not focusing
 /// * change the cursor on drag
 /// * FloatingPanes panning on drag
 ///

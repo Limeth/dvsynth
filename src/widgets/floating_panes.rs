@@ -313,7 +313,7 @@ impl<'a, M: 'a, R: 'a + WidgetRenderer> Widget<M, R> for FloatingPanes<'a, M, R>
 
                 child.element_tree.on_event(
                     event.clone(),
-                    layout,
+                    pane_layout,
                     cursor_position,
                     messages,
                     renderer,
