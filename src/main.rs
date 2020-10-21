@@ -1,6 +1,9 @@
 #![feature(const_fn_floating_point_arithmetic)]
 ///
 /// Task list:
+/// * Change background color;
+/// * Make sure that the pane title bar has a different background color than the rest of the pane;
+/// * Add channel connection points;
 ///
 
 use std::borrow::Cow;
