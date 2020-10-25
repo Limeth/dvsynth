@@ -1,6 +1,6 @@
-mod margin;
-mod floating_panes;
-mod node;
+pub mod margin;
+pub mod floating_panes;
+pub mod node;
 
 pub use margin::*;
 pub use floating_panes::*;
