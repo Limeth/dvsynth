@@ -4,7 +4,7 @@ use iced_native::{overlay, Element};
 use iced_native::mouse::{self, Event as MouseEvent, Button as MouseButton};
 use iced_native::widget::{Widget, Container};
 use iced_native::layout::{Layout, Limits, Node};
-use iced_graphics::{self, Backend, Defaults, Primitive};
+use iced_graphics::{self, Backend, Defaults, Primitive, Background, Color, Rectangle};
 use vek::Vec2;
 use ordered_float::OrderedFloat;
 use super::*;
@@ -13,10 +13,9 @@ pub struct FloatingPaneBuilder<'a, M: 'a, R: 'a + WidgetRenderer> {
     pub state: &'a mut FloatingPaneState,
     pub element: Element<'a, M, R>,
     pub title: Option<&'a str>,
-    pub title_style: Option<<R as iced_native::widget::container::Renderer>::Style>,
     pub title_size: Option<u16>,
     pub title_margin: Spacing,
-    pub pane_style: Option<<R as iced_native::widget::container::Renderer>::Style>,
+    pub style: Option<<R as WidgetRenderer>::StyleFloatingPane>,
 }
 
 impl<'a, M: 'a, R: 'a + WidgetRenderer> FloatingPaneBuilder<'a, M, R> {
@@ -28,21 +27,14 @@ impl<'a, M: 'a, R: 'a + WidgetRenderer> FloatingPaneBuilder<'a, M, R> {
             state,
             element: element.into(),
             title: Default::default(),
-            title_style: Default::default(),
             title_size: Default::default(),
             title_margin: Default::default(),
-            pane_style: Default::default(),
+            style: Default::default(),
         }
     }
 
     pub fn title(mut self, title: Option<&'a str>) -> Self {
         self.title = title;
-        self
-    }
-
-    pub fn title_style<T>(mut self, title_style: Option<T>) -> Self
-            where T: Into<<R as iced_native::widget::container::Renderer>::Style> {
-        self.title_style = title_style.map(Into::into);
         self
     }
 
@@ -56,9 +48,9 @@ impl<'a, M: 'a, R: 'a + WidgetRenderer> FloatingPaneBuilder<'a, M, R> {
         self
     }
 
-    pub fn pane_style<T>(mut self, pane_style: Option<T>) -> Self
-            where T: Into<<R as iced_native::widget::container::Renderer>::Style> {
-        self.pane_style = pane_style.map(Into::into);
+    pub fn style<T>(mut self, style: Option<T>) -> Self
+            where T: Into<<R as WidgetRenderer>::StyleFloatingPane> {
+        self.style = style.map(Into::into);
         self
     }
 
@@ -75,23 +67,22 @@ impl<'a, M: 'a, R: 'a + WidgetRenderer> FloatingPaneBuilder<'a, M, R> {
                         text = text.size(title_size);
                     }
 
-                    let margin = Margin::new(text, self.title_margin.clone());
-                    let mut container = Container::new(margin);
-
-                    if let Some(title_style) = self.title_style.take() {
-                        container = container.style(title_style);
-                    }
-
-                    column = column.push(container);
+                    column = column.push(Margin::new(text, self.title_margin.clone()));
                 }
 
-                let mut container = Container::new(column.push(self.element));
+                let mut element_container = Container::new(self.element);
 
-                if let Some(pane_style) = self.pane_style.take() {
-                    container = container.style(pane_style);
+                if let Some(style) = self.style.as_ref() {
+                    element_container = element_container.style(style.content_container_style());
                 }
 
-                container.into() // Container { Column [ title, element ] }
+                let mut container = Container::new(column.push(element_container));
+
+                if let Some(style) = self.style.as_ref() {
+                    container = container.style(style.root_container_style());
+                }
+
+                container.into() // Container { Column [ title, Container { element } ] }
             },
         }
     }
@@ -165,6 +156,7 @@ pub struct FloatingPanes<'a, M: 'a, R: 'a + WidgetRenderer> {
     width: Length,
     height: Length,
     extents: Vec2<u32>,
+    style: Option<<R as WidgetRenderer>::StyleFloatingPanes>,
     children: Vec<FloatingPane<'a, M, R>>,
 }
 
@@ -175,54 +167,42 @@ impl<'a, M: 'a, R: 'a + WidgetRenderer> FloatingPanes<'a, M, R> {
             width: Length::Shrink,
             height: Length::Shrink,
             extents: [u32::MAX, u32::MAX].into(),
+            style: None,
             children: Vec::new(),
         }
     }
 
-    /// Sets the width of the [`Row`].
-    ///
-    /// [`Row`]: struct.Row.html
     pub fn width(mut self, width: Length) -> Self {
         self.width = width;
         self
     }
 
-    /// Sets the height of the [`Row`].
-    ///
-    /// [`Row`]: struct.Row.html
     pub fn height(mut self, height: Length) -> Self {
         self.height = height;
         self
     }
 
-    /// Sets the maximum width of the [`Row`].
-    ///
-    /// [`Row`]: struct.Row.html
     pub fn max_width(mut self, max_width: u32) -> Self {
         self.extents[0] = max_width;
         self
     }
 
-    /// Sets the maximum height of the [`Row`].
-    ///
-    /// [`Row`]: struct.Row.html
     pub fn max_height(mut self, max_height: u32) -> Self {
         self.extents[1] = max_height;
         self
     }
 
-    /// Sets the maximum width and height of the [`Row`].
-    ///
-    /// [`Row`]: struct.Row.html
     pub fn extents(mut self, extents: Vec2<u32>) -> Self {
         self.extents = extents;
         self
     }
 
-    /// Adds an [`Element`] to the [`Row`].
-    ///
-    /// [`Element`]: ../struct.Element.html
-    /// [`Row`]: struct.Row.html
+    pub fn style<T>(mut self, style: T) -> Self
+            where T: Into<<R as WidgetRenderer>::StyleFloatingPanes> {
+        self.style = Some(style.into());
+        self
+    }
+
     pub fn push(mut self, child: FloatingPane<'a, M, R>) -> Self {
         self.children.push(child.into());
         self
@@ -396,6 +376,9 @@ pub trait WidgetRenderer:
       + iced_native::column::Renderer
       + iced_native::widget::container::Renderer
       + Sized {
+    type StyleFloatingPane: StyleFloatingPaneBounds<Self>;
+    type StyleFloatingPanes;
+
     fn draw<M>(
         &mut self,
         defaults: &Self::Defaults,
@@ -409,6 +392,9 @@ impl<B> WidgetRenderer for iced_graphics::Renderer<B>
 where
     B: Backend + iced_graphics::backend::Text,
 {
+    type StyleFloatingPane = Box<dyn FloatingPaneStyleSheet>;
+    type StyleFloatingPanes = Box<dyn FloatingPanesStyleSheet>;
+
     fn draw<M>(
         &mut self,
         defaults: &Self::Defaults,
@@ -425,24 +411,97 @@ where
             mouse::Interaction::default()
         };
 
-        (
-            Primitive::Group {
-                primitives: element.children
-                    .iter()
-                    .zip(layout.children())
-                    .map(|(child, layout)| {
-                        let (primitive, new_mouse_interaction) =
-                            child.element_tree.draw(self, defaults, layout, cursor_position);
+        let mut primitives = Vec::new();
 
-                        if new_mouse_interaction > mouse_interaction {
-                            mouse_interaction = new_mouse_interaction;
-                        }
+        primitives.push(Primitive::Quad {
+            bounds: Rectangle::new(Point::ORIGIN, layout.bounds().size()),
+            background: Background::Color(
+                element.style.as_ref()
+                    .map(|style| style.style().background_color)
+                    .unwrap_or(Color::TRANSPARENT)
+            ),
+            border_radius: 0,
+            border_width: 0,
+            border_color: Color::BLACK,
+        });
 
-                        primitive
-                    })
-                    .collect(),
-            },
-            mouse_interaction,
-        )
+        primitives.extend(
+            element.children
+                .iter()
+                .zip(layout.children())
+                .map(|(child, layout)| {
+                    let (primitive, new_mouse_interaction) =
+                        child.element_tree.draw(self, defaults, layout, cursor_position);
+
+                    if new_mouse_interaction > mouse_interaction {
+                        mouse_interaction = new_mouse_interaction;
+                    }
+
+                    primitive
+                })
+        );
+
+        (Primitive::Group { primitives }, mouse_interaction)
     }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct FloatingPaneStyle {
+    pub title_background_color: Color,
+    pub title_text_color: Color,
+    pub body_background_color: Color,
+}
+
+pub trait StyleFloatingPaneBounds<R: WidgetRenderer> {
+    fn root_container_style(&self) -> <R as iced_native::widget::container::Renderer>::Style;
+    fn content_container_style(&self) -> <R as iced_native::widget::container::Renderer>::Style;
+}
+
+pub trait FloatingPaneStyleSheet {
+    fn style(&self) -> FloatingPaneStyle;
+}
+
+impl<B> StyleFloatingPaneBounds<iced_graphics::Renderer<B>> for Box<dyn FloatingPaneStyleSheet>
+where B: Backend + iced_graphics::backend::Text,
+{
+    fn root_container_style(&self) -> Box<(dyn iced::container::StyleSheet + 'static)> {
+        struct StyleSheet(FloatingPaneStyle);
+
+        impl iced::container::StyleSheet for StyleSheet {
+            fn style(&self) -> iced::container::Style {
+                iced::container::Style {
+                    background: Some(Background::Color(self.0.title_background_color)),
+                    text_color: Some(self.0.title_text_color),
+                    ..Default::default()
+                }
+            }
+        }
+
+        Box::new(StyleSheet(self.style()))
+    }
+
+    fn content_container_style(&self) -> Box<(dyn iced::container::StyleSheet + 'static)> {
+        struct StyleSheet(FloatingPaneStyle);
+
+        impl iced::container::StyleSheet for StyleSheet {
+            fn style(&self) -> iced::container::Style {
+                iced::container::Style {
+                    background: Some(Background::Color(self.0.body_background_color)),
+                    ..Default::default()
+                }
+            }
+        }
+
+        Box::new(StyleSheet(self.style()))
+
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct FloatingPanesStyle {
+    pub background_color: Color,
+}
+
+pub trait FloatingPanesStyleSheet {
+    fn style(&self) -> FloatingPanesStyle;
 }

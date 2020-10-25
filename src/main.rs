@@ -1,20 +1,26 @@
 #![feature(const_fn_floating_point_arithmetic)]
 ///
 /// Task list:
-/// * Change background color;
-/// * Make sure that the pane title bar has a different background color than the rest of the pane;
-/// * Add channel connection points;
+/// * Add channel connections
+/// * Define channel types
 ///
 
 use std::borrow::Cow;
 use iced::{button, window, text_input, Point, Align, VerticalAlignment, HorizontalAlignment, Length, Button, Column, Text, Application, Command, Settings};
 use iced_wgpu::Renderer;
 use petgraph::{stable_graph::StableGraph, Directed};
+use petgraph::graph::NodeIndex;
 use style::*;
 use widgets::*;
 
 pub mod style;
 pub mod widgets;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChannelDirection {
+    In,
+    Out,
+}
 
 struct Channel {
     pub title: String,
@@ -53,8 +59,8 @@ struct NodeData {
 }
 
 impl NodeData {
-    pub fn view(&mut self, theme: style::Theme) -> FloatingPane<'_, Message, Renderer> {
-        let mut builder = NodeElement::builder(&mut self.element_state);
+    pub fn view(&mut self, index: NodeIndex<u32>, theme: &dyn Theme) -> FloatingPane<'_, Message, Renderer> {
+        let mut builder = NodeElement::builder(index, &mut self.element_state);
 
         for input_channel in &self.input_channels {
             builder = builder.push_input_channel(input_channel);
@@ -64,7 +70,12 @@ impl NodeData {
             builder = builder.push_output_channel(output_channel);
         }
 
-        let node_element = builder.build();
+        let node_element = builder.build(/*|index, new_value| {
+            Message::NodeMessage {
+                node: index,
+                message: NodeMessage::UpdateTextInput(new_value),
+            }
+        }*/);
 
         FloatingPane::builder(
             &mut self.floating_pane_state,
@@ -73,7 +84,7 @@ impl NodeData {
         .title(Some(&self.title))
         .title_size(Some(16))
         .title_margin(consts::SPACING)
-        .pane_style(Some(theme))
+        .style(Some(theme.floating_pane()))
         .build()
     }
 }
@@ -102,8 +113,16 @@ struct ApplicationState {
 }
 
 #[derive(Debug, Clone)]
-pub enum Message {
+pub enum NodeMessage {
     UpdateTextInput(String),
+}
+
+#[derive(Debug, Clone)]
+pub enum Message {
+    NodeMessage {
+        node: NodeIndex<u32>,
+        message: NodeMessage,
+    },
 }
 
 macro_rules! margin {
@@ -224,8 +243,17 @@ impl Application for ApplicationState {
 
     fn update(&mut self, message: Self::Message) -> Command<Self::Message> {
         match message {
-            Message::UpdateTextInput(new_value) => {
-                self.text_input_value = new_value;
+            Message::NodeMessage {
+                node,
+                message,
+            } => {
+                match message {
+                    NodeMessage::UpdateTextInput(new_value) => {
+                        if let Some(node_data) = self.graph.node_weight_mut(node) {
+                            // node_data.element_state.text_input_value = new_value;
+                        }
+                    }
+                }
             }
         }
 
@@ -233,14 +261,14 @@ impl Application for ApplicationState {
     }
 
     fn view(&mut self) -> iced::Element<Message> {
-        // let style: Box<dyn Style> = Box::new(StyleLight);
-        let theme = style::Theme::Dark;
+        let theme: Box<dyn Theme> = Box::new(style::Dark);
 
-        let mut panes = FloatingPanes::new(&mut self.floating_panes_state);
+        let mut panes = FloatingPanes::new(&mut self.floating_panes_state)
+            .style(theme.floating_panes());
         let node_indices = self.graph.node_indices().collect::<Vec<_>>();
 
         for (node_index, node_data) in node_indices.iter().zip(self.graph.node_weights_mut()) {
-            panes = panes.push(node_data.view(theme));
+            panes = panes.push(node_data.view(*node_index, theme.as_ref()));
         }
 
         panes.into()
@@ -310,6 +338,7 @@ fn main() {
                 icon: None, // TODO
                 ..window::Settings::default()
             },
+            antialiasing: true,
             ..Settings::default()
         }
     ).unwrap();
