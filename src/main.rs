@@ -16,6 +16,18 @@ use widgets::*;
 pub mod style;
 pub mod widgets;
 
+#[derive(Debug, Clone)]
+pub struct ChannelIdentifier {
+    pub node_index: NodeIndex<u32>,
+    pub channel_index: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct Connection {
+    pub from: ChannelIdentifier,
+    pub to: ChannelIdentifier,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChannelDirection {
     In,
@@ -54,12 +66,13 @@ struct NodeData {
     title: String,
     element_state: NodeElementState,
     floating_pane_state: FloatingPaneState,
+    floating_pane_content_state: (),
     input_channels: Vec<Channel>,
     output_channels: Vec<Channel>,
 }
 
 impl NodeData {
-    pub fn view(&mut self, index: NodeIndex<u32>, theme: &dyn Theme) -> FloatingPane<'_, Message, Renderer> {
+    pub fn view(&mut self, index: NodeIndex<u32>, theme: &dyn Theme) -> FloatingPane<'_, Message, Renderer, NodeElement<'_, Message, Renderer>> {
         let mut builder = NodeElement::builder(index, &mut self.element_state);
 
         for input_channel in &self.input_channels {
@@ -78,8 +91,9 @@ impl NodeData {
         }*/);
 
         FloatingPane::builder(
-            &mut self.floating_pane_state,
             node_element,
+            &mut self.floating_pane_state,
+            &mut self.floating_pane_content_state,
         )
         .title(Some(&self.title))
         .title_size(Some(16))
@@ -101,6 +115,11 @@ type Graph = StableGraph<
     u32, // Node Index
 >;
 
+#[derive(Default)]
+pub struct FloatingPanesContentState {
+    connections: Vec<Connection>,
+}
+
 struct ApplicationState {
     text_input_state: text_input::State,
     text_input_value: String,
@@ -108,6 +127,7 @@ struct ApplicationState {
     graph: Graph,
 
     floating_panes_state: FloatingPanesState,
+    floating_panes_content_state: FloatingPanesContentState,
     floating_pane_state_0: FloatingPaneState,
     floating_pane_state_1: FloatingPaneState,
 }
@@ -194,6 +214,7 @@ impl Application for ApplicationState {
                         title: "Node A".to_string(),
                         element_state: Default::default(),
                         floating_pane_state: FloatingPaneState::with_position([10.0, 10.0]),
+                        floating_pane_content_state: (),
                         input_channels: vec![
                             Channel::new("In A"),
                         ],
@@ -207,6 +228,7 @@ impl Application for ApplicationState {
                         title: "Node B".to_string(),
                         element_state: Default::default(),
                         floating_pane_state: FloatingPaneState::with_position([100.0, 10.0]),
+                        floating_pane_content_state: (),
                         input_channels: vec![
                             Channel::new("In A"),
                             Channel::new("In B"),
@@ -230,6 +252,7 @@ impl Application for ApplicationState {
                     graph
                 },
                 floating_panes_state: Default::default(),
+                floating_panes_content_state: FloatingPanesContentState::default(),
                 floating_pane_state_0: FloatingPaneState::with_position([0.0, 0.0]),
                 floating_pane_state_1: FloatingPaneState::with_position([100.0, 100.0]),
             },
@@ -262,13 +285,32 @@ impl Application for ApplicationState {
 
     fn view(&mut self) -> iced::Element<Message> {
         let theme: Box<dyn Theme> = Box::new(style::Dark);
-
-        let mut panes = FloatingPanes::new(&mut self.floating_panes_state)
-            .style(theme.floating_panes());
         let node_indices = self.graph.node_indices().collect::<Vec<_>>();
+        // TODO: do not allocate/recompute every time `view` is called
+        self.floating_panes_content_state.connections = self.graph.edge_indices().map(|edge_index| {
+            let edge_data = &self.graph[edge_index];
+            let (index_from, index_to) = self.graph.edge_endpoints(edge_index).unwrap();
+
+            Connection {
+                from: ChannelIdentifier {
+                    node_index: index_from,
+                    channel_index: edge_data.channel_index_from,
+                },
+                to: ChannelIdentifier {
+                    node_index: index_to,
+                    channel_index: edge_data.channel_index_to,
+                },
+            }
+        }).collect();
+
+        let mut panes = FloatingPanes::new(
+            &mut self.floating_panes_state,
+            &mut self.floating_panes_content_state,
+        )
+        .style(theme.floating_panes());
 
         for (node_index, node_data) in node_indices.iter().zip(self.graph.node_weights_mut()) {
-            panes = panes.push(node_data.view(*node_index, theme.as_ref()));
+            panes = panes.insert(*node_index, node_data.view(*node_index, theme.as_ref()));
         }
 
         panes.into()

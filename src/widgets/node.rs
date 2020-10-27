@@ -1,17 +1,17 @@
 use std::hash::Hash;
-use iced_native::{self, Align, Size, Length, Point, Hasher, Event, Clipboard, Row, Column, Text};
+use iced_native::{self, Align, Size, Length, Background, Point, Hasher, Event, Clipboard, Row, Column, Text};
 use iced_native::{overlay, Element};
 use iced_native::mouse::{self, Event as MouseEvent, Button as MouseButton};
 use iced_native::widget::{Widget, Container};
 use iced_native::layout::{Node, Layout, Limits};
 use iced_graphics::{self, Backend, Defaults, Primitive};
-use iced_graphics::canvas::{Fill, FillRule, Frame, LineCap, Path, Stroke};
+use iced_graphics::canvas::{Fill, FillRule, Frame, LineJoin, LineCap, Path, Stroke};
 use iced_native::{Color, Vector};
 use vek::Vec2;
 use ordered_float::OrderedFloat;
 use petgraph::graph::NodeIndex;
 use super::*;
-use crate::{style, Message, NodeMessage, ChannelDirection};
+use crate::{style, Message, NodeMessage, ChannelDirection, FloatingPanesContentState};
 
 pub struct ChannelSlice<'a> {
     pub title: &'a str,
@@ -307,5 +307,190 @@ where
             },
             interaction,
         )
+    }
+}
+
+fn draw_point(position: Vector, color: Color) -> Primitive {
+    const CONNECTION_POINT_RADIUS: f32 = 2.0;
+    const CONNECTION_POINT_CENTER: f32 = CONNECTION_POINT_RADIUS + 1.0; // extra pixel for anti aliasing
+    const FRAME_SIZE: f32 = CONNECTION_POINT_CENTER * 2.0;
+
+    let mut frame = Frame::new([FRAME_SIZE, FRAME_SIZE].into());
+    let path = Path::new(|builder| {
+        builder.circle([CONNECTION_POINT_CENTER, CONNECTION_POINT_CENTER].into(), CONNECTION_POINT_RADIUS);
+    });
+
+    frame.fill(&path, Fill {
+        color,
+        rule: FillRule::NonZero,
+    });
+
+    Primitive::Translate {
+        translation: position - Vector::new(CONNECTION_POINT_CENTER, CONNECTION_POINT_CENTER),
+        content: Box::new(frame.into_geometry().into_primitive()),
+    }
+}
+
+fn draw_bounds(layout: Layout<'_>, color: Color) -> Primitive {
+    // let layout_position = Vector::new(layout.position().x, layout.position().y);
+    // let layout_size = Vector::new(layout.bounds().size().width, layout.bounds().size().height);
+
+    // Primitive::Group {
+    //     primitives: vec![
+    //         draw_point(
+    //             layout_position,
+    //             color,
+    //         ),
+    //         draw_point(
+    //             layout_position + layout_size,
+    //             color,
+    //         ),
+    //     ],
+    // }
+    Primitive::Quad {
+        bounds: layout.bounds(),
+        background: Background::Color(Color::TRANSPARENT),
+        border_radius: 0,
+        border_width: 1,
+        border_color: color,
+    }
+}
+
+impl<'a, M: 'a + Clone, B: 'a + Backend + iced_graphics::backend::Text> FloatingPaneContent<'a, M, iced_graphics::Renderer<B>> for NodeElement<'a, M, iced_graphics::Renderer<B>> {
+    type FloatingPaneIndex = NodeIndex<u32>;
+    type FloatingPaneContentState = ();
+    type FloatingPanesContentState = FloatingPanesContentState;
+
+    fn create_element(self) -> Element<'a, M, iced_graphics::Renderer<B>> {
+        self.into()
+    }
+
+    fn draw_content(
+        panes: &FloatingPanes<'a, M, iced_graphics::Renderer<B>, Self>,
+        renderer: &mut iced_graphics::Renderer<B>,
+        defaults: &<iced_graphics::Renderer::<B> as iced_native::Renderer>::Defaults,
+        layout: Layout<'_>,
+        cursor_position: Point,
+    ) -> <iced_graphics::Renderer::<B> as iced_native::Renderer>::Output {
+        let mut mouse_interaction = mouse::Interaction::default();
+        let mut primitives = Vec::new();
+
+        primitives.extend(
+            panes.children
+                .iter()
+                .zip(layout.children())
+                .map(|((child_index, child), layout)| {
+                    let (primitive, new_mouse_interaction) =
+                        child.element_tree.draw(renderer, defaults, layout, cursor_position);
+
+                    if new_mouse_interaction > mouse_interaction {
+                        mouse_interaction = new_mouse_interaction;
+                    }
+
+                    primitive
+                })
+        );
+
+        // Draw connections
+        let mut frame = Frame::new(layout.bounds().size());
+
+        for connection in &panes.content_state.connections {
+            dbg!(connection);
+
+            // let pane_from = &panes.children[&connection.from.node_index];
+            // let pane_to = &panes.children[&connection.to.node_index];
+            // FIXME: Replace with O(1)
+            let (layout_from, (index_from, pane_from)) = layout.children().zip(&panes.children).find(|(child_layout, (child_index, child))| {
+                **child_index == connection.from.node_index
+            }).unwrap();
+            let (layout_to, (index_to, pane_to)) = layout.children().zip(&panes.children).find(|(child_layout, (child_index, child))| {
+                **child_index == connection.to.node_index
+            }).unwrap();
+
+            let layout_outputs = layout_from;
+            let layout_outputs = layout_outputs.children().nth(0).unwrap();
+            let layout_outputs = layout_outputs.children().nth(1).unwrap();
+            let layout_outputs = layout_outputs.children().nth(0).unwrap();
+            let layout_outputs = layout_outputs.children().nth(1).unwrap();
+            let layout_outputs = layout_outputs.children().nth(1).unwrap();
+            let layout_outputs = layout_outputs.children().nth(1).unwrap();
+
+            let layout_inputs = layout_to;
+            let layout_inputs = layout_inputs.children().nth(0).unwrap();
+            let layout_inputs = layout_inputs.children().nth(1).unwrap();
+            let layout_inputs = layout_inputs.children().nth(0).unwrap();
+            let layout_inputs = layout_inputs.children().nth(1).unwrap();
+            let layout_inputs = layout_inputs.children().nth(1).unwrap();
+            let layout_inputs = layout_inputs.children().nth(0).unwrap();
+
+            let layout_output = layout_outputs.children().nth(connection.from.channel_index).unwrap();
+            let layout_input = layout_inputs.children().nth(connection.to.channel_index).unwrap();
+
+            primitives.push(
+                draw_bounds(layout_output, Color::from_rgb(1.0, 0.0, 0.0))
+            );
+            primitives.push(
+                draw_bounds(layout_input, Color::from_rgb(0.0, 0.0, 1.0))
+            );
+
+            let from = {
+                let field_position: Vec2<f32> = Into::<[f32; 2]>::into(layout_output.position()).into();
+                let field_size: Vec2<f32> = Into::<[f32; 2]>::into(layout_output.bounds().size()).into();
+
+                field_position
+                    + field_size * Vec2::new(1.0, 0.5)
+                    + Vec2::new(style::consts::SPACING_HORIZONTAL as f32, 0.0)
+            };
+            let to = {
+                let field_position: Vec2<f32> = Into::<[f32; 2]>::into(layout_input.position()).into();
+                let field_size: Vec2<f32> = Into::<[f32; 2]>::into(layout_input.bounds().size()).into();
+
+                field_position
+                    + field_size * Vec2::new(0.0, 0.5)
+                    - Vec2::new(style::consts::SPACING_HORIZONTAL as f32, 0.0)
+            };
+
+            primitives.push(draw_point(from.into_array().into(), Color::from_rgb(1.0, 0.0, 0.0)));
+            primitives.push(draw_point(to.into_array().into(), Color::from_rgb(0.0, 0.0, 1.0)));
+
+            let mut frame = Frame::new(layout.bounds().size());
+            let path = Path::new(|builder| {
+                builder.move_to(from.into_array().into());
+                builder.line_to(to.into_array().into());
+            });
+
+            frame.stroke(&path, Stroke {
+                color: Color::WHITE,
+                width: 1.0,
+                line_cap: LineCap::Butt,
+                line_join: LineJoin::Round,
+            });
+
+            primitives.push(frame.into_geometry().into_primitive());
+        }
+
+        (
+            Primitive::Group { primitives },
+            mouse_interaction,
+        )
+    }
+
+    fn hash_content(
+        panes: &FloatingPanes<'a, M, iced_graphics::Renderer<B>, Self>,
+        state: &mut Hasher,
+    ) {
+        // TODO
+    }
+
+    fn on_event(
+        panes: &mut FloatingPanes<'a, M, iced_graphics::Renderer<B>, Self>,
+        event: Event,
+        layout: Layout<'_>,
+        cursor_position: Point,
+        messages: &mut Vec<M>,
+        renderer: &iced_graphics::Renderer<B>,
+        clipboard: Option<&dyn Clipboard>
+    ) -> bool {
+        false
     }
 }
