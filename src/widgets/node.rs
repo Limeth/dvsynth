@@ -11,7 +11,7 @@ use vek::Vec2;
 use ordered_float::OrderedFloat;
 use petgraph::graph::NodeIndex;
 use super::*;
-use crate::{style, Message, NodeMessage, ChannelDirection, FloatingPanesContentState};
+use crate::{style, Message, NodeMessage, ChannelDirection, Connection, ChannelIdentifier};
 
 pub struct ChannelSlice<'a> {
     pub title: &'a str,
@@ -164,6 +164,24 @@ impl<'a, M: 'a + Clone, R: 'a + WidgetRenderer> NodeElement<'a, M, R> {
     }
 }
 
+fn get_connection_point(layout: Layout, direction: ChannelDirection) -> Vec2<f32> {
+    let field_position: Vec2<f32> = Into::<[f32; 2]>::into(layout.position()).into();
+    let field_size: Vec2<f32> = Into::<[f32; 2]>::into(layout.bounds().size()).into();
+
+    match direction {
+        ChannelDirection::In => {
+            field_position
+                + field_size * Vec2::new(0.0, 0.5)
+                - Vec2::new(style::consts::SPACING_HORIZONTAL as f32, 0.0)
+        },
+        ChannelDirection::Out => {
+            field_position
+                + field_size * Vec2::new(1.0, 0.5)
+                + Vec2::new(style::consts::SPACING_HORIZONTAL as f32, 0.0)
+        },
+    }
+}
+
 impl<'a, M: 'a + Clone, R: 'a + WidgetRenderer> Widget<M, R> for NodeElement<'a, M, R> {
     fn width(&self) -> Length {
         self.width
@@ -284,16 +302,8 @@ where
             .chain(outputs_layout.children().map(|layout| (layout, ChannelDirection::Out)));
 
         for (channel_layout, channel_direction) in channel_layouts {
-            let position = channel_layout.position();
-            let mut translation: Vec2<f32> = Vec2::new(0.0, position.y)
-                - Vec2::new(CONNECTION_POINT_CENTER, CONNECTION_POINT_CENTER)
-                // + Vec2::new(0.0 * crate::style::consts::SPACING_HORIZONTAL as f32, 0.0)
-                + Vec2::new(layout.position().x, 0.0)
-                + Vec2::new(0.0, channel_layout.bounds().height / 2.0);
-
-            if channel_direction == ChannelDirection::Out {
-                translation += Vec2::new(layout.bounds().width, 0.0)
-            }
+            let translation = get_connection_point(channel_layout, channel_direction)
+                - Vec2::new(CONNECTION_POINT_CENTER, CONNECTION_POINT_CENTER);
 
             primitives.push(Primitive::Translate {
                 translation: Vector::new(translation.x, translation.y),
@@ -356,17 +366,17 @@ fn draw_bounds(layout: Layout<'_>, color: Color) -> Primitive {
     }
 }
 
-impl<'a, M: 'a + Clone, B: 'a + Backend + iced_graphics::backend::Text> FloatingPaneContent<'a, M, iced_graphics::Renderer<B>> for NodeElement<'a, M, iced_graphics::Renderer<B>> {
+impl<'a, B: 'a + Backend + iced_graphics::backend::Text> FloatingPaneContent<'a, Message, iced_graphics::Renderer<B>> for NodeElement<'a, Message, iced_graphics::Renderer<B>> {
     type FloatingPaneIndex = NodeIndex<u32>;
-    type FloatingPaneContentState = ();
+    type FloatingPaneContentState = FloatingPaneContentState;
     type FloatingPanesContentState = FloatingPanesContentState;
 
-    fn create_element(self) -> Element<'a, M, iced_graphics::Renderer<B>> {
+    fn create_element(self) -> Element<'a, Message, iced_graphics::Renderer<B>> {
         self.into()
     }
 
     fn draw_content(
-        panes: &FloatingPanes<'a, M, iced_graphics::Renderer<B>, Self>,
+        panes: &FloatingPanes<'a, Message, iced_graphics::Renderer<B>, Self>,
         renderer: &mut iced_graphics::Renderer<B>,
         defaults: &<iced_graphics::Renderer::<B> as iced_native::Renderer>::Defaults,
         layout: Layout<'_>,
@@ -391,20 +401,35 @@ impl<'a, M: 'a + Clone, B: 'a + Backend + iced_graphics::backend::Text> Floating
                 })
         );
 
+        fn draw_connection(frame: &mut Frame, from: Vec2<f32>, to: Vec2<f32>, stroke: Stroke) {
+            let mid = (from + to) / 2.0;
+            let delta_x = to.x - from.x;
+            let control_point_distance = delta_x / 3.0;
+            let control_from = from + Vec2::new(control_point_distance, 0.0);
+            let control_to = to - Vec2::new(control_point_distance, 0.0);
+            let path = Path::new(|builder| {
+                builder.move_to(from.into_array().into());
+                // builder.line_to(to.into_array().into());
+                builder.quadratic_curve_to(control_from.into_array().into(), mid.into_array().into());
+                builder.quadratic_curve_to(control_to.into_array().into(), to.into_array().into());
+            });
+
+            frame.stroke(&path, stroke);
+        }
+
         // Draw connections
         let mut frame = Frame::new(layout.bounds().size());
 
+        // Draw existing connections
         for connection in &panes.content_state.connections {
-            dbg!(connection);
-
             // let pane_from = &panes.children[&connection.from.node_index];
             // let pane_to = &panes.children[&connection.to.node_index];
             // FIXME: Replace with O(1)
             let (layout_from, (index_from, pane_from)) = layout.children().zip(&panes.children).find(|(child_layout, (child_index, child))| {
-                **child_index == connection.from.node_index
+                **child_index == connection.from().node_index
             }).unwrap();
             let (layout_to, (index_to, pane_to)) = layout.children().zip(&panes.children).find(|(child_layout, (child_index, child))| {
-                **child_index == connection.to.node_index
+                **child_index == connection.to().node_index
             }).unwrap();
 
             let layout_outputs = layout_from;
@@ -423,51 +448,64 @@ impl<'a, M: 'a + Clone, B: 'a + Backend + iced_graphics::backend::Text> Floating
             let layout_inputs = layout_inputs.children().nth(1).unwrap();
             let layout_inputs = layout_inputs.children().nth(0).unwrap();
 
-            let layout_output = layout_outputs.children().nth(connection.from.channel_index).unwrap();
-            let layout_input = layout_inputs.children().nth(connection.to.channel_index).unwrap();
+            let layout_output = layout_outputs.children().nth(connection.from().channel_index).unwrap();
+            let layout_input = layout_inputs.children().nth(connection.to().channel_index).unwrap();
 
-            primitives.push(
-                draw_bounds(layout_output, Color::from_rgb(1.0, 0.0, 0.0))
-            );
-            primitives.push(
-                draw_bounds(layout_input, Color::from_rgb(0.0, 0.0, 1.0))
-            );
+            // primitives.push(
+            //     draw_bounds(layout_output, Color::from_rgb(1.0, 0.0, 0.0))
+            // );
+            // primitives.push(
+            //     draw_bounds(layout_input, Color::from_rgb(0.0, 0.0, 1.0))
+            // );
 
-            let from = {
-                let field_position: Vec2<f32> = Into::<[f32; 2]>::into(layout_output.position()).into();
-                let field_size: Vec2<f32> = Into::<[f32; 2]>::into(layout_output.bounds().size()).into();
+            let from = get_connection_point(layout_output, ChannelDirection::Out);
+            let to = get_connection_point(layout_input, ChannelDirection::In);
 
-                field_position
-                    + field_size * Vec2::new(1.0, 0.5)
-                    + Vec2::new(style::consts::SPACING_HORIZONTAL as f32, 0.0)
-            };
-            let to = {
-                let field_position: Vec2<f32> = Into::<[f32; 2]>::into(layout_input.position()).into();
-                let field_size: Vec2<f32> = Into::<[f32; 2]>::into(layout_input.bounds().size()).into();
+            // primitives.push(draw_point(from.into_array().into(), Color::from_rgb(1.0, 0.0, 0.0)));
+            // primitives.push(draw_point(to.into_array().into(), Color::from_rgb(0.0, 0.0, 1.0)));
 
-                field_position
-                    + field_size * Vec2::new(0.0, 0.5)
-                    - Vec2::new(style::consts::SPACING_HORIZONTAL as f32, 0.0)
-            };
-
-            primitives.push(draw_point(from.into_array().into(), Color::from_rgb(1.0, 0.0, 0.0)));
-            primitives.push(draw_point(to.into_array().into(), Color::from_rgb(0.0, 0.0, 1.0)));
-
-            let mut frame = Frame::new(layout.bounds().size());
-            let path = Path::new(|builder| {
-                builder.move_to(from.into_array().into());
-                builder.line_to(to.into_array().into());
-            });
-
-            frame.stroke(&path, Stroke {
+            draw_connection(&mut frame, from, to, Stroke {
                 color: Color::WHITE,
-                width: 1.0,
+                width: 1.5,
                 line_cap: LineCap::Butt,
                 line_join: LineJoin::Round,
             });
-
-            primitives.push(frame.into_geometry().into_primitive());
         }
+
+        // Draw pending connection
+        if let Some(selected_channel) = panes.content_state.selected_channel.as_ref() {
+            let pane_index = panes.children.keys().enumerate().find(|(_, key)| {
+                **key == selected_channel.node_index
+            }).unwrap().0;
+
+            let pane_layout = layout.children().nth(pane_index).unwrap();
+
+            let layout_channels = pane_layout;
+            let layout_channels = layout_channels.children().nth(0).unwrap();
+            let layout_channels = layout_channels.children().nth(1).unwrap();
+            let layout_channels = layout_channels.children().nth(0).unwrap();
+            let layout_channels = layout_channels.children().nth(1).unwrap();
+            let layout_channels = layout_channels.children().nth(1).unwrap();
+            let layout_channels = layout_channels.children().nth({
+                match selected_channel.channel_direction {
+                    ChannelDirection::In => 0,
+                    ChannelDirection::Out => 1,
+                }
+            }).unwrap();
+            let layout_channel = layout_channels.children().nth(selected_channel.channel_index).unwrap();
+
+            let from = get_connection_point(layout_channel, selected_channel.channel_direction);
+            let to = panes.state.cursor_position;
+
+            draw_connection(&mut frame, from, to, Stroke {
+                color: Color::from_rgba(1.0, 1.0, 1.0, 0.75),
+                width: 1.5,
+                line_cap: LineCap::Butt,
+                line_join: LineJoin::Round,
+            });
+        }
+
+        primitives.push(frame.into_geometry().into_primitive());
 
         (
             Primitive::Group { primitives },
@@ -476,21 +514,131 @@ impl<'a, M: 'a + Clone, B: 'a + Backend + iced_graphics::backend::Text> Floating
     }
 
     fn hash_content(
-        panes: &FloatingPanes<'a, M, iced_graphics::Renderer<B>, Self>,
+        panes: &FloatingPanes<'a, Message, iced_graphics::Renderer<B>, Self>,
         state: &mut Hasher,
     ) {
         // TODO
     }
 
     fn on_event(
-        panes: &mut FloatingPanes<'a, M, iced_graphics::Renderer<B>, Self>,
+        panes: &mut FloatingPanes<'a, Message, iced_graphics::Renderer<B>, Self>,
         event: Event,
         layout: Layout<'_>,
         cursor_position: Point,
-        messages: &mut Vec<M>,
+        messages: &mut Vec<Message>,
         renderer: &iced_graphics::Renderer<B>,
         clipboard: Option<&dyn Clipboard>
     ) -> bool {
+        match event {
+            Event::Mouse(MouseEvent::ButtonPressed(MouseButton::Left)) => {
+                let node_indices = panes.children.iter()
+                    .map(|(index, _)| *index)
+                    .collect::<Vec<_>>();
+                for (layout, node_index) in layout.children().zip(node_indices.iter()) {
+                    let row_layout = layout;
+                    let row_layout = row_layout.children().nth(0).unwrap();
+                    let row_layout = row_layout.children().nth(1).unwrap();
+                    let row_layout = row_layout.children().nth(0).unwrap();
+                    let row_layout = row_layout.children().nth(1).unwrap(); // Margin Column
+                    let row_layout = row_layout.children().nth(1).unwrap(); // Margin Row
+                    let inputs_layout = row_layout.children().nth(0).unwrap();
+                    let outputs_layout = row_layout.children().nth(1).unwrap();
+                    let channels = inputs_layout.children().enumerate().map(|(index, layout)| (index, layout, ChannelDirection::In))
+                        .chain(outputs_layout.children().enumerate().map(|(index, layout)| (index, layout, ChannelDirection::Out)));
+
+                    for (channel_index, channel_layout, channel_direction) in channels {
+                        let grab_radius = channel_layout.bounds().size().height / 2.0;
+                        let connection_point = get_connection_point(channel_layout, channel_direction);
+                        let distance_squared = panes.state.cursor_position.distance_squared(connection_point);
+
+                        if distance_squared <= grab_radius * grab_radius {
+                            let channel = ChannelIdentifier {
+                                node_index: *node_index,
+                                channel_direction,
+                                channel_index,
+                            };
+                            println!("Clicked {:#?}", (channel_index, channel_layout, channel_direction));
+
+                            let disconnect = match channel_direction {
+                                ChannelDirection::In => {
+                                    panes.content_state.is_connected(channel)
+                                }
+                                ChannelDirection::Out => false
+                            };
+
+                            if let Some(selected_channel) = panes.content_state.selected_channel.clone() {
+                                if panes.content_state.can_connect(selected_channel, channel) {
+                                    if disconnect {
+                                        messages.push(Message::DisconnectChannel {
+                                            channel,
+                                        });
+                                    }
+
+                                    let channels = match selected_channel.channel_direction {
+                                        ChannelDirection::In => [channel, selected_channel],
+                                        ChannelDirection::Out => [selected_channel, channel],
+                                    };
+
+                                    messages.push(Message::InsertConnection {
+                                        connection: Connection::try_from_identifiers(channels).unwrap(),
+                                    });
+                                    panes.content_state.selected_channel = None;
+                                }
+                            } else {
+                                if disconnect {
+                                    let connection = panes.content_state.connections.iter().find(|connection| {
+                                        connection.contains_channel(channel)
+                                    });
+                                    if let Some(connection) = connection {
+                                        let other_channel = connection.channel(channel.channel_direction.inverse());
+                                        panes.content_state.selected_channel = Some(other_channel);
+
+                                        messages.push(Message::DisconnectChannel {
+                                            channel,
+                                        });
+                                    }
+                                } else {
+                                    panes.content_state.selected_channel = Some(channel);
+                                }
+                            }
+
+                            return true;
+                        }
+                    }
+                }
+
+                panes.content_state.selected_channel = None;
+            }
+            _ => ()
+        }
+
         false
+    }
+}
+
+#[derive(Default)]
+pub struct FloatingPaneContentState {
+    pub node_index: Option<NodeIndex<u32>>,
+}
+
+#[derive(Default)]
+pub struct FloatingPanesContentState {
+    pub connections: Vec<Connection>,
+    pub selected_channel: Option<ChannelIdentifier>,
+}
+
+impl FloatingPanesContentState {
+    fn can_connect(&self, from: ChannelIdentifier, to: ChannelIdentifier) -> bool {
+        // TODO: Add borrow checking and type checking
+        from.node_index != to.node_index
+            && from.channel_direction != to.channel_direction
+            // Allow, but disconnect previous connection
+            // && self.connections.iter().any(|connection| connection.to() == to)
+    }
+
+    fn is_connected(&self, channel: ChannelIdentifier) -> bool {
+        self.connections.iter().any(|connection| {
+            connection.channel(channel.channel_direction) == channel
+        })
     }
 }

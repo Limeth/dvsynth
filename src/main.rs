@@ -16,22 +16,73 @@ use widgets::*;
 pub mod style;
 pub mod widgets;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ChannelIdentifier {
     pub node_index: NodeIndex<u32>,
+    pub channel_direction: ChannelDirection,
     pub channel_index: usize,
 }
 
-#[derive(Debug, Clone)]
-pub struct Connection {
-    pub from: ChannelIdentifier,
-    pub to: ChannelIdentifier,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Connection(pub [(NodeIndex<u32>, usize); 2]);
+
+impl Connection {
+    pub fn try_from_identifiers([a, b]: [ChannelIdentifier; 2]) -> Option<Connection> {
+        if a.channel_direction == b.channel_direction {
+            None
+        } else {
+            Some(Self(if a.channel_direction == ChannelDirection::Out {
+                [(a.node_index, a.channel_index), (b.node_index, b.channel_index)]
+            } else {
+                [(b.node_index, b.channel_index), (a.node_index, a.channel_index)]
+            }))
+        }
+    }
+
+    pub fn contains_channel(&self, channel: ChannelIdentifier) -> bool {
+        let index = match channel.channel_direction {
+            ChannelDirection::In => 1,
+            ChannelDirection::Out => 0,
+        };
+        let current = &self.0[index];
+
+        current.0 == channel.node_index && current.1 == channel.channel_index
+    }
+
+    pub fn channel(&self, direction: ChannelDirection) -> ChannelIdentifier {
+        let index = match direction {
+            ChannelDirection::In => 1,
+            ChannelDirection::Out => 0,
+        };
+        ChannelIdentifier {
+            node_index: self.0[index].0,
+            channel_direction: direction,
+            channel_index: self.0[index].1,
+        }
+    }
+
+    pub fn to(&self) -> ChannelIdentifier {
+        self.channel(ChannelDirection::In)
+    }
+
+    pub fn from(&self) -> ChannelIdentifier {
+        self.channel(ChannelDirection::Out)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChannelDirection {
     In,
     Out,
+}
+
+impl ChannelDirection {
+    pub fn inverse(self) -> Self {
+        match self {
+            ChannelDirection::In => ChannelDirection::Out,
+            ChannelDirection::Out => ChannelDirection::In,
+        }
+    }
 }
 
 struct Channel {
@@ -66,7 +117,7 @@ struct NodeData {
     title: String,
     element_state: NodeElementState,
     floating_pane_state: FloatingPaneState,
-    floating_pane_content_state: (),
+    floating_pane_content_state: FloatingPaneContentState,
     input_channels: Vec<Channel>,
     output_channels: Vec<Channel>,
 }
@@ -108,17 +159,21 @@ struct EdgeData {
     channel_index_to: usize,
 }
 
+impl EdgeData {
+    fn get_channel_index(&self, direction: ChannelDirection) -> usize {
+        match direction {
+            ChannelDirection::In => self.channel_index_from,
+            ChannelDirection::Out => self.channel_index_to,
+        }
+    }
+}
+
 type Graph = StableGraph<
     NodeData, // Node Data
     EdgeData, // Edge Data
     Directed, // Edge Type
     u32, // Node Index
 >;
-
-#[derive(Default)]
-pub struct FloatingPanesContentState {
-    connections: Vec<Connection>,
-}
 
 struct ApplicationState {
     text_input_state: text_input::State,
@@ -142,6 +197,12 @@ pub enum Message {
     NodeMessage {
         node: NodeIndex<u32>,
         message: NodeMessage,
+    },
+    DisconnectChannel {
+        channel: ChannelIdentifier,
+    },
+    InsertConnection {
+        connection: Connection,
     },
 }
 
@@ -214,7 +275,7 @@ impl Application for ApplicationState {
                         title: "Node A".to_string(),
                         element_state: Default::default(),
                         floating_pane_state: FloatingPaneState::with_position([10.0, 10.0]),
-                        floating_pane_content_state: (),
+                        floating_pane_content_state: Default::default(),
                         input_channels: vec![
                             Channel::new("In A"),
                         ],
@@ -228,7 +289,7 @@ impl Application for ApplicationState {
                         title: "Node B".to_string(),
                         element_state: Default::default(),
                         floating_pane_state: FloatingPaneState::with_position([100.0, 10.0]),
-                        floating_pane_content_state: (),
+                        floating_pane_content_state: Default::default(),
                         input_channels: vec![
                             Channel::new("In A"),
                             Channel::new("In B"),
@@ -238,6 +299,11 @@ impl Application for ApplicationState {
                             Channel::new("Out A"),
                         ],
                     });
+
+                    let node_indices: Vec<_> = graph.node_indices().collect();
+                    for (node_index, node) in node_indices.iter().zip(graph.node_weights_mut()) {
+                        node.floating_pane_content_state.node_index = Some(*node_index);
+                    }
 
                     graph.add_edge(node_a, node_b, EdgeData {
                         channel_index_from: 0,
@@ -278,6 +344,38 @@ impl Application for ApplicationState {
                     }
                 }
             }
+            Message::DisconnectChannel {
+                channel
+            } => {
+                self.graph.retain_edges(|frozen, edge| {
+                    let (from, to) = frozen.edge_endpoints(edge).unwrap();
+                    let node_index = match channel.channel_direction {
+                        ChannelDirection::In => to,
+                        ChannelDirection::Out => from,
+                    };
+
+                    if node_index == channel.node_index {
+                        let edge_data = frozen.edge_weight(edge).unwrap();
+
+                        if edge_data.get_channel_index(channel.channel_direction.inverse()) == channel.channel_index {
+                            return false;
+                        }
+                    }
+
+                    true
+                });
+            }
+            Message::InsertConnection {
+                connection,
+            } => {
+                let from = connection.from();
+                let to = connection.to();
+
+                self.graph.add_edge(from.node_index, to.node_index, EdgeData {
+                    channel_index_from: from.channel_index,
+                    channel_index_to: to.channel_index,
+                });
+            }
         }
 
         Command::none()
@@ -291,16 +389,16 @@ impl Application for ApplicationState {
             let edge_data = &self.graph[edge_index];
             let (index_from, index_to) = self.graph.edge_endpoints(edge_index).unwrap();
 
-            Connection {
-                from: ChannelIdentifier {
-                    node_index: index_from,
-                    channel_index: edge_data.channel_index_from,
-                },
-                to: ChannelIdentifier {
-                    node_index: index_to,
-                    channel_index: edge_data.channel_index_to,
-                },
-            }
+            Connection([
+                (
+                    index_from,
+                    edge_data.channel_index_from,
+                ),
+                (
+                    index_to,
+                    edge_data.channel_index_to,
+                ),
+            ])
         }).collect();
 
         let mut panes = FloatingPanes::new(
