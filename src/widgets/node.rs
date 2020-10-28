@@ -540,7 +540,7 @@ impl<'a, B: 'a + Backend + iced_graphics::backend::Text> FloatingPaneContent<'a,
             // primitives.push(draw_point(to.into_array().into(), Color::from_rgb(0.0, 0.0, 1.0)));
 
             draw_connection(&mut frame, from, to, Stroke {
-                color: Color::WHITE,
+                color:  Color::from_rgba(1.0, 1.0, 1.0, 0.7),
                 width: 1.5,
                 line_cap: LineCap::Butt,
                 line_join: LineJoin::Round,
@@ -578,8 +578,8 @@ impl<'a, B: 'a + Backend + iced_graphics::backend::Text> FloatingPaneContent<'a,
             };
 
             draw_connection(&mut frame, from, to, Stroke {
-                color: Color::from_rgba(1.0, 1.0, 1.0, 0.75),
-                width: 1.5,
+                color: Color::from_rgba(1.0, 0.6, 0.0, 1.0),
+                width: 3.0,
                 line_cap: LineCap::Butt,
                 line_join: LineJoin::Round,
             });
