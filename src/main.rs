@@ -384,22 +384,19 @@ impl Application for ApplicationState {
     fn view(&mut self) -> iced::Element<Message> {
         let theme: Box<dyn Theme> = Box::new(style::Dark);
         let node_indices = self.graph.node_indices().collect::<Vec<_>>();
-        // TODO: do not allocate/recompute every time `view` is called
-        self.floating_panes_content_state.connections = self.graph.edge_indices().map(|edge_index| {
-            let edge_data = &self.graph[edge_index];
-            let (index_from, index_to) = self.graph.edge_endpoints(edge_index).unwrap();
-
-            Connection([
-                (
-                    index_from,
-                    edge_data.channel_index_from,
-                ),
-                (
-                    index_to,
-                    edge_data.channel_index_to,
-                ),
-            ])
-        }).collect();
+        // TODO: do not recompute every time `view` is called
+        let Self { graph, floating_panes_content_state, .. } = self;
+        floating_panes_content_state.connections.clear();
+        floating_panes_content_state
+            .connections
+            .extend(graph.edge_indices().map(|edge_index| {
+                let edge_data = &graph[edge_index];
+                let (index_from, index_to) = graph.edge_endpoints(edge_index).unwrap();
+                Connection([
+                    (index_from, edge_data.channel_index_from),
+                    (index_to, edge_data.channel_index_to),
+                ])
+            }));
 
         let mut panes = FloatingPanes::new(
             &mut self.floating_panes_state,
