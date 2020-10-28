@@ -15,6 +15,7 @@ use widgets::*;
 
 pub mod style;
 pub mod widgets;
+pub mod util;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ChannelIdentifier {

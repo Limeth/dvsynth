@@ -11,7 +11,7 @@ use vek::Vec2;
 use ordered_float::OrderedFloat;
 use petgraph::graph::NodeIndex;
 use super::*;
-use crate::{style, Message, NodeMessage, ChannelDirection, Connection, ChannelIdentifier};
+use crate::{style, util, Message, NodeMessage, ChannelDirection, Connection, ChannelIdentifier};
 
 pub struct ChannelSlice<'a> {
     pub title: &'a str,
@@ -402,83 +402,20 @@ impl<'a, B: 'a + Backend + iced_graphics::backend::Text> FloatingPaneContent<'a,
         );
 
         fn draw_connection(frame: &mut Frame, from: Vec2<f32>, to: Vec2<f32>, stroke: Stroke) {
-            const CONTROL_POINT_DISTANCE_ABS_SOFTNESS: f32 = (style::consts::SPACING_HORIZONTAL * 4) as f32;
-            const CONTROL_POINT_DISTANCE_MAX_SOFTNESS: f32 = 10.0;
-            const CONTROL_POINT_DISTANCE_MAX_VERTICAL: f32 = (style::consts::SPACING_VERTICAL * 16) as f32;
-            const CONTROL_POINT_DISTANCE_MAX_HORIZONTAL: f32 = (style::consts::SPACING_HORIZONTAL * 128) as f32;
-
-            // https://www.desmos.com/calculator/hmhxxjxnld
-            // fn softmax(min: f32, sharpness: f32, x: f32) -> f32 {
-            //     let min = min as f64;
-            //     let sharpness = sharpness as f64;
-            //     let x = x as f64;
-            //     let result = ((1.0 + (sharpness * (x - min)).exp()).ln() / sharpness) + min;
-
-            //     result as f32
-            // }
-
-            /// Variant of softmax, where smoothness = 1 / sharpness
-            fn softmax2(min: f32, softness: f32, x: f32) -> f32 {
-                let min = min as f64;
-                let softness = softness as f64;
-                let x = x as f64;
-                let result = ((1.0 + ((x - min) / softness).exp()).ln() * softness) + min;
-
-                result as f32
-            }
-
-            /// Do not google images for this function (or do at your own risk)
-            /// https://www.desmos.com/calculator/miwhjandre
-            ///
-            /// `softness` describes the radius around the origin in which the result is smooth
-            fn softabs(softness: f32, x: f32) -> f32 {
-                let abs_x = x.abs();
-
-                if abs_x < softness {
-                    ((x / softness).powi(2) + 1.0) * 0.5 * softness
-                } else {
-                    abs_x
-                }
-            }
-
-            /// Do not google images for this function (or do at your own risk)
-            /// https://www.desmos.com/calculator/miwhjandre
-            ///
-            /// Variant of `softabs` where f(0) = 0
-            ///
-            /// https://www.desmos.com/calculator/dxybnuifuw
-            fn softabs2(softness: f32, x: f32) -> f32 {
-                let abs_x = x.abs();
-
-                if abs_x < softness {
-                    (x / softness).powi(2) * 0.5 * softness
-                } else {
-                    abs_x - 0.5 * softness
-                }
-            }
-
-            /// A combination of softabs2 and softmax to limit the maximum value
-            /// https://www.desmos.com/calculator/h33jcf4wkr
-            fn softminabs(abs_softness: f32, max_softness: f32, max: f32, x: f32) -> f32 {
-                softmax2(-max, max_softness, 0.0) - softmax2(-max, max_softness, -softabs2(abs_softness, x))
-            }
+            const CONTROL_POINT_DISTANCE_SLOPE: f32 = 1.0 / 3.0;
+            const CONTROL_POINT_DISTANCE_ABS_SOFTNESS: f32 = 32.0;
+            const CONTROL_POINT_DISTANCE_MAX_SHARPNESS: f32 = 0.01;
+            const CONTROL_POINT_DISTANCE_MAX: f32 = 64.0;
 
             let mid = (from + to) / 2.0;
-            let control_point_distance = softminabs(
-                CONTROL_POINT_DISTANCE_ABS_SOFTNESS,
-                CONTROL_POINT_DISTANCE_MAX_HORIZONTAL,
-                CONTROL_POINT_DISTANCE_MAX_SOFTNESS,
-                to.x - from.x,
-            ) / 3.0 + softminabs(
-                CONTROL_POINT_DISTANCE_ABS_SOFTNESS,
-                CONTROL_POINT_DISTANCE_MAX_VERTICAL,
-                CONTROL_POINT_DISTANCE_MAX_SOFTNESS,
-                to.y - from.y,
-            );
-
-            // if control_point_distance < CONTROL_POINT_DISTANCE_MIN {
-            //     control_point_distance = CONTROL_POINT_DISTANCE_MIN;
-            // }
+            let control_point_distance = (to - from).map(|coord_delta| {
+                util::softminabs(
+                    CONTROL_POINT_DISTANCE_ABS_SOFTNESS,
+                    CONTROL_POINT_DISTANCE_MAX_SHARPNESS,
+                    CONTROL_POINT_DISTANCE_MAX,
+                    coord_delta * CONTROL_POINT_DISTANCE_SLOPE,
+                )
+            }).sum();
 
             let control_from = from + Vec2::new(control_point_distance, 0.0);
             let control_to = to - Vec2::new(control_point_distance, 0.0);
