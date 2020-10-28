@@ -1,9 +1,9 @@
-use iced_native::{Length, Point, Hasher, Event, Clipboard};
-use iced_native::{mouse, overlay, Element};
-use iced_native::widget::Widget;
-use iced_native::layout::{Layout, Limits, Node};
-use iced_native::widget::{Column, Row, Space};
 use iced_graphics::{Backend, Defaults, Primitive, Renderer};
+use iced_native::layout::{Layout, Limits, Node};
+use iced_native::widget::Widget;
+use iced_native::widget::{Column, Row, Space};
+use iced_native::{mouse, overlay, Element};
+use iced_native::{Clipboard, Event, Hasher, Length, Point};
 
 #[derive(Default, PartialEq, Eq, Clone)]
 pub struct Spacing {
@@ -15,21 +15,11 @@ pub struct Spacing {
 
 impl Spacing {
     pub const fn from_axes(horizontal: u16, vertical: u16) -> Self {
-        Self {
-            right: horizontal,
-            up: vertical,
-            left: horizontal,
-            down: vertical,
-        }
+        Self { right: horizontal, up: vertical, left: horizontal, down: vertical }
     }
 
     pub const fn uniform(spacing: u16) -> Self {
-        Self {
-            right: spacing,
-            up: spacing,
-            left: spacing,
-            down: spacing,
-        }
+        Self { right: spacing, up: spacing, left: spacing, down: spacing }
     }
 }
 
@@ -50,7 +40,7 @@ impl<'a, M: 'a, R: WidgetRenderer + 'a> Margin<'a, M, R> {
                     Row::new()
                         .push(Space::with_width(Length::Units(spacing.left)))
                         .push(element)
-                        .push(Space::with_width(Length::Units(spacing.right)))
+                        .push(Space::with_width(Length::Units(spacing.right))),
                 )
                 .push(Space::with_height(Length::Units(spacing.down)))
                 .into(),
@@ -77,7 +67,8 @@ impl<'a, M: 'a, R: WidgetRenderer + 'a> Widget<M, R> for Margin<'a, M, R> {
         defaults: &R::Defaults,
         layout: Layout<'_>,
         cursor_position: Point,
-    ) -> R::Output {
+    ) -> R::Output
+    {
         self.child.draw(renderer, defaults, layout, cursor_position)
     }
 
@@ -92,17 +83,13 @@ impl<'a, M: 'a, R: WidgetRenderer + 'a> Widget<M, R> for Margin<'a, M, R> {
         cursor_position: Point,
         messages: &mut Vec<M>,
         renderer: &R,
-        clipboard: Option<&dyn Clipboard>
-    ) {
-        self.child.on_event(
-            event, layout, cursor_position, messages, renderer, clipboard,
-        )
+        clipboard: Option<&dyn Clipboard>,
+    )
+    {
+        self.child.on_event(event, layout, cursor_position, messages, renderer, clipboard)
     }
 
-    fn overlay(
-        &mut self, 
-        layout: Layout<'_>
-    ) -> Option<overlay::Element<'_, M, R>> {
+    fn overlay(&mut self, layout: Layout<'_>) -> Option<overlay::Element<'_, M, R>> {
         self.child.overlay(layout)
     }
 }
@@ -114,12 +101,12 @@ impl<'a, M: 'a, R: WidgetRenderer + 'a> From<Margin<'a, M, R>> for Element<'a, M
 }
 
 pub trait WidgetRenderer:
-        iced_native::Renderer
-      + iced_native::space::Renderer
-      + iced_native::column::Renderer
-      + iced_native::row::Renderer
-      + Sized {}
+    iced_native::Renderer
+    + iced_native::space::Renderer
+    + iced_native::column::Renderer
+    + iced_native::row::Renderer
+    + Sized
+{
+}
 
-impl<B> WidgetRenderer for iced_graphics::Renderer<B>
-where
-    B: Backend + iced_graphics::backend::Text {}
+impl<B> WidgetRenderer for iced_graphics::Renderer<B> where B: Backend + iced_graphics::backend::Text {}

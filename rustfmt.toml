@@ -1,0 +1,5 @@
+edition = "2018"
+max_width = 110
+use_small_heuristics = "Max"
+# Nightly options
+where_single_line = true

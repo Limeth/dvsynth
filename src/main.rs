@@ -1,21 +1,23 @@
 #![feature(const_fn_floating_point_arithmetic)]
+use iced::{
+    button, text_input, window, Align, Application, Button, Column, Command, HorizontalAlignment, Length,
+    Point, Settings, Text, VerticalAlignment,
+};
+use iced_wgpu::Renderer;
+use petgraph::graph::NodeIndex;
+use petgraph::{stable_graph::StableGraph, Directed};
 ///
 /// Task list:
 /// * Make channel connections more responsive
 /// * Define channel types
 ///
-
 use std::borrow::Cow;
-use iced::{button, window, text_input, Point, Align, VerticalAlignment, HorizontalAlignment, Length, Button, Column, Text, Application, Command, Settings};
-use iced_wgpu::Renderer;
-use petgraph::{stable_graph::StableGraph, Directed};
-use petgraph::graph::NodeIndex;
 use style::*;
 use widgets::*;
 
 pub mod style;
-pub mod widgets;
 pub mod util;
+pub mod widgets;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ChannelIdentifier {
@@ -93,19 +95,13 @@ struct Channel {
 
 impl<'a> From<&'a Channel> for ChannelSlice<'a> {
     fn from(other: &'a Channel) -> Self {
-        Self {
-            title: &other.title,
-            description: other.description.as_ref().map(String::as_str),
-        }
+        Self { title: &other.title, description: other.description.as_ref().map(String::as_str) }
     }
 }
 
 impl Channel {
     pub fn new(title: impl ToString) -> Self {
-        Self {
-            title: title.to_string(),
-            description: None,
-        }
+        Self { title: title.to_string(), description: None }
     }
 
     pub fn with_description(mut self, description: impl ToString) -> Self {
@@ -124,7 +120,12 @@ struct NodeData {
 }
 
 impl NodeData {
-    pub fn view(&mut self, index: NodeIndex<u32>, theme: &dyn Theme) -> FloatingPane<'_, Message, Renderer, NodeElement<'_, Message, Renderer>> {
+    pub fn view(
+        &mut self,
+        index: NodeIndex<u32>,
+        theme: &dyn Theme,
+    ) -> FloatingPane<'_, Message, Renderer, NodeElement<'_, Message, Renderer>>
+    {
         let mut builder = NodeElement::builder(index, &mut self.element_state);
 
         for input_channel in &self.input_channels {
@@ -173,7 +174,7 @@ type Graph = StableGraph<
     NodeData, // Node Data
     EdgeData, // Edge Data
     Directed, // Edge Type
-    u32, // Node Index
+    u32,      // Node Index
 >;
 
 struct ApplicationState {
@@ -195,16 +196,9 @@ pub enum NodeMessage {
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    NodeMessage {
-        node: NodeIndex<u32>,
-        message: NodeMessage,
-    },
-    DisconnectChannel {
-        channel: ChannelIdentifier,
-    },
-    InsertConnection {
-        connection: Connection,
-    },
+    NodeMessage { node: NodeIndex<u32>, message: NodeMessage },
+    DisconnectChannel { channel: ChannelIdentifier },
+    InsertConnection { connection: Connection },
 }
 
 macro_rules! margin {
@@ -277,13 +271,8 @@ impl Application for ApplicationState {
                         element_state: Default::default(),
                         floating_pane_state: FloatingPaneState::with_position([10.0, 10.0]),
                         floating_pane_content_state: Default::default(),
-                        input_channels: vec![
-                            Channel::new("In A"),
-                        ],
-                        output_channels: vec![
-                            Channel::new("Out A"),
-                            Channel::new("Out B"),
-                        ],
+                        input_channels: vec![Channel::new("In A")],
+                        output_channels: vec![Channel::new("Out A"), Channel::new("Out B")],
                     });
 
                     let node_b = graph.add_node(NodeData {
@@ -296,9 +285,7 @@ impl Application for ApplicationState {
                             Channel::new("In B"),
                             Channel::new("In C"),
                         ],
-                        output_channels: vec![
-                            Channel::new("Out A"),
-                        ],
+                        output_channels: vec![Channel::new("Out A")],
                     });
 
                     let node_indices: Vec<_> = graph.node_indices().collect();
@@ -306,15 +293,9 @@ impl Application for ApplicationState {
                         node.floating_pane_content_state.node_index = Some(*node_index);
                     }
 
-                    graph.add_edge(node_a, node_b, EdgeData {
-                        channel_index_from: 0,
-                        channel_index_to: 2,
-                    });
+                    graph.add_edge(node_a, node_b, EdgeData { channel_index_from: 0, channel_index_to: 2 });
 
-                    graph.add_edge(node_a, node_b, EdgeData {
-                        channel_index_from: 1,
-                        channel_index_to: 0,
-                    });
+                    graph.add_edge(node_a, node_b, EdgeData { channel_index_from: 1, channel_index_to: 0 });
 
                     graph
                 },
@@ -333,10 +314,7 @@ impl Application for ApplicationState {
 
     fn update(&mut self, message: Self::Message) -> Command<Self::Message> {
         match message {
-            Message::NodeMessage {
-                node,
-                message,
-            } => {
+            Message::NodeMessage { node, message } => {
                 match message {
                     NodeMessage::UpdateTextInput(new_value) => {
                         if let Some(node_data) = self.graph.node_weight_mut(node) {
@@ -345,9 +323,7 @@ impl Application for ApplicationState {
                     }
                 }
             }
-            Message::DisconnectChannel {
-                channel
-            } => {
+            Message::DisconnectChannel { channel } => {
                 self.graph.retain_edges(|frozen, edge| {
                     let (from, to) = frozen.edge_endpoints(edge).unwrap();
                     let node_index = match channel.channel_direction {
@@ -358,7 +334,9 @@ impl Application for ApplicationState {
                     if node_index == channel.node_index {
                         let edge_data = frozen.edge_weight(edge).unwrap();
 
-                        if edge_data.get_channel_index(channel.channel_direction.inverse()) == channel.channel_index {
+                        if edge_data.get_channel_index(channel.channel_direction.inverse())
+                            == channel.channel_index
+                        {
                             return false;
                         }
                     }
@@ -366,16 +344,15 @@ impl Application for ApplicationState {
                     true
                 });
             }
-            Message::InsertConnection {
-                connection,
-            } => {
+            Message::InsertConnection { connection } => {
                 let from = connection.from();
                 let to = connection.to();
 
-                self.graph.add_edge(from.node_index, to.node_index, EdgeData {
-                    channel_index_from: from.channel_index,
-                    channel_index_to: to.channel_index,
-                });
+                self.graph.add_edge(
+                    from.node_index,
+                    to.node_index,
+                    EdgeData { channel_index_from: from.channel_index, channel_index_to: to.channel_index },
+                );
             }
         }
 
@@ -388,22 +365,15 @@ impl Application for ApplicationState {
         // TODO: do not recompute every time `view` is called
         let Self { graph, floating_panes_content_state, .. } = self;
         floating_panes_content_state.connections.clear();
-        floating_panes_content_state
-            .connections
-            .extend(graph.edge_indices().map(|edge_index| {
-                let edge_data = &graph[edge_index];
-                let (index_from, index_to) = graph.edge_endpoints(edge_index).unwrap();
-                Connection([
-                    (index_from, edge_data.channel_index_from),
-                    (index_to, edge_data.channel_index_to),
-                ])
-            }));
+        floating_panes_content_state.connections.extend(graph.edge_indices().map(|edge_index| {
+            let edge_data = &graph[edge_index];
+            let (index_from, index_to) = graph.edge_endpoints(edge_index).unwrap();
+            Connection([(index_from, edge_data.channel_index_from), (index_to, edge_data.channel_index_to)])
+        }));
 
-        let mut panes = FloatingPanes::new(
-            &mut self.floating_panes_state,
-            &mut self.floating_panes_content_state,
-        )
-        .style(theme.floating_panes());
+        let mut panes =
+            FloatingPanes::new(&mut self.floating_panes_state, &mut self.floating_panes_content_state)
+                .style(theme.floating_panes());
 
         for (node_index, node_data) in node_indices.iter().zip(self.graph.node_weights_mut()) {
             panes = panes.insert(*node_index, node_data.view(*node_index, theme.as_ref()));
@@ -411,73 +381,72 @@ impl Application for ApplicationState {
 
         panes.into()
 
-//         // We use a column: a simple vertical layout
-//         iced::Element::new(
-//             FloatingPanes::new(&mut self.floating_panes_state)
-//                 .push(
-//                     FloatingPane::builder(
-//                         &mut self.floating_pane_state_0,
-//                         Column::new()
-//                             .width(Length::Units(256))
-//                             .push(
-//                                 ui_field! {
-//                                     name: "Test Text Input",
-//                                     state: &mut self.text_input_state,
-//                                     placeholder: "Placeholder",
-//                                     value: &self.text_input_value,
-//                                     on_change: |new_value| {
-//                                         Message::UpdateTextInput(new_value.to_string())
-//                                     },
-//                                     theme: theme,
-//                                 }
-//                             ),
-//                     )
-//                     .title(Some("First"))
-//                     .title_size(Some(16))
-//                     .title_margin(consts::SPACING)
-//                     .pane_style(Some(theme))
-//                     .build(),
-//                 )
-//                 .push(
-//                     FloatingPane::builder(
-//                         &mut self.floating_pane_state_1,
-//                         Column::new()
-//                             .width(Length::Units(256))
-//                             .push(
-//                                 iced::Container::new(
-//                                     // Margin::new(
-//                                     margin! {
-//                                         element: iced::Container::new(
-//                                             Text::new("Test Node - Node Type")
-//                                                 .size(16)
-//                                         ),
-//                                         spacing: consts::SPACING,
-//                                     }
-//                                     // )
-//                                 )
-//                                 .width(Length::Fill)
-//                                 .style(theme)
-//                             ),
-//                     )
-//                     .title(Some("Second"))
-//                     .title_size(Some(16))
-//                     .title_margin(consts::SPACING)
-//                     .pane_style(Some(theme))
-//                     .build(),
-//                 )
-//         )
+        //         // We use a column: a simple vertical layout
+        //         iced::Element::new(
+        //             FloatingPanes::new(&mut self.floating_panes_state)
+        //                 .push(
+        //                     FloatingPane::builder(
+        //                         &mut self.floating_pane_state_0,
+        //                         Column::new()
+        //                             .width(Length::Units(256))
+        //                             .push(
+        //                                 ui_field! {
+        //                                     name: "Test Text Input",
+        //                                     state: &mut self.text_input_state,
+        //                                     placeholder: "Placeholder",
+        //                                     value: &self.text_input_value,
+        //                                     on_change: |new_value| {
+        //                                         Message::UpdateTextInput(new_value.to_string())
+        //                                     },
+        //                                     theme: theme,
+        //                                 }
+        //                             ),
+        //                     )
+        //                     .title(Some("First"))
+        //                     .title_size(Some(16))
+        //                     .title_margin(consts::SPACING)
+        //                     .pane_style(Some(theme))
+        //                     .build(),
+        //                 )
+        //                 .push(
+        //                     FloatingPane::builder(
+        //                         &mut self.floating_pane_state_1,
+        //                         Column::new()
+        //                             .width(Length::Units(256))
+        //                             .push(
+        //                                 iced::Container::new(
+        //                                     // Margin::new(
+        //                                     margin! {
+        //                                         element: iced::Container::new(
+        //                                             Text::new("Test Node - Node Type")
+        //                                                 .size(16)
+        //                                         ),
+        //                                         spacing: consts::SPACING,
+        //                                     }
+        //                                     // )
+        //                                 )
+        //                                 .width(Length::Fill)
+        //                                 .style(theme)
+        //                             ),
+        //                     )
+        //                     .title(Some("Second"))
+        //                     .title_size(Some(16))
+        //                     .title_margin(consts::SPACING)
+        //                     .pane_style(Some(theme))
+        //                     .build(),
+        //                 )
+        //         )
     }
 }
 
 fn main() {
-    ApplicationState::run(
-        Settings {
-            window: window::Settings {
-                icon: None, // TODO
-                ..window::Settings::default()
-            },
-            antialiasing: true,
-            ..Settings::default()
-        }
-    ).unwrap();
+    ApplicationState::run(Settings {
+        window: window::Settings {
+            icon: None, // TODO
+            ..window::Settings::default()
+        },
+        antialiasing: true,
+        ..Settings::default()
+    })
+    .unwrap();
 }

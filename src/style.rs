@@ -1,9 +1,6 @@
-use iced::{
-    button, checkbox, container, progress_bar, radio, rule, scrollable,
-    slider, text_input, Color,
-};
-use crate::Spacing;
 use crate::widgets::floating_panes;
+use crate::Spacing;
+use iced::{button, checkbox, container, progress_bar, radio, rule, scrollable, slider, text_input, Color};
 
 pub mod consts {
     use super::*;
@@ -198,8 +195,8 @@ const fn rgba(rgba: u32) -> Color {
     Color::from_rgba(
         ((rgba >> 24) & 0xFF) as f32 / 0xFF as f32,
         ((rgba >> 16) & 0xFF) as f32 / 0xFF as f32,
-        ((rgba >>  8) & 0xFF) as f32 / 0xFF as f32,
-        ((rgba >>  0) & 0xFF) as f32 / 0xFF as f32,
+        ((rgba >> 8) & 0xFF) as f32 / 0xFF as f32,
+        ((rgba >> 0) & 0xFF) as f32 / 0xFF as f32,
     )
 }
 
@@ -207,7 +204,7 @@ const fn rgba(rgba: u32) -> Color {
 const fn rgb(rgb: u32) -> Color {
     Color::from_rgb(
         ((rgb >> 16) & 0xFF) as f32 / 0xFF as f32,
-        ((rgb >>  8) & 0xFF) as f32 / 0xFF as f32,
-        ((rgb >>  0) & 0xFF) as f32 / 0xFF as f32,
+        ((rgb >> 8) & 0xFF) as f32 / 0xFF as f32,
+        ((rgb >> 0) & 0xFF) as f32 / 0xFF as f32,
     )
 }
