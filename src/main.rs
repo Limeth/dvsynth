@@ -281,7 +281,7 @@ impl Application for ApplicationState {
                         ],
                         output_channels: vec![
                             Channel::new("Out A"),
-                            Channel::new("Outtt B"),
+                            Channel::new("Out B"),
                         ],
                     });
 
