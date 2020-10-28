@@ -402,9 +402,84 @@ impl<'a, B: 'a + Backend + iced_graphics::backend::Text> FloatingPaneContent<'a,
         );
 
         fn draw_connection(frame: &mut Frame, from: Vec2<f32>, to: Vec2<f32>, stroke: Stroke) {
+            const CONTROL_POINT_DISTANCE_ABS_SOFTNESS: f32 = (style::consts::SPACING_HORIZONTAL * 4) as f32;
+            const CONTROL_POINT_DISTANCE_MAX_SOFTNESS: f32 = 10.0;
+            const CONTROL_POINT_DISTANCE_MAX_VERTICAL: f32 = (style::consts::SPACING_VERTICAL * 16) as f32;
+            const CONTROL_POINT_DISTANCE_MAX_HORIZONTAL: f32 = (style::consts::SPACING_HORIZONTAL * 128) as f32;
+
+            // https://www.desmos.com/calculator/hmhxxjxnld
+            // fn softmax(min: f32, sharpness: f32, x: f32) -> f32 {
+            //     let min = min as f64;
+            //     let sharpness = sharpness as f64;
+            //     let x = x as f64;
+            //     let result = ((1.0 + (sharpness * (x - min)).exp()).ln() / sharpness) + min;
+
+            //     result as f32
+            // }
+
+            /// Variant of softmax, where smoothness = 1 / sharpness
+            fn softmax2(min: f32, softness: f32, x: f32) -> f32 {
+                let min = min as f64;
+                let softness = softness as f64;
+                let x = x as f64;
+                let result = ((1.0 + ((x - min) / softness).exp()).ln() * softness) + min;
+
+                result as f32
+            }
+
+            /// Do not google images for this function (or do at your own risk)
+            /// https://www.desmos.com/calculator/miwhjandre
+            ///
+            /// `softness` describes the radius around the origin in which the result is smooth
+            fn softabs(softness: f32, x: f32) -> f32 {
+                let abs_x = x.abs();
+
+                if abs_x < softness {
+                    ((x / softness).powi(2) + 1.0) * 0.5 * softness
+                } else {
+                    abs_x
+                }
+            }
+
+            /// Do not google images for this function (or do at your own risk)
+            /// https://www.desmos.com/calculator/miwhjandre
+            ///
+            /// Variant of `softabs` where f(0) = 0
+            ///
+            /// https://www.desmos.com/calculator/dxybnuifuw
+            fn softabs2(softness: f32, x: f32) -> f32 {
+                let abs_x = x.abs();
+
+                if abs_x < softness {
+                    (x / softness).powi(2) * 0.5 * softness
+                } else {
+                    abs_x - 0.5 * softness
+                }
+            }
+
+            /// A combination of softabs2 and softmax to limit the maximum value
+            /// https://www.desmos.com/calculator/h33jcf4wkr
+            fn softminabs(abs_softness: f32, max_softness: f32, max: f32, x: f32) -> f32 {
+                softmax2(-max, max_softness, 0.0) - softmax2(-max, max_softness, -softabs2(abs_softness, x))
+            }
+
             let mid = (from + to) / 2.0;
-            let delta_x = to.x - from.x;
-            let control_point_distance = delta_x / 3.0;
+            let control_point_distance = softminabs(
+                CONTROL_POINT_DISTANCE_ABS_SOFTNESS,
+                CONTROL_POINT_DISTANCE_MAX_HORIZONTAL,
+                CONTROL_POINT_DISTANCE_MAX_SOFTNESS,
+                to.x - from.x,
+            ) / 3.0 + softminabs(
+                CONTROL_POINT_DISTANCE_ABS_SOFTNESS,
+                CONTROL_POINT_DISTANCE_MAX_VERTICAL,
+                CONTROL_POINT_DISTANCE_MAX_SOFTNESS,
+                to.y - from.y,
+            );
+
+            // if control_point_distance < CONTROL_POINT_DISTANCE_MIN {
+            //     control_point_distance = CONTROL_POINT_DISTANCE_MIN;
+            // }
+
             let control_from = from + Vec2::new(control_point_distance, 0.0);
             let control_to = to - Vec2::new(control_point_distance, 0.0);
             let path = Path::new(|builder| {
@@ -494,8 +569,13 @@ impl<'a, B: 'a + Backend + iced_graphics::backend::Text> FloatingPaneContent<'a,
             }).unwrap();
             let layout_channel = layout_channels.children().nth(selected_channel.channel_index).unwrap();
 
-            let from = get_connection_point(layout_channel, selected_channel.channel_direction);
-            let to = panes.state.cursor_position;
+            let connection_position = get_connection_point(layout_channel, selected_channel.channel_direction);
+            let cursor_position = panes.state.cursor_position;
+
+            let (from, to) = match selected_channel.channel_direction {
+                ChannelDirection::In => (cursor_position, connection_position),
+                ChannelDirection::Out => (connection_position, cursor_position),
+            };
 
             draw_connection(&mut frame, from, to, Stroke {
                 color: Color::from_rgba(1.0, 1.0, 1.0, 0.75),
@@ -531,10 +611,7 @@ impl<'a, B: 'a + Backend + iced_graphics::backend::Text> FloatingPaneContent<'a,
     ) -> bool {
         match event {
             Event::Mouse(MouseEvent::ButtonPressed(MouseButton::Left)) => {
-                let node_indices = panes.children.iter()
-                    .map(|(index, _)| *index)
-                    .collect::<Vec<_>>();
-                for (layout, node_index) in layout.children().zip(node_indices.iter()) {
+                for (layout, node_index) in layout.children().zip(panes.children.keys()) {
                     let row_layout = layout;
                     let row_layout = row_layout.children().nth(0).unwrap();
                     let row_layout = row_layout.children().nth(1).unwrap();
@@ -557,7 +634,6 @@ impl<'a, B: 'a + Backend + iced_graphics::backend::Text> FloatingPaneContent<'a,
                                 channel_direction,
                                 channel_index,
                             };
-                            println!("Clicked {:#?}", (channel_index, channel_layout, channel_direction));
 
                             let disconnect = match channel_direction {
                                 ChannelDirection::In => {
@@ -566,6 +642,7 @@ impl<'a, B: 'a + Backend + iced_graphics::backend::Text> FloatingPaneContent<'a,
                                 ChannelDirection::Out => false
                             };
 
+                            // Is connection pending?
                             if let Some(selected_channel) = panes.content_state.selected_channel.clone() {
                                 if panes.content_state.can_connect(selected_channel, channel) {
                                     if disconnect {

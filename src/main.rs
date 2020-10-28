@@ -1,7 +1,7 @@
 #![feature(const_fn_floating_point_arithmetic)]
 ///
 /// Task list:
-/// * Add channel connections
+/// * Make channel connections more responsive
 /// * Define channel types
 ///
 
