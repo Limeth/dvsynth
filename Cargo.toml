@@ -13,9 +13,15 @@ debug = ["iced/debug"]
 
 [dependencies]
 iced = { git = "https://github.com/hecrj/iced.git", features = ["canvas"] }
-iced_native = { git = "https://github.com/hecrj/iced.git" }
 iced_graphics = { git = "https://github.com/hecrj/iced.git", features = ["canvas"] }
+iced_native = { git = "https://github.com/hecrj/iced.git" }
 iced_wgpu = { git = "https://github.com/hecrj/iced.git", features = ["canvas"] }
-vek = "0.12"
+lyon_geom = "0.16"
 ordered-float = "2"
 petgraph = "0.5"
+smallvec = "1.4"
+vek = "0.12"
+roots = "*"
+
+[package.metadata.docs.rs]
+rustdoc-args = [ "--html-in-header", "doc/katex.html" ]

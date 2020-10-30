@@ -515,8 +515,11 @@ dependencies = [
  "iced_graphics",
  "iced_native",
  "iced_wgpu",
+ "lyon_geom 0.16.2",
  "ordered-float 2.0.0",
  "petgraph",
+ "roots",
+ "smallvec",
  "vek",
 ]
 
@@ -553,6 +556,15 @@ name = "euclid"
 version = "0.20.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2bb7ef65b3777a325d1eeefefab5b6d4959da54747e33bd6258e789640f307ad"
+dependencies = [
+ "num-traits 0.2.12",
+]
+
+[[package]]
+name = "euclid"
+version = "0.22.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5337024b8293bdce5265dc9570ef6e608a34bfacbbc87fe1a5dcb5f1dac2f4e2"
 dependencies = [
  "num-traits 0.2.12",
 ]
@@ -961,7 +973,7 @@ version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "47065d052e2f000066c4ffbea7051e55bff5c1532c400fc1e269492b2474ccc1"
 dependencies = [
- "euclid",
+ "euclid 0.20.14",
  "svg_fmt",
 ]
 
@@ -1280,7 +1292,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9962a2ba81382716b87d7d358493cb71844c1f9165ddad763cd9f4d3f5474df2"
 dependencies = [
  "arrayvec",
- "euclid",
+ "euclid 0.20.14",
+ "num-traits 0.2.12",
+]
+
+[[package]]
+name = "lyon_geom"
+version = "0.16.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6ce4e12203c428a58200b8cf1c0a3aad1cda907008ea11310bb3729593e5f933"
+dependencies = [
+ "arrayvec",
+ "euclid 0.22.1",
  "num-traits 0.2.12",
 ]
 
@@ -1290,7 +1313,7 @@ version = "0.15.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c81a044414965c051b7b4785770820d23146480a2d8573cd825f03a00a5b8dd8"
 dependencies = [
- "lyon_geom",
+ "lyon_geom 0.15.3",
 ]
 
 [[package]]
@@ -1894,6 +1917,12 @@ dependencies = [
  "redox_syscall",
  "rust-argon2",
 ]
+
+[[package]]
+name = "roots"
+version = "0.0.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "84348444bd7ad45729d0c49a4240d7cdc11c9d512c06c5ad1835c1ad4acda6db"
 
 [[package]]
 name = "rust-argon2"

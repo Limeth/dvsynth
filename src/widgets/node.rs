@@ -320,7 +320,7 @@ where B: Backend + iced_graphics::backend::Text
 }
 
 fn draw_point(position: Vector, color: Color) -> Primitive {
-    const CONNECTION_POINT_RADIUS: f32 = 2.0;
+    const CONNECTION_POINT_RADIUS: f32 = 5.0;
     const CONNECTION_POINT_CENTER: f32 = CONNECTION_POINT_RADIUS + 1.0; // extra pixel for anti aliasing
     const FRAME_SIZE: f32 = CONNECTION_POINT_CENTER * 2.0;
 
@@ -399,30 +399,10 @@ impl<'a, B: 'a + Backend + iced_graphics::backend::Text>
         ));
 
         fn draw_connection(frame: &mut Frame, from: Vec2<f32>, to: Vec2<f32>, stroke: Stroke) {
-            const CONTROL_POINT_DISTANCE_SLOPE: f32 = 1.0 / 3.0;
-            const CONTROL_POINT_DISTANCE_ABS_SOFTNESS: f32 = 32.0;
-            const CONTROL_POINT_DISTANCE_MAX_SHARPNESS: f32 = 0.01;
-            const CONTROL_POINT_DISTANCE_MAX: f32 = 64.0;
-
-            let mid = (from + to) / 2.0;
-            let control_point_distance = (to - from)
-                .map(|coord_delta| {
-                    util::softminabs(
-                        CONTROL_POINT_DISTANCE_ABS_SOFTNESS,
-                        CONTROL_POINT_DISTANCE_MAX_SHARPNESS,
-                        CONTROL_POINT_DISTANCE_MAX,
-                        coord_delta * CONTROL_POINT_DISTANCE_SLOPE,
-                    )
-                })
-                .sum();
-
-            let control_from = from + Vec2::new(control_point_distance, 0.0);
-            let control_to = to - Vec2::new(control_point_distance, 0.0);
+            let segments = util::get_connection_curve(from, to);
             let path = Path::new(|builder| {
                 builder.move_to(from.into_array().into());
-                // builder.line_to(to.into_array().into());
-                builder.quadratic_curve_to(control_from.into_array().into(), mid.into_array().into());
-                builder.quadratic_curve_to(control_to.into_array().into(), to.into_array().into());
+                segments.build_segments(builder);
             });
 
             frame.stroke(&path, stroke);
@@ -490,6 +470,23 @@ impl<'a, B: 'a + Backend + iced_graphics::backend::Text>
                     line_join: LineJoin::Round,
                 },
             );
+
+            // Code to visualize finding the closest point to the curve
+            {
+                // TODO: When checking whether the cursor is above a curve, first construct
+                // a bounding convex polygon or AABB that encloses the curve + the max distance
+                // at which the selection should be active
+                let segments = util::get_connection_curve(from, to);
+                let projection = segments.project_point(panes.state.cursor_position);
+                let projection = segments.sample(projection.t);
+                let radius = projection.distance(panes.state.cursor_position);
+
+                frame.stroke(
+                    &Path::circle(panes.state.cursor_position.into_array().into(), radius),
+                    Stroke { color: Color::WHITE, width: 1.0, ..Default::default() },
+                );
+                primitives.push(draw_point(projection.into_array().into(), Color::from_rgb(1.0, 0.0, 1.0)));
+            }
         }
 
         // Draw pending connection
