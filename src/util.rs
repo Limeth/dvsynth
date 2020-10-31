@@ -1,4 +1,11 @@
+use iced_graphics::canvas::{Fill, FillRule, Frame, LineCap, LineJoin, Path, Stroke};
 use iced_graphics::widget::canvas::path::Builder;
+use iced_graphics::{self, Backend, Defaults, Primitive};
+use iced_native::layout::{Layout, Limits, Node};
+use iced_native::{
+    self, Align, Background, Clipboard, Column, Event, Hasher, Length, Point, Row, Size, Text,
+};
+use iced_native::{Color, Vector};
 use lyon_geom::{QuadraticBezierSegment, Scalar, Segment};
 use smallvec::{smallvec, SmallVec};
 use vek::Vec2;
@@ -218,4 +225,47 @@ pub fn softabs2(softness: f32, x: f32) -> f32 {
 /// https://www.desmos.com/calculator/1j5pkbmxd8
 pub fn softminabs(abs_softness: f32, max_sharpness: f32, max: f32, x: f32) -> f32 {
     softmax(-max, max_sharpness, 0.0) - softmax(-max, max_sharpness, -softabs2(abs_softness, x))
+}
+
+pub fn draw_point(position: Vector, color: Color) -> Primitive {
+    const CONNECTION_POINT_RADIUS: f32 = 5.0;
+    const CONNECTION_POINT_CENTER: f32 = CONNECTION_POINT_RADIUS + 1.0; // extra pixel for anti aliasing
+    const FRAME_SIZE: f32 = CONNECTION_POINT_CENTER * 2.0;
+
+    let mut frame = Frame::new([FRAME_SIZE, FRAME_SIZE].into());
+    let path = Path::new(|builder| {
+        builder.circle([CONNECTION_POINT_CENTER, CONNECTION_POINT_CENTER].into(), CONNECTION_POINT_RADIUS);
+    });
+
+    frame.fill(&path, Fill { color, rule: FillRule::NonZero });
+
+    Primitive::Translate {
+        translation: position - Vector::new(CONNECTION_POINT_CENTER, CONNECTION_POINT_CENTER),
+        content: Box::new(frame.into_geometry().into_primitive()),
+    }
+}
+
+pub fn draw_bounds(layout: Layout<'_>, color: Color) -> Primitive {
+    // let layout_position = Vector::new(layout.position().x, layout.position().y);
+    // let layout_size = Vector::new(layout.bounds().size().width, layout.bounds().size().height);
+
+    // Primitive::Group {
+    //     primitives: vec![
+    //         draw_point(
+    //             layout_position,
+    //             color,
+    //         ),
+    //         draw_point(
+    //             layout_position + layout_size,
+    //             color,
+    //         ),
+    //     ],
+    // }
+    Primitive::Quad {
+        bounds: layout.bounds(),
+        background: Background::Color(Color::TRANSPARENT),
+        border_radius: 0,
+        border_width: 1,
+        border_color: color,
+    }
 }
