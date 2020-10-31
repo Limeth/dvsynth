@@ -1004,7 +1004,7 @@ dependencies = [
 [[package]]
 name = "iced"
 version = "0.1.1"
-source = "git+https://github.com/hecrj/iced.git#23647d2f50f0e177b93cf09c72886a90702df982"
+source = "git+https://github.com/Limeth/iced.git#4dc93e8138132298746c71492773dcd70a15cd17"
 dependencies = [
  "iced_core",
  "iced_futures",
@@ -1017,12 +1017,12 @@ dependencies = [
 [[package]]
 name = "iced_core"
 version = "0.2.1"
-source = "git+https://github.com/hecrj/iced.git#23647d2f50f0e177b93cf09c72886a90702df982"
+source = "git+https://github.com/Limeth/iced.git#4dc93e8138132298746c71492773dcd70a15cd17"
 
 [[package]]
 name = "iced_futures"
 version = "0.1.2"
-source = "git+https://github.com/hecrj/iced.git#23647d2f50f0e177b93cf09c72886a90702df982"
+source = "git+https://github.com/Limeth/iced.git#4dc93e8138132298746c71492773dcd70a15cd17"
 dependencies = [
  "futures",
  "log",
@@ -1032,7 +1032,7 @@ dependencies = [
 [[package]]
 name = "iced_graphics"
 version = "0.1.0"
-source = "git+https://github.com/hecrj/iced.git#23647d2f50f0e177b93cf09c72886a90702df982"
+source = "git+https://github.com/Limeth/iced.git#4dc93e8138132298746c71492773dcd70a15cd17"
 dependencies = [
  "bytemuck",
  "font-kit",
@@ -1047,7 +1047,7 @@ dependencies = [
 [[package]]
 name = "iced_native"
 version = "0.2.2"
-source = "git+https://github.com/hecrj/iced.git#23647d2f50f0e177b93cf09c72886a90702df982"
+source = "git+https://github.com/Limeth/iced.git#4dc93e8138132298746c71492773dcd70a15cd17"
 dependencies = [
  "iced_core",
  "iced_futures",
@@ -1059,7 +1059,7 @@ dependencies = [
 [[package]]
 name = "iced_style"
 version = "0.1.0"
-source = "git+https://github.com/hecrj/iced.git#23647d2f50f0e177b93cf09c72886a90702df982"
+source = "git+https://github.com/Limeth/iced.git#4dc93e8138132298746c71492773dcd70a15cd17"
 dependencies = [
  "iced_core",
 ]
@@ -1067,7 +1067,7 @@ dependencies = [
 [[package]]
 name = "iced_web"
 version = "0.2.1"
-source = "git+https://github.com/hecrj/iced.git#23647d2f50f0e177b93cf09c72886a90702df982"
+source = "git+https://github.com/Limeth/iced.git#4dc93e8138132298746c71492773dcd70a15cd17"
 dependencies = [
  "dodrio",
  "iced_core",
@@ -1083,7 +1083,7 @@ dependencies = [
 [[package]]
 name = "iced_wgpu"
 version = "0.2.2"
-source = "git+https://github.com/hecrj/iced.git#23647d2f50f0e177b93cf09c72886a90702df982"
+source = "git+https://github.com/Limeth/iced.git#4dc93e8138132298746c71492773dcd70a15cd17"
 dependencies = [
  "bytemuck",
  "futures",
@@ -1101,7 +1101,7 @@ dependencies = [
 [[package]]
 name = "iced_winit"
 version = "0.1.1"
-source = "git+https://github.com/hecrj/iced.git#23647d2f50f0e177b93cf09c72886a90702df982"
+source = "git+https://github.com/Limeth/iced.git#4dc93e8138132298746c71492773dcd70a15cd17"
 dependencies = [
  "iced_futures",
  "iced_graphics",

@@ -219,6 +219,25 @@ impl<'a, M: 'a + Clone, R: 'a + WidgetRenderer> NodeElement<'a, M, R> {
             }
         }
     }
+
+    fn is_channel_selected(
+        channel_layout: Layout,
+        channel_direction: ChannelDirection,
+        cursor_position: Vec2<f32>,
+    ) -> bool
+    {
+        const GRAB_RADIUS: f32 = 6.0;
+
+        // TODO: Grow bounds in the channel direction to remove gap
+        if channel_layout.bounds().contains(cursor_position.into_array().into()) {
+            return true;
+        }
+
+        let connection_point = Self::get_connection_point(channel_layout, channel_direction);
+        let distance_squared = cursor_position.distance_squared(connection_point);
+
+        distance_squared <= GRAB_RADIUS * GRAB_RADIUS
+    }
 }
 
 impl<'a, M: 'a + Clone, R: 'a + WidgetRenderer> Widget<M, R> for NodeElement<'a, M, R> {
@@ -317,16 +336,21 @@ impl<'a, M: Clone + 'a, R: 'a + WidgetRenderer> floating_panes::FloatingPanesBeh
     ) -> bool
     {
         match event {
-            Event::Mouse(MouseEvent::ButtonPressed(MouseButton::Left)) => {
-                for (layout, node_index) in layout.children().zip(panes.children.keys()) {
-                    let row_layout = layout;
-                    let row_layout = row_layout.children().nth(0).unwrap();
-                    let row_layout = row_layout.children().nth(1).unwrap();
-                    let row_layout = row_layout.children().nth(0).unwrap();
-                    let row_layout = row_layout.children().nth(1).unwrap(); // Margin Column
-                    let row_layout = row_layout.children().nth(1).unwrap(); // Margin Row
-                    let inputs_layout = row_layout.children().nth(0).unwrap();
-                    let outputs_layout = row_layout.children().nth(1).unwrap();
+            Event::Mouse(MouseEvent::CursorMoved { x, y }) => {
+                let cursor_position = Vec2::new(x, y);
+
+                panes.content_state.highlight = None;
+
+                // Highlight channel, if possible
+                for (layout, node_index) in layout.children().zip(panes.children.keys().copied()) {
+                    let inputs_layout = NodeElement::<M, R>::get_channels_layout_from_child_layout(
+                        layout,
+                        ChannelDirection::In,
+                    );
+                    let outputs_layout = NodeElement::<M, R>::get_channels_layout_from_child_layout(
+                        layout,
+                        ChannelDirection::Out,
+                    );
                     let channels = inputs_layout
                         .children()
                         .enumerate()
@@ -338,19 +362,114 @@ impl<'a, M: Clone + 'a, R: 'a + WidgetRenderer> floating_panes::FloatingPanesBeh
                                 .map(|(index, layout)| (index, layout, ChannelDirection::Out)),
                         );
 
-                    for (channel_index, channel_layout, channel_direction) in channels {
-                        let grab_radius = channel_layout.bounds().size().height / 2.0;
-                        let connection_point =
-                            NodeElement::<M, R>::get_connection_point(channel_layout, channel_direction);
-                        let distance_squared = panes.state.cursor_position.distance_squared(connection_point);
+                    let highlighted_channel = channels
+                        .filter(|(channel_index, channel_layout, channel_direction)| {
+                            // If a new connection is being formed, make sure the target channel
+                            // can be connected to.
+                            if let Some(selected_channel) = panes.content_state.selected_channel.as_ref() {
+                                let channel = ChannelIdentifier {
+                                    node_index,
+                                    channel_index: *channel_index,
+                                    channel_direction: *channel_direction,
+                                };
 
-                        if distance_squared <= grab_radius * grab_radius {
-                            let channel = ChannelIdentifier {
-                                node_index: *node_index,
-                                channel_direction,
-                                channel_index,
-                            };
+                                if !panes.content_state.can_connect(*selected_channel, channel) {
+                                    return false;
+                                }
+                            }
 
+                            NodeElement::<M, R>::is_channel_selected(
+                                channel_layout.clone(),
+                                channel_direction.clone(),
+                                cursor_position,
+                            )
+                        })
+                        .next();
+
+                    if let Some((channel_index, _, channel_direction)) = highlighted_channel {
+                        let channel = ChannelIdentifier {
+                            node_index: node_index.clone(),
+                            channel_index,
+                            channel_direction,
+                        };
+                        panes.content_state.highlight = Some(Highlight::Channel(channel));
+                    }
+                }
+
+                // Otherwise, highlight a connection, if one is not being created
+                if panes.content_state.highlight.is_none() && panes.content_state.selected_channel.is_none() {
+                    const MAX_CONNECTION_HIGHLIGHT_DISTANCE: f32 = 6.0;
+
+                    let closest_connection = panes
+                        .content_state
+                        .connections
+                        .iter()
+                        .map(|connection| {
+                            // FIXME: Replace with O(1)
+                            let (layout_from, (index_from, pane_from)) = layout
+                                .children()
+                                .zip(&panes.children)
+                                .find(|(child_layout, (child_index, child))| {
+                                    **child_index == connection.from().node_index
+                                })
+                                .unwrap();
+                            let (layout_to, (index_to, pane_to)) = layout
+                                .children()
+                                .zip(&panes.children)
+                                .find(|(child_layout, (child_index, child))| {
+                                    **child_index == connection.to().node_index
+                                })
+                                .unwrap();
+
+                            let layout_outputs = NodeElement::<M, R>::get_channels_layout_from_child_layout(
+                                layout_from,
+                                ChannelDirection::Out,
+                            );
+                            let layout_inputs = NodeElement::<M, R>::get_channels_layout_from_child_layout(
+                                layout_to,
+                                ChannelDirection::In,
+                            );
+                            let layout_output =
+                                layout_outputs.children().nth(connection.from().channel_index).unwrap();
+                            let layout_input =
+                                layout_inputs.children().nth(connection.to().channel_index).unwrap();
+                            let from = NodeElement::<M, R>::get_connection_point(
+                                layout_output,
+                                ChannelDirection::Out,
+                            );
+                            let to =
+                                NodeElement::<M, R>::get_connection_point(layout_input, ChannelDirection::In);
+
+                            let segments = util::get_connection_curve(from, to);
+                            let projection = segments.project_point(cursor_position);
+                            let projection = segments.sample(projection.t);
+                            let connection_distance_squared = projection.distance_squared(cursor_position);
+
+                            (connection, connection_distance_squared)
+                        })
+                        .filter(|(_, connection_distance_squared)| {
+                            *connection_distance_squared
+                                <= MAX_CONNECTION_HIGHLIGHT_DISTANCE * MAX_CONNECTION_HIGHLIGHT_DISTANCE
+                        })
+                        .min_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+                        .map(|(connection, _)| connection);
+
+                    if let Some(closest_connection) = closest_connection {
+                        panes.content_state.highlight =
+                            Some(Highlight::Connection(closest_connection.clone()));
+                    }
+                }
+            }
+            Event::Mouse(MouseEvent::ButtonPressed(MouseButton::Left)) => {
+                // FIXME: Use current highlight to decide upon how this event is handled
+                if let Some(highlight) = panes.content_state.highlight.take() {
+                    match highlight {
+                        Highlight::Connection(highlighted_connection) => {
+                            panes.content_state.selected_channel = Some(highlighted_connection.from());
+                            messages
+                                .push((panes.behaviour.on_channel_disconnect)(highlighted_connection.to()));
+                        }
+                        Highlight::Channel(channel @ ChannelIdentifier { channel_direction, .. }) => {
                             let disconnect = match channel_direction {
                                 ChannelDirection::In => panes.content_state.is_connected(channel),
                                 ChannelDirection::Out => false,
@@ -391,10 +510,23 @@ impl<'a, M: Clone + 'a, R: 'a + WidgetRenderer> floating_panes::FloatingPanesBeh
                                     panes.content_state.selected_channel = Some(channel);
                                 }
                             }
-
-                            return true;
                         }
                     }
+
+                    // Properly update the highlight
+                    Self::on_event(
+                        panes,
+                        Event::Mouse(MouseEvent::CursorMoved {
+                            x: panes.state.cursor_position.x,
+                            y: panes.state.cursor_position.y,
+                        }),
+                        layout,
+                        cursor_position,
+                        messages,
+                        renderer,
+                        clipboard,
+                    );
+                    return true;
                 }
 
                 panes.content_state.selected_channel = None;
@@ -411,13 +543,21 @@ pub struct FloatingPaneBehaviourState {
     pub node_index: Option<NodeIndex<u32>>,
 }
 
+#[derive(Debug)]
+pub enum Highlight {
+    Channel(ChannelIdentifier),
+    Connection(Connection),
+}
+
 #[derive(Default)]
 pub struct FloatingPanesBehaviourState {
     pub connections: Vec<Connection>,
     pub selected_channel: Option<ChannelIdentifier>,
+    pub highlight: Option<Highlight>,
 }
 
 impl FloatingPanesBehaviourState {
+    /// A reflexive function to check whether two channels can be connected
     fn can_connect(&self, from: ChannelIdentifier, to: ChannelIdentifier) -> bool {
         // TODO: Add borrow checking and type checking
         from.node_index != to.node_index && from.channel_direction != to.channel_direction
@@ -529,38 +669,54 @@ where B: Backend + iced_graphics::backend::Text
             let from = NodeElement::<M, Self>::get_connection_point(layout_output, ChannelDirection::Out);
             let to = NodeElement::<M, Self>::get_connection_point(layout_input, ChannelDirection::In);
 
-            // primitives.push(draw_point(from.into_array().into(), Color::from_rgb(1.0, 0.0, 0.0)));
-            // primitives.push(draw_point(to.into_array().into(), Color::from_rgb(0.0, 0.0, 1.0)));
-
-            draw_connection(
-                &mut frame,
-                from,
-                to,
+            let highlighted = if let Some(highlight) = panes.content_state.highlight.as_ref() {
+                match highlight {
+                    Highlight::Connection(highlighted_connection) => connection == highlighted_connection,
+                    Highlight::Channel(highlighted_channel) => {
+                        connection.contains_channel(highlighted_channel.clone())
+                    }
+                }
+            } else {
+                false
+            };
+            let stroke = if highlighted {
                 Stroke {
-                    color: Color::from_rgba(1.0, 1.0, 1.0, 0.7),
+                    color: Color::from_rgba(0.5, 1.0, 0.0, 1.0),
+                    width: 3.0,
+                    line_cap: LineCap::Butt,
+                    line_join: LineJoin::Round,
+                }
+            } else {
+                Stroke {
+                    color: Color::from_rgba(1.0, 1.0, 1.0, 1.0),
                     width: 1.5,
                     line_cap: LineCap::Butt,
                     line_join: LineJoin::Round,
-                },
-            );
+                }
+            };
+
+            // primitives.push(draw_point(from.into_array().into(), Color::from_rgb(1.0, 0.0, 0.0)));
+            // primitives.push(draw_point(to.into_array().into(), Color::from_rgb(0.0, 0.0, 1.0)));
+
+            draw_connection(&mut frame, from, to, stroke);
 
             // Code to visualize finding the closest point to the curve
-            {
-                // TODO: When checking whether the cursor is above a curve, first construct
-                // a bounding convex polygon or AABB that encloses the curve + the max distance
-                // at which the selection should be active
-                let segments = util::get_connection_curve(from, to);
-                let projection = segments.project_point(panes.state.cursor_position);
-                let projection = segments.sample(projection.t);
-                let radius = projection.distance(panes.state.cursor_position);
+            // {
+            //     // TODO: When checking whether the cursor is above a curve, first construct
+            //     // a bounding convex polygon or AABB that encloses the curve + the max distance
+            //     // at which the selection should be active
+            //     let segments = util::get_connection_curve(from, to);
+            //     let projection = segments.project_point(panes.state.cursor_position);
+            //     let projection = segments.sample(projection.t);
+            //     let radius = projection.distance(panes.state.cursor_position);
 
-                frame.stroke(
-                    &Path::circle(panes.state.cursor_position.into_array().into(), radius),
-                    Stroke { color: Color::WHITE, width: 1.0, ..Default::default() },
-                );
-                primitives
-                    .push(util::draw_point(projection.into_array().into(), Color::from_rgb(1.0, 0.0, 1.0)));
-            }
+            //     frame.stroke(
+            //         &Path::circle(panes.state.cursor_position.into_array().into(), radius),
+            //         Stroke { color: Color::WHITE, width: 1.0, ..Default::default() },
+            //     );
+            //     primitives
+            //         .push(util::draw_point(projection.into_array().into(), Color::from_rgb(1.0, 0.0, 1.0)));
+            // }
         }
 
         // Draw pending connection
@@ -580,15 +736,36 @@ where B: Backend + iced_graphics::backend::Text
             );
             let layout_channel = layout_channels.children().nth(selected_channel.channel_index).unwrap();
 
-            let connection_position = NodeElement::<M, Self>::get_connection_point(
+            let connected_position = NodeElement::<M, Self>::get_connection_point(
                 layout_channel,
                 selected_channel.channel_direction,
             );
-            let cursor_position = panes.state.cursor_position;
+            let target_position = if let Some(Highlight::Channel(highlighted_channel)) =
+                panes.content_state.highlight.as_ref()
+            {
+                let child_layout = layout
+                    .children()
+                    .zip(panes.children.keys())
+                    .find(|(_, key)| **key == highlighted_channel.node_index)
+                    .map(|(layout, _)| layout)
+                    .unwrap();
+                let layout_channels = NodeElement::<M, Self>::get_channels_layout_from_child_layout(
+                    child_layout,
+                    highlighted_channel.channel_direction,
+                );
+                let layout_channel =
+                    layout_channels.children().nth(highlighted_channel.channel_index).unwrap();
+                NodeElement::<M, Self>::get_connection_point(
+                    layout_channel,
+                    highlighted_channel.channel_direction,
+                )
+            } else {
+                panes.state.cursor_position
+            };
 
             let (from, to) = match selected_channel.channel_direction {
-                ChannelDirection::In => (cursor_position, connection_position),
-                ChannelDirection::Out => (connection_position, cursor_position),
+                ChannelDirection::In => (target_position, connected_position),
+                ChannelDirection::Out => (connected_position, target_position),
             };
 
             draw_connection(
@@ -608,22 +785,9 @@ where B: Backend + iced_graphics::backend::Text
         // Draw connection points
         {
             const CONNECTION_POINT_RADIUS: f32 = 3.0;
-            const CONNECTION_POINT_CENTER: f32 = CONNECTION_POINT_RADIUS + 1.0; // extra pixel for anti aliasing
-            const FRAME_SIZE: f32 = CONNECTION_POINT_CENTER * 2.0;
+            const CONNECTION_POINT_RADIUS_HIGHLIGHTED: f32 = 4.5;
 
-            let mut frame = Frame::new([FRAME_SIZE, FRAME_SIZE].into());
-            let path = Path::new(|builder| {
-                builder.circle(
-                    [CONNECTION_POINT_CENTER, CONNECTION_POINT_CENTER].into(),
-                    CONNECTION_POINT_RADIUS,
-                );
-            });
-
-            frame.fill(&path, Fill { color: Color::WHITE, rule: FillRule::NonZero });
-
-            let primitive_connection_point = frame.into_geometry().into_primitive();
-
-            for child_layout in layout.children() {
+            for (child_layout, node_index) in layout.children().zip(panes.children.keys().copied()) {
                 let inputs_layout = NodeElement::<M, Self>::get_channels_layout_from_child_layout(
                     child_layout,
                     ChannelDirection::In,
@@ -634,18 +798,33 @@ where B: Backend + iced_graphics::backend::Text
                 );
                 let channel_layouts = inputs_layout
                     .children()
-                    .map(|layout| (layout, ChannelDirection::In))
-                    .chain(outputs_layout.children().map(|layout| (layout, ChannelDirection::Out)));
+                    .enumerate()
+                    .map(|(index, layout)| (index, layout, ChannelDirection::In))
+                    .chain(
+                        outputs_layout
+                            .children()
+                            .enumerate()
+                            .map(|(index, layout)| (index, layout, ChannelDirection::Out)),
+                    );
 
-                for (channel_layout, channel_direction) in channel_layouts {
-                    let translation =
-                        NodeElement::<M, Self>::get_connection_point(channel_layout, channel_direction)
-                            - Vec2::new(CONNECTION_POINT_CENTER, CONNECTION_POINT_CENTER);
+                for (channel_index, channel_layout, channel_direction) in channel_layouts {
+                    let position =
+                        NodeElement::<M, Self>::get_connection_point(channel_layout, channel_direction);
+                    let channel = ChannelIdentifier { node_index, channel_index, channel_direction };
+                    let highlighted = if let Some(Highlight::Channel(highlighted_channel)) =
+                        panes.content_state.highlight.as_ref()
+                    {
+                        *highlighted_channel == channel
+                    } else {
+                        false
+                    };
+                    let (radius, color) = if highlighted {
+                        (CONNECTION_POINT_RADIUS_HIGHLIGHTED, Color::from_rgb(0.5, 1.0, 0.0))
+                    } else {
+                        (CONNECTION_POINT_RADIUS, Color::WHITE)
+                    };
 
-                    primitives.push(Primitive::Translate {
-                        translation: Vector::new(translation.x, translation.y),
-                        content: Box::new(primitive_connection_point.clone()),
-                    });
+                    primitives.push(util::draw_point(position, color, radius));
                 }
             }
         }

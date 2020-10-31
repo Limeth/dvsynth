@@ -227,20 +227,20 @@ pub fn softminabs(abs_softness: f32, max_sharpness: f32, max: f32, x: f32) -> f3
     softmax(-max, max_sharpness, 0.0) - softmax(-max, max_sharpness, -softabs2(abs_softness, x))
 }
 
-pub fn draw_point(position: Vector, color: Color) -> Primitive {
-    const CONNECTION_POINT_RADIUS: f32 = 5.0;
-    const CONNECTION_POINT_CENTER: f32 = CONNECTION_POINT_RADIUS + 1.0; // extra pixel for anti aliasing
-    const FRAME_SIZE: f32 = CONNECTION_POINT_CENTER * 2.0;
-
-    let mut frame = Frame::new([FRAME_SIZE, FRAME_SIZE].into());
+pub fn draw_point(position: Vec2<f32>, color: Color, radius: f32) -> Primitive {
+    let connection_point_center = radius + 1.0; // extra pixel for anti aliasing
+    let frame_size = connection_point_center * 2.0;
+    let mut frame = Frame::new([frame_size, frame_size].into());
     let path = Path::new(|builder| {
-        builder.circle([CONNECTION_POINT_CENTER, CONNECTION_POINT_CENTER].into(), CONNECTION_POINT_RADIUS);
+        builder.circle([connection_point_center, connection_point_center].into(), radius);
     });
 
     frame.fill(&path, Fill { color, rule: FillRule::NonZero });
 
     Primitive::Translate {
-        translation: position - Vector::new(CONNECTION_POINT_CENTER, CONNECTION_POINT_CENTER),
+        translation: (position - Vec2::new(connection_point_center, connection_point_center))
+            .into_array()
+            .into(),
         content: Box::new(frame.into_geometry().into_primitive()),
     }
 }

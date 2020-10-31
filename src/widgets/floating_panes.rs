@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::hash::Hash;
 use vek::Vec2;
 
-/// A widget-like trait for customizing the behaviour of the FloatingPanes widget
+/// A widget-like trait for customizing the behaviour of the [`FloatingPanes`] widget
 pub trait FloatingPanesBehaviour<'a, M: 'a, R: 'a + WidgetRenderer>: Sized {
     type FloatingPaneIndex: Hash + Eq;
     type FloatingPaneBehaviourState;
@@ -85,9 +85,7 @@ impl<'a, M: 'a, B: 'a + Backend + iced_graphics::backend::Text>
         )
     }
 
-    fn hash_panes(panes: &FloatingPanes<'a, M, iced_graphics::Renderer<B>, Self>, state: &mut Hasher) {
-        // no-op
-    }
+    fn hash_panes(panes: &FloatingPanes<'a, M, iced_graphics::Renderer<B>, Self>, state: &mut Hasher) {}
 
     fn on_event(
         panes: &mut FloatingPanes<'a, M, iced_graphics::Renderer<B>, Self>,
@@ -236,6 +234,7 @@ impl FloatingPaneState {
     }
 }
 
+/// A single floating pane within the [`FloatingPanes`] widget.
 pub struct FloatingPane<'a, M: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a, M, R>> {
     pub state: &'a mut FloatingPaneState,
     pub element_tree: Element<'a, M, R>,

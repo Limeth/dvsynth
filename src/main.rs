@@ -1,13 +1,19 @@
 #![feature(const_fn_floating_point_arithmetic)]
+#![feature(bindings_after_at)]
+//!
+//! Task list:
+//! * Make channel connections more responsive
+//!     * Make clicking on the labels function as clicking on the connection points
+//!     * Highlight channel when mouse over
+//!     * Highlight connection when mouse over
+//! * Define channel types
+//! * Add `NodeElement` styles
+//!
+
 use iced::{window, Application, Command, Settings};
 use iced_wgpu::Renderer;
 use petgraph::graph::NodeIndex;
 use petgraph::{stable_graph::StableGraph, Directed};
-///
-/// Task list:
-/// * Make channel connections more responsive
-/// * Define channel types
-///
 use std::borrow::Cow;
 use style::*;
 use widgets::*;
