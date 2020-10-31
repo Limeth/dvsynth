@@ -130,7 +130,7 @@ impl<T: Segment + ConnectionSegment> Segments<T> {
             .map(|(index, segment)| {
                 let mut projection = segment.project_point(query);
                 projection.t = (projection.t + index as f32) / self.segments.len() as f32;
-                dbg!(projection)
+                projection
             })
             .min_by(|a, b| std::cmp::PartialOrd::partial_cmp(&a.distance, &b.distance).unwrap())
             .unwrap()

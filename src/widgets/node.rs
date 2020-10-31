@@ -167,6 +167,39 @@ impl<'a, M: 'a + Clone, R: 'a + WidgetRenderer> NodeElement<'a, M, R> {
     pub fn builder(index: NodeIndex<u32>, state: &'a mut NodeElementState) -> NodeElementBuilder<'a, M, R> {
         NodeElementBuilder::new(index, state)
     }
+
+    pub fn get_channels_layout_from_content_layout(
+        content_layout: Layout,
+        channel_direction: ChannelDirection,
+    ) -> Layout
+    {
+        content_layout
+            .children()
+            .nth(1)
+            .unwrap()
+            .children()
+            .nth(1)
+            .unwrap()
+            .children()
+            .nth(match channel_direction {
+                ChannelDirection::In => 0,
+                ChannelDirection::Out => 1,
+            })
+            .unwrap()
+    }
+
+    pub fn get_channels_layout_from_child_layout(
+        child_layout: Layout,
+        channel_direction: ChannelDirection,
+    ) -> Layout
+    {
+        Self::get_channels_layout_from_content_layout(
+            FloatingPanes::<M, R, FloatingPanesBehaviour<M>>::get_content_layout_from_child_layout(
+                child_layout,
+            ),
+            channel_direction,
+        )
+    }
 }
 
 fn get_connection_point(layout: Layout, direction: ChannelDirection) -> Vec2<f32> {
@@ -212,7 +245,7 @@ impl<'a, M: 'a + Clone, R: 'a + WidgetRenderer> Widget<M, R> for NodeElement<'a,
         cursor_position: Point,
     ) -> <R as iced_native::Renderer>::Output
     {
-        <R as WidgetRenderer>::draw(renderer, defaults, layout, cursor_position, self)
+        self.element_tree.draw(renderer, defaults, layout, cursor_position)
     }
 
     fn hash_layout(&self, state: &mut Hasher) {
@@ -250,6 +283,7 @@ impl<'a, M: 'a + Clone, R: 'a + WidgetRenderer> From<NodeElement<'a, M, R>> for 
 /// is to be implemented on the specific `Renderer`.
 pub trait WidgetRenderer:
     margin::WidgetRenderer
+    + floating_panes::WidgetRenderer
     + iced_native::Renderer
     + iced_native::text::Renderer
     + iced_native::column::Renderer
@@ -257,130 +291,25 @@ pub trait WidgetRenderer:
     + iced_native::widget::text_input::Renderer
     + Sized
 {
-    fn draw<M: Clone>(
+    fn draw_panes<M: Clone>(
         &mut self,
+        panes: &FloatingPanes<'_, M, Self, FloatingPanesBehaviour<M>>,
         defaults: &Self::Defaults,
         layout: Layout<'_>,
         cursor_position: Point,
-        element: &NodeElement<'_, M, Self>,
     ) -> Self::Output;
 }
 
 impl<B> WidgetRenderer for iced_graphics::Renderer<B>
 where B: Backend + iced_graphics::backend::Text
 {
-    fn draw<M: Clone>(
+    fn draw_panes<M: Clone>(
         &mut self,
+        panes: &FloatingPanes<'_, M, Self, FloatingPanesBehaviour<M>>,
         defaults: &Self::Defaults,
         layout: Layout<'_>,
         cursor_position: Point,
-        element: &NodeElement<'_, M, Self>,
     ) -> Self::Output
-    {
-        const CONNECTION_POINT_RADIUS: f32 = 3.0;
-        const CONNECTION_POINT_CENTER: f32 = CONNECTION_POINT_RADIUS + 1.0; // extra pixel for anti aliasing
-        const FRAME_SIZE: f32 = CONNECTION_POINT_CENTER * 2.0;
-
-        let mut primitives = Vec::new();
-        let mut frame = Frame::new([FRAME_SIZE, FRAME_SIZE].into());
-        let path = Path::new(|builder| {
-            builder
-                .circle([CONNECTION_POINT_CENTER, CONNECTION_POINT_CENTER].into(), CONNECTION_POINT_RADIUS);
-        });
-
-        frame.fill(&path, Fill { color: Color::WHITE, rule: FillRule::NonZero });
-
-        let primitive_connection_point = frame.into_geometry().into_primitive();
-        let (primitive, interaction) = element.element_tree.draw(self, defaults, layout, cursor_position);
-
-        primitives.push(primitive);
-
-        // Element { Margin { Row [ Column [ .. ], Column [ .. ] ] } }
-        let row_layout = layout.children().nth(1).unwrap(); // Margin Column
-        let row_layout = row_layout.children().nth(1).unwrap(); // Margin Row
-        let inputs_layout = row_layout.children().nth(0).unwrap();
-        let outputs_layout = row_layout.children().nth(1).unwrap();
-        let channel_layouts = inputs_layout
-            .children()
-            .map(|layout| (layout, ChannelDirection::In))
-            .chain(outputs_layout.children().map(|layout| (layout, ChannelDirection::Out)));
-
-        for (channel_layout, channel_direction) in channel_layouts {
-            let translation = get_connection_point(channel_layout, channel_direction)
-                - Vec2::new(CONNECTION_POINT_CENTER, CONNECTION_POINT_CENTER);
-
-            primitives.push(Primitive::Translate {
-                translation: Vector::new(translation.x, translation.y),
-                content: Box::new(primitive_connection_point.clone()),
-            });
-        }
-
-        (Primitive::Group { primitives }, interaction)
-    }
-}
-
-fn draw_point(position: Vector, color: Color) -> Primitive {
-    const CONNECTION_POINT_RADIUS: f32 = 5.0;
-    const CONNECTION_POINT_CENTER: f32 = CONNECTION_POINT_RADIUS + 1.0; // extra pixel for anti aliasing
-    const FRAME_SIZE: f32 = CONNECTION_POINT_CENTER * 2.0;
-
-    let mut frame = Frame::new([FRAME_SIZE, FRAME_SIZE].into());
-    let path = Path::new(|builder| {
-        builder.circle([CONNECTION_POINT_CENTER, CONNECTION_POINT_CENTER].into(), CONNECTION_POINT_RADIUS);
-    });
-
-    frame.fill(&path, Fill { color, rule: FillRule::NonZero });
-
-    Primitive::Translate {
-        translation: position - Vector::new(CONNECTION_POINT_CENTER, CONNECTION_POINT_CENTER),
-        content: Box::new(frame.into_geometry().into_primitive()),
-    }
-}
-
-fn draw_bounds(layout: Layout<'_>, color: Color) -> Primitive {
-    // let layout_position = Vector::new(layout.position().x, layout.position().y);
-    // let layout_size = Vector::new(layout.bounds().size().width, layout.bounds().size().height);
-
-    // Primitive::Group {
-    //     primitives: vec![
-    //         draw_point(
-    //             layout_position,
-    //             color,
-    //         ),
-    //         draw_point(
-    //             layout_position + layout_size,
-    //             color,
-    //         ),
-    //     ],
-    // }
-    Primitive::Quad {
-        bounds: layout.bounds(),
-        background: Background::Color(Color::TRANSPARENT),
-        border_radius: 0,
-        border_width: 1,
-        border_color: color,
-    }
-}
-
-impl<'a, B: 'a + Backend + iced_graphics::backend::Text>
-    FloatingPaneContent<'a, Message, iced_graphics::Renderer<B>>
-    for NodeElement<'a, Message, iced_graphics::Renderer<B>>
-{
-    type FloatingPaneIndex = NodeIndex<u32>;
-    type FloatingPaneContentState = FloatingPaneContentState;
-    type FloatingPanesContentState = FloatingPanesContentState;
-
-    fn create_element(self) -> Element<'a, Message, iced_graphics::Renderer<B>> {
-        self.into()
-    }
-
-    fn draw_content(
-        panes: &FloatingPanes<'a, Message, iced_graphics::Renderer<B>, Self>,
-        renderer: &mut iced_graphics::Renderer<B>,
-        defaults: &<iced_graphics::Renderer<B> as iced_native::Renderer>::Defaults,
-        layout: Layout<'_>,
-        cursor_position: Point,
-    ) -> <iced_graphics::Renderer<B> as iced_native::Renderer>::Output
     {
         let mut mouse_interaction = mouse::Interaction::default();
         let mut primitives = Vec::new();
@@ -388,7 +317,7 @@ impl<'a, B: 'a + Backend + iced_graphics::backend::Text>
         primitives.extend(panes.children.iter().zip(layout.children()).map(
             |((child_index, child), layout)| {
                 let (primitive, new_mouse_interaction) =
-                    child.element_tree.draw(renderer, defaults, layout, cursor_position);
+                    child.element_tree.draw(self, defaults, layout, cursor_position);
 
                 if new_mouse_interaction > mouse_interaction {
                     mouse_interaction = new_mouse_interaction;
@@ -427,21 +356,14 @@ impl<'a, B: 'a + Backend + iced_graphics::backend::Text>
                 .find(|(child_layout, (child_index, child))| **child_index == connection.to().node_index)
                 .unwrap();
 
-            let layout_outputs = layout_from;
-            let layout_outputs = layout_outputs.children().nth(0).unwrap();
-            let layout_outputs = layout_outputs.children().nth(1).unwrap();
-            let layout_outputs = layout_outputs.children().nth(0).unwrap();
-            let layout_outputs = layout_outputs.children().nth(1).unwrap();
-            let layout_outputs = layout_outputs.children().nth(1).unwrap();
-            let layout_outputs = layout_outputs.children().nth(1).unwrap();
-
-            let layout_inputs = layout_to;
-            let layout_inputs = layout_inputs.children().nth(0).unwrap();
-            let layout_inputs = layout_inputs.children().nth(1).unwrap();
-            let layout_inputs = layout_inputs.children().nth(0).unwrap();
-            let layout_inputs = layout_inputs.children().nth(1).unwrap();
-            let layout_inputs = layout_inputs.children().nth(1).unwrap();
-            let layout_inputs = layout_inputs.children().nth(0).unwrap();
+            let layout_outputs = NodeElement::<M, Self>::get_channels_layout_from_child_layout(
+                layout_from,
+                ChannelDirection::Out,
+            );
+            let layout_inputs = NodeElement::<M, Self>::get_channels_layout_from_child_layout(
+                layout_to,
+                ChannelDirection::In,
+            );
 
             let layout_output = layout_outputs.children().nth(connection.from().channel_index).unwrap();
             let layout_input = layout_inputs.children().nth(connection.to().channel_index).unwrap();
@@ -500,22 +422,10 @@ impl<'a, B: 'a + Backend + iced_graphics::backend::Text>
                 .0;
 
             let pane_layout = layout.children().nth(pane_index).unwrap();
-
-            let layout_channels = pane_layout;
-            let layout_channels = layout_channels.children().nth(0).unwrap();
-            let layout_channels = layout_channels.children().nth(1).unwrap();
-            let layout_channels = layout_channels.children().nth(0).unwrap();
-            let layout_channels = layout_channels.children().nth(1).unwrap();
-            let layout_channels = layout_channels.children().nth(1).unwrap();
-            let layout_channels = layout_channels
-                .children()
-                .nth({
-                    match selected_channel.channel_direction {
-                        ChannelDirection::In => 0,
-                        ChannelDirection::Out => 1,
-                    }
-                })
-                .unwrap();
+            let layout_channels = NodeElement::<M, Self>::get_channels_layout_from_child_layout(
+                pane_layout,
+                selected_channel.channel_direction,
+            );
             let layout_channel = layout_channels.children().nth(selected_channel.channel_index).unwrap();
 
             let connection_position =
@@ -531,6 +441,7 @@ impl<'a, B: 'a + Backend + iced_graphics::backend::Text>
                 &mut frame,
                 from,
                 to,
+                // TODO: Store in `style`
                 Stroke {
                     color: Color::from_rgba(1.0, 0.6, 0.0, 1.0),
                     width: 3.0,
@@ -540,26 +451,133 @@ impl<'a, B: 'a + Backend + iced_graphics::backend::Text>
             );
         }
 
+        // Draw connection points
+        {
+            const CONNECTION_POINT_RADIUS: f32 = 3.0;
+            const CONNECTION_POINT_CENTER: f32 = CONNECTION_POINT_RADIUS + 1.0; // extra pixel for anti aliasing
+            const FRAME_SIZE: f32 = CONNECTION_POINT_CENTER * 2.0;
+
+            let mut frame = Frame::new([FRAME_SIZE, FRAME_SIZE].into());
+            let path = Path::new(|builder| {
+                builder.circle(
+                    [CONNECTION_POINT_CENTER, CONNECTION_POINT_CENTER].into(),
+                    CONNECTION_POINT_RADIUS,
+                );
+            });
+
+            frame.fill(&path, Fill { color: Color::WHITE, rule: FillRule::NonZero });
+
+            let primitive_connection_point = frame.into_geometry().into_primitive();
+
+            for child_layout in layout.children() {
+                let inputs_layout = NodeElement::<M, Self>::get_channels_layout_from_child_layout(
+                    child_layout,
+                    ChannelDirection::In,
+                );
+                let outputs_layout = NodeElement::<M, Self>::get_channels_layout_from_child_layout(
+                    child_layout,
+                    ChannelDirection::Out,
+                );
+                let channel_layouts = inputs_layout
+                    .children()
+                    .map(|layout| (layout, ChannelDirection::In))
+                    .chain(outputs_layout.children().map(|layout| (layout, ChannelDirection::Out)));
+
+                for (channel_layout, channel_direction) in channel_layouts {
+                    let translation = get_connection_point(channel_layout, channel_direction)
+                        - Vec2::new(CONNECTION_POINT_CENTER, CONNECTION_POINT_CENTER);
+
+                    primitives.push(Primitive::Translate {
+                        translation: Vector::new(translation.x, translation.y),
+                        content: Box::new(primitive_connection_point.clone()),
+                    });
+                }
+            }
+        }
+
         primitives.push(frame.into_geometry().into_primitive());
 
         (Primitive::Group { primitives }, mouse_interaction)
     }
+}
 
-    fn hash_content(
-        panes: &FloatingPanes<'a, Message, iced_graphics::Renderer<B>, Self>,
-        state: &mut Hasher,
-    )
+fn draw_point(position: Vector, color: Color) -> Primitive {
+    const CONNECTION_POINT_RADIUS: f32 = 5.0;
+    const CONNECTION_POINT_CENTER: f32 = CONNECTION_POINT_RADIUS + 1.0; // extra pixel for anti aliasing
+    const FRAME_SIZE: f32 = CONNECTION_POINT_CENTER * 2.0;
+
+    let mut frame = Frame::new([FRAME_SIZE, FRAME_SIZE].into());
+    let path = Path::new(|builder| {
+        builder.circle([CONNECTION_POINT_CENTER, CONNECTION_POINT_CENTER].into(), CONNECTION_POINT_RADIUS);
+    });
+
+    frame.fill(&path, Fill { color, rule: FillRule::NonZero });
+
+    Primitive::Translate {
+        translation: position - Vector::new(CONNECTION_POINT_CENTER, CONNECTION_POINT_CENTER),
+        content: Box::new(frame.into_geometry().into_primitive()),
+    }
+}
+
+fn draw_bounds(layout: Layout<'_>, color: Color) -> Primitive {
+    // let layout_position = Vector::new(layout.position().x, layout.position().y);
+    // let layout_size = Vector::new(layout.bounds().size().width, layout.bounds().size().height);
+
+    // Primitive::Group {
+    //     primitives: vec![
+    //         draw_point(
+    //             layout_position,
+    //             color,
+    //         ),
+    //         draw_point(
+    //             layout_position + layout_size,
+    //             color,
+    //         ),
+    //     ],
+    // }
+    Primitive::Quad {
+        bounds: layout.bounds(),
+        background: Background::Color(Color::TRANSPARENT),
+        border_radius: 0,
+        border_width: 1,
+        border_color: color,
+    }
+}
+
+pub struct FloatingPanesBehaviour<M> {
+    pub on_channel_disconnect: fn(ChannelIdentifier) -> M,
+    pub on_connection_create: fn(Connection) -> M,
+}
+
+impl<'a, M: Clone + 'a, R: 'a + WidgetRenderer> floating_panes::FloatingPanesBehaviour<'a, M, R>
+    for FloatingPanesBehaviour<M>
+{
+    type FloatingPaneIndex = NodeIndex<u32>;
+    type FloatingPaneBehaviourState = FloatingPaneBehaviourState;
+    type FloatingPanesBehaviourState = FloatingPanesBehaviourState;
+
+    fn draw_panes(
+        panes: &FloatingPanes<'a, M, R, Self>,
+        renderer: &mut R,
+        defaults: &<R as iced_native::Renderer>::Defaults,
+        layout: Layout<'_>,
+        cursor_position: Point,
+    ) -> <R as iced_native::Renderer>::Output
     {
+        <R as WidgetRenderer>::draw_panes(renderer, panes, defaults, layout, cursor_position)
+    }
+
+    fn hash_panes(panes: &FloatingPanes<'a, M, R, Self>, state: &mut Hasher) {
         // TODO
     }
 
     fn on_event(
-        panes: &mut FloatingPanes<'a, Message, iced_graphics::Renderer<B>, Self>,
+        panes: &mut FloatingPanes<'a, M, R, Self>,
         event: Event,
         layout: Layout<'_>,
         cursor_position: Point,
-        messages: &mut Vec<Message>,
-        renderer: &iced_graphics::Renderer<B>,
+        messages: &mut Vec<M>,
+        renderer: &R,
         clipboard: Option<&dyn Clipboard>,
     ) -> bool
     {
@@ -606,7 +624,7 @@ impl<'a, B: 'a + Backend + iced_graphics::backend::Text>
                             if let Some(selected_channel) = panes.content_state.selected_channel.clone() {
                                 if panes.content_state.can_connect(selected_channel, channel) {
                                     if disconnect {
-                                        messages.push(Message::DisconnectChannel { channel });
+                                        messages.push((panes.behaviour.on_channel_disconnect)(channel));
                                     }
 
                                     let channels = match selected_channel.channel_direction {
@@ -614,9 +632,9 @@ impl<'a, B: 'a + Backend + iced_graphics::backend::Text>
                                         ChannelDirection::Out => [selected_channel, channel],
                                     };
 
-                                    messages.push(Message::InsertConnection {
-                                        connection: Connection::try_from_identifiers(channels).unwrap(),
-                                    });
+                                    messages.push((panes.behaviour.on_connection_create)(
+                                        Connection::try_from_identifiers(channels).unwrap(),
+                                    ));
                                     panes.content_state.selected_channel = None;
                                 }
                             } else {
@@ -631,7 +649,7 @@ impl<'a, B: 'a + Backend + iced_graphics::backend::Text>
                                             connection.channel(channel.channel_direction.inverse());
                                         panes.content_state.selected_channel = Some(other_channel);
 
-                                        messages.push(Message::DisconnectChannel { channel });
+                                        messages.push((panes.behaviour.on_channel_disconnect)(channel));
                                     }
                                 } else {
                                     panes.content_state.selected_channel = Some(channel);
@@ -653,17 +671,17 @@ impl<'a, B: 'a + Backend + iced_graphics::backend::Text>
 }
 
 #[derive(Default)]
-pub struct FloatingPaneContentState {
+pub struct FloatingPaneBehaviourState {
     pub node_index: Option<NodeIndex<u32>>,
 }
 
 #[derive(Default)]
-pub struct FloatingPanesContentState {
+pub struct FloatingPanesBehaviourState {
     pub connections: Vec<Connection>,
     pub selected_channel: Option<ChannelIdentifier>,
 }
 
-impl FloatingPanesContentState {
+impl FloatingPanesBehaviourState {
     fn can_connect(&self, from: ChannelIdentifier, to: ChannelIdentifier) -> bool {
         // TODO: Add borrow checking and type checking
         from.node_index != to.node_index && from.channel_direction != to.channel_direction

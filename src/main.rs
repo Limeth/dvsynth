@@ -111,7 +111,7 @@ struct NodeData {
     title: String,
     element_state: NodeElementState,
     floating_pane_state: FloatingPaneState,
-    floating_pane_content_state: FloatingPaneContentState,
+    floating_pane_content_state: FloatingPaneBehaviourState,
     input_channels: Vec<Channel>,
     output_channels: Vec<Channel>,
 }
@@ -121,7 +121,7 @@ impl NodeData {
         &mut self,
         index: NodeIndex<u32>,
         theme: &dyn Theme,
-    ) -> FloatingPane<'_, Message, Renderer, NodeElement<'_, Message, Renderer>>
+    ) -> FloatingPane<'_, Message, Renderer, node::FloatingPanesBehaviour<Message>>
     {
         let mut builder = NodeElement::builder(index, &mut self.element_state);
 
@@ -177,7 +177,7 @@ type Graph = StableGraph<
 struct ApplicationState {
     graph: Graph,
     floating_panes_state: FloatingPanesState,
-    floating_panes_content_state: FloatingPanesContentState,
+    floating_panes_content_state: FloatingPanesBehaviourState,
 }
 
 #[derive(Debug, Clone)]
@@ -225,6 +225,19 @@ impl Application for ApplicationState {
                         output_channels: vec![Channel::new("Out A")],
                     });
 
+                    let node_c = graph.add_node(NodeData {
+                        title: "Node C".to_string(),
+                        element_state: Default::default(),
+                        floating_pane_state: FloatingPaneState::with_position([200.0, 10.0]),
+                        floating_pane_content_state: Default::default(),
+                        input_channels: vec![Channel::new("In A"), Channel::new("In B")],
+                        output_channels: vec![
+                            Channel::new("Out A"),
+                            Channel::new("Out B"),
+                            Channel::new("Out C"),
+                        ],
+                    });
+
                     let node_indices: Vec<_> = graph.node_indices().collect();
                     for (node_index, node) in node_indices.iter().zip(graph.node_weights_mut()) {
                         node.floating_pane_content_state.node_index = Some(*node_index);
@@ -237,7 +250,7 @@ impl Application for ApplicationState {
                     graph
                 },
                 floating_panes_state: Default::default(),
-                floating_panes_content_state: FloatingPanesContentState::default(),
+                floating_panes_content_state: FloatingPanesBehaviourState::default(),
             },
             Command::none(),
         )
@@ -306,9 +319,15 @@ impl Application for ApplicationState {
             Connection([(index_from, edge_data.channel_index_from), (index_to, edge_data.channel_index_to)])
         }));
 
-        let mut panes =
-            FloatingPanes::new(&mut self.floating_panes_state, &mut self.floating_panes_content_state)
-                .style(theme.floating_panes());
+        let mut panes = FloatingPanes::new(
+            &mut self.floating_panes_state,
+            &mut self.floating_panes_content_state,
+            node::FloatingPanesBehaviour {
+                on_channel_disconnect: |channel| Message::DisconnectChannel { channel },
+                on_connection_create: |connection| Message::InsertConnection { connection },
+            },
+        )
+        .style(theme.floating_panes());
 
         for (node_index, node_data) in node_indices.iter().zip(self.graph.node_weights_mut()) {
             panes = panes.insert(*node_index, node_data.view(*node_index, theme.as_ref()));
