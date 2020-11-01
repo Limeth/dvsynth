@@ -2,10 +2,8 @@
 #![feature(bindings_after_at)]
 //!
 //! Task list:
-//! * Make channel connections more responsive
-//!     * Make clicking on the labels function as clicking on the connection points
-//!     * Highlight channel when mouse over
-//!     * Highlight connection when mouse over
+//! * Use acceleration structures to check for incidence/highlights with connection points and
+//!   connections
 //! * Define channel types
 //! * Add `NodeElement` styles
 //!

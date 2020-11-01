@@ -12,6 +12,7 @@ use iced_native::{overlay, Element};
 use iced_native::{Color, Vector};
 use ordered_float::OrderedFloat;
 use petgraph::graph::NodeIndex;
+use std::collections::HashMap;
 use std::hash::Hash;
 use vek::Vec2;
 
@@ -170,40 +171,7 @@ impl<'a, M: 'a + Clone, R: 'a + WidgetRenderer> NodeElement<'a, M, R> {
         NodeElementBuilder::new(index, state)
     }
 
-    pub fn get_channels_layout_from_content_layout(
-        content_layout: Layout,
-        channel_direction: ChannelDirection,
-    ) -> Layout
-    {
-        content_layout
-            .children()
-            .nth(1)
-            .unwrap()
-            .children()
-            .nth(1)
-            .unwrap()
-            .children()
-            .nth(match channel_direction {
-                ChannelDirection::In => 0,
-                ChannelDirection::Out => 1,
-            })
-            .unwrap()
-    }
-
-    pub fn get_channels_layout_from_child_layout(
-        child_layout: Layout,
-        channel_direction: ChannelDirection,
-    ) -> Layout
-    {
-        Self::get_channels_layout_from_content_layout(
-            FloatingPanes::<M, R, FloatingPanesBehaviour<M>>::get_content_layout_from_child_layout(
-                child_layout,
-            ),
-            channel_direction,
-        )
-    }
-
-    fn get_connection_point(layout: Layout, direction: ChannelDirection) -> Vec2<f32> {
+    fn get_connection_point(layout: ChannelLayout, direction: ChannelDirection) -> Vec2<f32> {
         let field_position: Vec2<f32> = Into::<[f32; 2]>::into(layout.position()).into();
         let field_size: Vec2<f32> = Into::<[f32; 2]>::into(layout.bounds().size()).into();
 
@@ -221,7 +189,7 @@ impl<'a, M: 'a + Clone, R: 'a + WidgetRenderer> NodeElement<'a, M, R> {
     }
 
     fn is_channel_selected(
-        channel_layout: Layout,
+        channel_layout: ChannelLayout,
         channel_direction: ChannelDirection,
         cursor_position: Vec2<f32>,
     ) -> bool
@@ -237,6 +205,14 @@ impl<'a, M: 'a + Clone, R: 'a + WidgetRenderer> NodeElement<'a, M, R> {
         let distance_squared = cursor_position.distance_squared(connection_point);
 
         distance_squared <= GRAB_RADIUS * GRAB_RADIUS
+    }
+
+    pub fn get_layout_index_from_channel(
+        panes: &FloatingPanes<'a, M, R, FloatingPanesBehaviour<M>>,
+        channel: ChannelIdentifier,
+    ) -> Option<usize>
+    {
+        panes.get_layout_index_from_pane_index(&channel.node_index)
     }
 }
 
@@ -316,7 +292,7 @@ impl<'a, M: Clone + 'a, R: 'a + WidgetRenderer> floating_panes::FloatingPanesBeh
         panes: &FloatingPanes<'a, M, R, Self>,
         renderer: &mut R,
         defaults: &<R as iced_native::Renderer>::Defaults,
-        layout: Layout<'_>,
+        layout: FloatingPanesLayout<'_>,
         cursor_position: Point,
     ) -> <R as iced_native::Renderer>::Output
     {
@@ -328,7 +304,7 @@ impl<'a, M: Clone + 'a, R: 'a + WidgetRenderer> floating_panes::FloatingPanesBeh
     fn on_event(
         panes: &mut FloatingPanes<'a, M, R, Self>,
         event: Event,
-        layout: Layout<'_>,
+        layout: FloatingPanesLayout<'_>,
         cursor_position: Point,
         messages: &mut Vec<M>,
         renderer: &R,
@@ -342,22 +318,16 @@ impl<'a, M: Clone + 'a, R: 'a + WidgetRenderer> floating_panes::FloatingPanesBeh
                 panes.content_state.highlight = None;
 
                 // Highlight channel, if possible
-                for (layout, node_index) in layout.children().zip(panes.children.keys().copied()) {
-                    let inputs_layout = NodeElement::<M, R>::get_channels_layout_from_child_layout(
-                        layout,
-                        ChannelDirection::In,
-                    );
-                    let outputs_layout = NodeElement::<M, R>::get_channels_layout_from_child_layout(
-                        layout,
-                        ChannelDirection::Out,
-                    );
+                for (pane_layout, node_index) in layout.panes().zip(panes.children.keys().copied()) {
+                    let inputs_layout = pane_layout.content().channels_with_direction(ChannelDirection::In);
+                    let outputs_layout = pane_layout.content().channels_with_direction(ChannelDirection::Out);
                     let channels = inputs_layout
-                        .children()
+                        .channels()
                         .enumerate()
                         .map(|(index, layout)| (index, layout, ChannelDirection::In))
                         .chain(
                             outputs_layout
-                                .children()
+                                .channels()
                                 .enumerate()
                                 .map(|(index, layout)| (index, layout, ChannelDirection::Out)),
                         );
@@ -405,34 +375,32 @@ impl<'a, M: Clone + 'a, R: 'a + WidgetRenderer> floating_panes::FloatingPanesBeh
                         .connections
                         .iter()
                         .map(|connection| {
-                            // FIXME: Replace with O(1)
-                            let (layout_from, (index_from, pane_from)) = layout
-                                .children()
-                                .zip(&panes.children)
-                                .find(|(child_layout, (child_index, child))| {
-                                    **child_index == connection.from().node_index
-                                })
+                            let layout_from = layout
+                                .panes()
+                                .nth(
+                                    NodeElement::<M, R>::get_layout_index_from_channel(
+                                        panes,
+                                        connection.from(),
+                                    )
+                                    .unwrap(),
+                                )
                                 .unwrap();
-                            let (layout_to, (index_to, pane_to)) = layout
-                                .children()
-                                .zip(&panes.children)
-                                .find(|(child_layout, (child_index, child))| {
-                                    **child_index == connection.to().node_index
-                                })
+                            let layout_to = layout
+                                .panes()
+                                .nth(
+                                    NodeElement::<M, R>::get_layout_index_from_channel(
+                                        panes,
+                                        connection.to(),
+                                    )
+                                    .unwrap(),
+                                )
                                 .unwrap();
-
-                            let layout_outputs = NodeElement::<M, R>::get_channels_layout_from_child_layout(
-                                layout_from,
-                                ChannelDirection::Out,
-                            );
-                            let layout_inputs = NodeElement::<M, R>::get_channels_layout_from_child_layout(
-                                layout_to,
-                                ChannelDirection::In,
-                            );
-                            let layout_output =
-                                layout_outputs.children().nth(connection.from().channel_index).unwrap();
-                            let layout_input =
-                                layout_inputs.children().nth(connection.to().channel_index).unwrap();
+                            let layout_outputs =
+                                layout_from.content().channels_with_direction(ChannelDirection::Out);
+                            let layout_inputs =
+                                layout_to.content().channels_with_direction(ChannelDirection::In);
+                            let layout_output = layout_outputs.channel(connection.from().channel_index);
+                            let layout_input = layout_inputs.channel(connection.to().channel_index);
                             let from = NodeElement::<M, R>::get_connection_point(
                                 layout_output,
                                 ChannelDirection::Out,
@@ -586,7 +554,7 @@ pub trait WidgetRenderer:
         &mut self,
         panes: &FloatingPanes<'_, M, Self, FloatingPanesBehaviour<M>>,
         defaults: &Self::Defaults,
-        layout: Layout<'_>,
+        layout: FloatingPanesLayout<'_>,
         cursor_position: Point,
     ) -> Self::Output;
 }
@@ -598,25 +566,23 @@ where B: Backend + iced_graphics::backend::Text
         &mut self,
         panes: &FloatingPanes<'_, M, Self, FloatingPanesBehaviour<M>>,
         defaults: &Self::Defaults,
-        layout: Layout<'_>,
+        layout: FloatingPanesLayout<'_>,
         cursor_position: Point,
     ) -> Self::Output
     {
         let mut mouse_interaction = mouse::Interaction::default();
         let mut primitives = Vec::new();
 
-        primitives.extend(panes.children.iter().zip(layout.children()).map(
-            |((child_index, child), layout)| {
-                let (primitive, new_mouse_interaction) =
-                    child.element_tree.draw(self, defaults, layout, cursor_position);
+        primitives.extend(panes.children.iter().zip(layout.panes()).map(|((child_index, child), layout)| {
+            let (primitive, new_mouse_interaction) =
+                child.element_tree.draw(self, defaults, layout.into(), cursor_position);
 
-                if new_mouse_interaction > mouse_interaction {
-                    mouse_interaction = new_mouse_interaction;
-                }
+            if new_mouse_interaction > mouse_interaction {
+                mouse_interaction = new_mouse_interaction;
+            }
 
-                primitive
-            },
-        ));
+            primitive
+        }));
 
         fn draw_connection(frame: &mut Frame, from: Vec2<f32>, to: Vec2<f32>, stroke: Stroke) {
             let segments = util::get_connection_curve(from, to);
@@ -633,31 +599,17 @@ where B: Backend + iced_graphics::backend::Text
 
         // Draw existing connections
         for connection in &panes.content_state.connections {
-            // let pane_from = &panes.children[&connection.from.node_index];
-            // let pane_to = &panes.children[&connection.to.node_index];
-            // FIXME: Replace with O(1)
-            let (layout_from, (index_from, pane_from)) = layout
-                .children()
-                .zip(&panes.children)
-                .find(|(child_layout, (child_index, child))| **child_index == connection.from().node_index)
-                .unwrap();
-            let (layout_to, (index_to, pane_to)) = layout
-                .children()
-                .zip(&panes.children)
-                .find(|(child_layout, (child_index, child))| **child_index == connection.to().node_index)
-                .unwrap();
-
-            let layout_outputs = NodeElement::<M, Self>::get_channels_layout_from_child_layout(
-                layout_from,
-                ChannelDirection::Out,
+            let layout_from = layout.pane_with_index(
+                NodeElement::<M, Self>::get_layout_index_from_channel(panes, connection.from()).unwrap(),
             );
-            let layout_inputs = NodeElement::<M, Self>::get_channels_layout_from_child_layout(
-                layout_to,
-                ChannelDirection::In,
+            let layout_to = layout.pane_with_index(
+                NodeElement::<M, Self>::get_layout_index_from_channel(panes, connection.to()).unwrap(),
             );
 
-            let layout_output = layout_outputs.children().nth(connection.from().channel_index).unwrap();
-            let layout_input = layout_inputs.children().nth(connection.to().channel_index).unwrap();
+            let layout_outputs = layout_from.content().channels_with_direction(ChannelDirection::Out);
+            let layout_inputs = layout_to.content().channels_with_direction(ChannelDirection::In);
+            let layout_output = layout_outputs.channel(connection.from().channel_index);
+            let layout_input = layout_inputs.channel(connection.to().channel_index);
 
             // primitives.push(
             //     draw_bounds(layout_output, Color::from_rgb(1.0, 0.0, 0.0))
@@ -721,20 +673,13 @@ where B: Backend + iced_graphics::backend::Text
 
         // Draw pending connection
         if let Some(selected_channel) = panes.content_state.selected_channel.as_ref() {
-            let pane_index = panes
-                .children
-                .keys()
-                .enumerate()
-                .find(|(_, key)| **key == selected_channel.node_index)
-                .unwrap()
-                .0;
-
-            let pane_layout = layout.children().nth(pane_index).unwrap();
-            let layout_channels = NodeElement::<M, Self>::get_channels_layout_from_child_layout(
-                pane_layout,
-                selected_channel.channel_direction,
-            );
-            let layout_channel = layout_channels.children().nth(selected_channel.channel_index).unwrap();
+            let pane_layout = layout
+                .panes()
+                .nth(NodeElement::<M, Self>::get_layout_index_from_channel(panes, *selected_channel).unwrap())
+                .unwrap();
+            let layout_channels =
+                pane_layout.content().channels_with_direction(selected_channel.channel_direction);
+            let layout_channel = layout_channels.channel(selected_channel.channel_index);
 
             let connected_position = NodeElement::<M, Self>::get_connection_point(
                 layout_channel,
@@ -744,17 +689,15 @@ where B: Backend + iced_graphics::backend::Text
                 panes.content_state.highlight.as_ref()
             {
                 let child_layout = layout
-                    .children()
-                    .zip(panes.children.keys())
-                    .find(|(_, key)| **key == highlighted_channel.node_index)
-                    .map(|(layout, _)| layout)
+                    .panes()
+                    .nth(
+                        NodeElement::<M, Self>::get_layout_index_from_channel(panes, *highlighted_channel)
+                            .unwrap(),
+                    )
                     .unwrap();
-                let layout_channels = NodeElement::<M, Self>::get_channels_layout_from_child_layout(
-                    child_layout,
-                    highlighted_channel.channel_direction,
-                );
-                let layout_channel =
-                    layout_channels.children().nth(highlighted_channel.channel_index).unwrap();
+                let layout_channels =
+                    child_layout.content().channels_with_direction(highlighted_channel.channel_direction);
+                let layout_channel = layout_channels.channel(highlighted_channel.channel_index);
                 NodeElement::<M, Self>::get_connection_point(
                     layout_channel,
                     highlighted_channel.channel_direction,
@@ -787,22 +730,16 @@ where B: Backend + iced_graphics::backend::Text
             const CONNECTION_POINT_RADIUS: f32 = 3.0;
             const CONNECTION_POINT_RADIUS_HIGHLIGHTED: f32 = 4.5;
 
-            for (child_layout, node_index) in layout.children().zip(panes.children.keys().copied()) {
-                let inputs_layout = NodeElement::<M, Self>::get_channels_layout_from_child_layout(
-                    child_layout,
-                    ChannelDirection::In,
-                );
-                let outputs_layout = NodeElement::<M, Self>::get_channels_layout_from_child_layout(
-                    child_layout,
-                    ChannelDirection::Out,
-                );
+            for (pane_layout, node_index) in layout.panes().zip(panes.children.keys().copied()) {
+                let inputs_layout = pane_layout.content().channels_with_direction(ChannelDirection::In);
+                let outputs_layout = pane_layout.content().channels_with_direction(ChannelDirection::Out);
                 let channel_layouts = inputs_layout
-                    .children()
+                    .channels()
                     .enumerate()
                     .map(|(index, layout)| (index, layout, ChannelDirection::In))
                     .chain(
                         outputs_layout
-                            .children()
+                            .channels()
                             .enumerate()
                             .map(|(index, layout)| (index, layout, ChannelDirection::Out)),
                     );
@@ -833,4 +770,48 @@ where B: Backend + iced_graphics::backend::Text
 
         (Primitive::Group { primitives }, mouse_interaction)
     }
+}
+
+typed_layout! {
+    type_name: Channels,
+    traverse: [
+        {
+            parent_type_name: FloatingPaneContent,
+            fn_name: channels_with_direction,
+            fn_args: [channel_direction: ChannelDirection],
+            fn: |parent: Layout<'a>, channel_direction: ChannelDirection| {
+                parent
+                    .children()
+                    .nth(1)
+                    .unwrap()
+                    .children()
+                    .nth(1)
+                    .unwrap()
+                    .children()
+                    .nth(match channel_direction {
+                        ChannelDirection::In => 0,
+                        ChannelDirection::Out => 1,
+                    })
+                    .unwrap()
+            },
+        },
+    ],
+}
+
+typed_layout! {
+    type_name: Channel,
+    traverse: [
+        {
+            parent_type_name: Channels,
+            fn_name: channel,
+            fn_args: [channel_index: usize],
+            fn: |parent: Layout<'a>, channel_index: usize| {
+                parent.children().nth(channel_index).unwrap()
+            },
+        },
+    ],
+    children_of: {
+        parent_type_name: Channels,
+        fn_name: channels,
+    },
 }

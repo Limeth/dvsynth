@@ -16,12 +16,14 @@ iced = { git = "https://github.com/Limeth/iced.git", features = ["canvas"] }
 iced_graphics = { git = "https://github.com/Limeth/iced.git", features = ["canvas"] }
 iced_native = { git = "https://github.com/Limeth/iced.git" }
 iced_wgpu = { git = "https://github.com/Limeth/iced.git", features = ["canvas"] }
+indexmap = "1.6"
 lyon_geom = "0.16"
 ordered-float = "2"
+paste = "1.0"
 petgraph = "0.5"
+roots = "*"
 smallvec = "1.4"
 vek = "0.12"
-roots = "*"
 
 [package.metadata.docs.rs]
 rustdoc-args = [ "--html-in-header", "doc/katex.html" ]

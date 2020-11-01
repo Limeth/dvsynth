@@ -515,8 +515,10 @@ dependencies = [
  "iced_graphics",
  "iced_native",
  "iced_wgpu",
+ "indexmap",
  "lyon_geom 0.16.2",
  "ordered-float 2.0.0",
+ "paste",
  "petgraph",
  "roots",
  "smallvec",
@@ -1701,6 +1703,12 @@ dependencies = [
  "smallvec",
  "winapi 0.3.9",
 ]
+
+[[package]]
+name = "paste"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ba7ae1a2180ed02ddfdb5ab70c70d596a26dd642e097bb6fe78b1bde8588ed97"
 
 [[package]]
 name = "pathfinder_geometry"
