@@ -1,4 +1,5 @@
 use super::*;
+use crate::node::ChannelSlice;
 use crate::util::{PathBuilderExt, RectangleExt, Segments};
 use crate::{style, util, ChannelDirection, ChannelIdentifier, Connection, Message, NodeMessage};
 use iced_graphics::canvas::{Fill, FillRule, Frame, LineCap, LineJoin, Path, Stroke};
@@ -18,11 +19,6 @@ use std::collections::HashMap;
 use std::hash::Hash;
 use vek::Vec2;
 
-pub struct ChannelSlice<'a> {
-    pub title: &'a str,
-    pub description: Option<&'a str>,
-}
-
 impl<'a> ChannelSlice<'a> {
     pub fn render<M: 'a + Clone, R: 'a + WidgetRenderer>(&self) -> Element<'a, M, R> {
         Text::new(self.title.to_string())
@@ -38,7 +34,7 @@ pub struct NodeElementState {
 }
 
 pub struct NodeElementBuilder<'a, M: 'a + Clone, R: 'a + WidgetRenderer> {
-    index: NodeIndex<u32>,
+    index: NodeIndex,
     state: &'a mut NodeElementState,
     width: Length,
     height: Length,
@@ -51,7 +47,7 @@ pub struct NodeElementBuilder<'a, M: 'a + Clone, R: 'a + WidgetRenderer> {
 /// A widget specifically made to be used as the child of the [`FloatingPanes`] widget alongside the
 /// custom behaviour [`FloatingPanesBehaviour`] to function as a node graph editor.
 pub struct NodeElement<'a, M: 'a + Clone, R: 'a + WidgetRenderer> {
-    index: NodeIndex<u32>,
+    index: NodeIndex,
     // state: &'a mut NodeElementState,
     width: Length,
     height: Length,
@@ -60,7 +56,7 @@ pub struct NodeElement<'a, M: 'a + Clone, R: 'a + WidgetRenderer> {
 }
 
 impl<'a, M: 'a + Clone, R: 'a + WidgetRenderer> NodeElementBuilder<'a, M, R> {
-    pub fn new(index: NodeIndex<u32>, state: &'a mut NodeElementState) -> Self {
+    pub fn new(index: NodeIndex, state: &'a mut NodeElementState) -> Self {
         Self {
             index,
             state,
@@ -109,7 +105,7 @@ impl<'a, M: 'a + Clone, R: 'a + WidgetRenderer> NodeElementBuilder<'a, M, R> {
     }
 
     pub fn build(
-        self, /*, text_input_callback: impl (Fn(NodeIndex<u32>, String) -> M) + 'static*/
+        self, /*, text_input_callback: impl (Fn(NodeIndex, String) -> M) + 'static*/
     ) -> NodeElement<'a, M, R> {
         NodeElement {
             index: self.index,
@@ -169,7 +165,7 @@ impl<'a, M: 'a + Clone, R: 'a + WidgetRenderer> NodeElementBuilder<'a, M, R> {
 }
 
 impl<'a, M: 'a + Clone, R: 'a + WidgetRenderer> NodeElement<'a, M, R> {
-    pub fn builder(index: NodeIndex<u32>, state: &'a mut NodeElementState) -> NodeElementBuilder<'a, M, R> {
+    pub fn builder(index: NodeIndex, state: &'a mut NodeElementState) -> NodeElementBuilder<'a, M, R> {
         NodeElementBuilder::new(index, state)
     }
 
@@ -301,7 +297,7 @@ pub struct FloatingPanesBehaviour<M> {
 impl<'a, M: Clone + 'a, R: 'a + WidgetRenderer> floating_panes::FloatingPanesBehaviour<'a, M, R>
     for FloatingPanesBehaviour<M>
 {
-    type FloatingPaneIndex = NodeIndex<u32>;
+    type FloatingPaneIndex = NodeIndex;
     type FloatingPaneBehaviourState = FloatingPaneBehaviourState;
     type FloatingPanesBehaviourState = FloatingPanesBehaviourState;
 
@@ -523,7 +519,7 @@ impl<'a, M: Clone + 'a, R: 'a + WidgetRenderer> floating_panes::FloatingPanesBeh
 
 #[derive(Default)]
 pub struct FloatingPaneBehaviourState {
-    pub node_index: Option<NodeIndex<u32>>,
+    pub node_index: Option<NodeIndex>,
 }
 
 #[derive(Debug)]
