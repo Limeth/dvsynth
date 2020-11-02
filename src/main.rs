@@ -1,5 +1,6 @@
 #![feature(const_fn_floating_point_arithmetic)]
 #![feature(bindings_after_at)]
+#![feature(iterator_fold_self)]
 //!
 //! Task list:
 //! * Use acceleration structures to check for incidence/highlights with connection points and

@@ -3,11 +3,13 @@ use iced_graphics::widget::canvas::path::Builder;
 use iced_graphics::{self, Backend, Defaults, Primitive};
 use iced_native::layout::{Layout, Limits, Node};
 use iced_native::{
-    self, Align, Background, Clipboard, Column, Event, Hasher, Length, Point, Row, Size, Text,
+    self, Align, Background, Clipboard, Column, Event, Hasher, Length, Point, Rectangle, Row, Size, Text,
 };
 use iced_native::{Color, Vector};
 use lyon_geom::{QuadraticBezierSegment, Scalar, Segment};
 use smallvec::{smallvec, SmallVec};
+use std::ops::Deref;
+use std::ops::DerefMut;
 use vek::Vec2;
 
 #[derive(Debug)]
@@ -99,7 +101,7 @@ impl ConnectionSegment for QuadraticBezierSegment<f32> {
 }
 
 pub struct Segments<T: Segment> {
-    segments: SmallVec<[T; 2]>,
+    pub segments: SmallVec<[T; 2]>,
 }
 
 impl<T: Segment> Segments<T> {
@@ -120,6 +122,20 @@ impl<T: Segment> Segments<T> {
 
             segment.sample(T::Scalar::value(ts.fract())).to_array().into()
         }
+    }
+}
+
+impl<T: Segment> Deref for Segments<T> {
+    type Target = [T];
+
+    fn deref(&self) -> &Self::Target {
+        &self.segments[..]
+    }
+}
+
+impl<T: Segment> DerefMut for Segments<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.segments[..]
     }
 }
 
@@ -267,5 +283,90 @@ pub fn draw_bounds(layout: Layout<'_>, color: Color) -> Primitive {
         border_radius: 0,
         border_width: 1,
         border_color: color,
+    }
+}
+
+pub fn partial_min<T: PartialOrd>(a: T, b: T) -> T {
+    if a < b {
+        a
+    } else {
+        b
+    }
+}
+
+pub fn partial_max<T: PartialOrd>(a: T, b: T) -> T {
+    if a < b {
+        b
+    } else {
+        a
+    }
+}
+
+pub trait RectangleExt: Sized {
+    fn from_min_max(min: Vec2<f32>, max: Vec2<f32>) -> Self;
+    fn grow(&self, right: f32, up: f32, left: f32, down: f32) -> Self;
+    fn min(&self) -> Vec2<f32>;
+    fn max(&self) -> Vec2<f32>;
+    fn vertices(&self) -> [Vec2<f32>; 4];
+
+    fn grow_symmetrical(&self, horizontally: f32, vertically: f32) -> Self {
+        self.grow(horizontally, vertically, horizontally, vertically)
+    }
+
+    fn grow_uniform(&self, amount: f32) -> Self {
+        self.grow(amount, amount, amount, amount)
+    }
+}
+
+impl RectangleExt for Rectangle {
+    fn from_min_max(min: Vec2<f32>, max: Vec2<f32>) -> Self {
+        Self::new(min.into_array().into(), (max - min).into_array().into())
+    }
+
+    fn grow(&self, right: f32, up: f32, left: f32, down: f32) -> Self {
+        Self {
+            x: self.x - left,
+            y: self.y - up,
+            width: self.width + left + right,
+            height: self.height + up + down,
+        }
+    }
+
+    fn min(&self) -> Vec2<f32> {
+        Vec2::new(self.x, self.y)
+    }
+
+    fn max(&self) -> Vec2<f32> {
+        Vec2::new(self.x + self.width, self.y + self.height)
+    }
+
+    fn vertices(&self) -> [Vec2<f32>; 4] {
+        let min = self.min();
+        let max = self.max();
+
+        [
+            Vec2::new(min[0], max[1]),
+            Vec2::new(max[0], max[1]),
+            Vec2::new(max[0], min[1]),
+            Vec2::new(min[0], min[1]),
+        ]
+    }
+}
+
+pub trait PathBuilderExt {
+    fn line_segment_loop(&mut self, line_segments: &[Vec2<f32>]);
+}
+
+impl PathBuilderExt for iced_graphics::widget::canvas::path::Builder {
+    fn line_segment_loop(&mut self, vertices: &[Vec2<f32>]) {
+        if vertices.len() < 2 {
+            return;
+        }
+
+        self.move_to(vertices.last().unwrap().into_array().into());
+
+        for vertex in vertices {
+            self.line_to(vertex.into_array().into());
+        }
     }
 }

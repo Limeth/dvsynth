@@ -1,4 +1,5 @@
 use super::*;
+use crate::util::{PathBuilderExt, RectangleExt, Segments};
 use crate::{style, util, ChannelDirection, ChannelIdentifier, Connection, Message, NodeMessage};
 use iced_graphics::canvas::{Fill, FillRule, Frame, LineCap, LineJoin, Path, Stroke};
 use iced_graphics::{self, Backend, Defaults, Primitive};
@@ -6,10 +7,11 @@ use iced_native::layout::{Layout, Limits, Node};
 use iced_native::mouse::{self, Button as MouseButton, Event as MouseEvent};
 use iced_native::widget::{Container, Widget};
 use iced_native::{
-    self, Align, Background, Clipboard, Column, Event, Hasher, Length, Point, Row, Size, Text,
+    self, Align, Background, Clipboard, Column, Event, Hasher, Length, Point, Rectangle, Row, Size, Text,
 };
 use iced_native::{overlay, Element};
 use iced_native::{Color, Vector};
+use lyon_geom::QuadraticBezierSegment;
 use ordered_float::OrderedFloat;
 use petgraph::graph::NodeIndex;
 use std::collections::HashMap;
@@ -196,8 +198,23 @@ impl<'a, M: 'a + Clone, R: 'a + WidgetRenderer> NodeElement<'a, M, R> {
     {
         const GRAB_RADIUS: f32 = 6.0;
 
-        // TODO: Grow bounds in the channel direction to remove gap
-        if channel_layout.bounds().contains(cursor_position.into_array().into()) {
+        let mut bounds = channel_layout.bounds();
+        bounds = match channel_direction {
+            ChannelDirection::Out => bounds.grow(
+                style::consts::SPACING_HORIZONTAL as f32,
+                style::consts::SPACING_VERTICAL as f32 * 0.5,
+                0.0,
+                style::consts::SPACING_VERTICAL as f32 * 0.5,
+            ),
+            ChannelDirection::In => bounds.grow(
+                0.0,
+                style::consts::SPACING_VERTICAL as f32 * 0.5,
+                style::consts::SPACING_HORIZONTAL as f32,
+                style::consts::SPACING_VERTICAL as f32 * 0.5,
+            ),
+        };
+
+        if bounds.contains(cursor_position.into_array().into()) {
             return true;
         }
 
@@ -319,6 +336,13 @@ impl<'a, M: Clone + 'a, R: 'a + WidgetRenderer> floating_panes::FloatingPanesBeh
 
                 // Highlight channel, if possible
                 for (pane_layout, node_index) in layout.panes().zip(panes.children.keys().copied()) {
+                    let pane_bounding_box =
+                        pane_layout.bounds().grow_symmetrical(style::consts::SPACING_HORIZONTAL as f32, 0.0);
+
+                    if !pane_bounding_box.contains(cursor_position.into_array().into()) {
+                        continue;
+                    }
+
                     let inputs_layout = pane_layout.content().channels_with_direction(ChannelDirection::In);
                     let outputs_layout = pane_layout.content().channels_with_direction(ChannelDirection::Out);
                     let channels = inputs_layout
@@ -401,23 +425,15 @@ impl<'a, M: Clone + 'a, R: 'a + WidgetRenderer> floating_panes::FloatingPanesBeh
                                 layout_to.content().channels_with_direction(ChannelDirection::In);
                             let layout_output = layout_outputs.channel(connection.from().channel_index);
                             let layout_input = layout_inputs.channel(connection.to().channel_index);
-                            let from = NodeElement::<M, R>::get_connection_point(
-                                layout_output,
-                                ChannelDirection::Out,
-                            );
-                            let to =
-                                NodeElement::<M, R>::get_connection_point(layout_input, ChannelDirection::In);
-
-                            let segments = util::get_connection_curve(from, to);
-                            let projection = segments.project_point(cursor_position);
-                            let projection = segments.sample(projection.t);
-                            let connection_distance_squared = projection.distance_squared(cursor_position);
+                            let connection_curve =
+                                ConnectionCurve::from_channel_layouts::<M, R>(layout_output, layout_input);
+                            let connection_distance_squared = connection_curve
+                                .get_distance_squared(cursor_position, MAX_CONNECTION_HIGHLIGHT_DISTANCE);
 
                             (connection, connection_distance_squared)
                         })
-                        .filter(|(_, connection_distance_squared)| {
-                            *connection_distance_squared
-                                <= MAX_CONNECTION_HIGHLIGHT_DISTANCE * MAX_CONNECTION_HIGHLIGHT_DISTANCE
+                        .filter_map(|(connection, distance_squared)| {
+                            distance_squared.map(move |distance_squared| (connection, distance_squared))
                         })
                         .min_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
                         .map(|(connection, _)| connection);
@@ -429,7 +445,6 @@ impl<'a, M: Clone + 'a, R: 'a + WidgetRenderer> floating_panes::FloatingPanesBeh
                 }
             }
             Event::Mouse(MouseEvent::ButtonPressed(MouseButton::Left)) => {
-                // FIXME: Use current highlight to decide upon how this event is handled
                 if let Some(highlight) = panes.content_state.highlight.take() {
                     match highlight {
                         Highlight::Connection(highlighted_connection) => {
@@ -584,16 +599,6 @@ where B: Backend + iced_graphics::backend::Text
             primitive
         }));
 
-        fn draw_connection(frame: &mut Frame, from: Vec2<f32>, to: Vec2<f32>, stroke: Stroke) {
-            let segments = util::get_connection_curve(from, to);
-            let path = Path::new(|builder| {
-                builder.move_to(from.into_array().into());
-                segments.build_segments(builder);
-            });
-
-            frame.stroke(&path, stroke);
-        }
-
         // Draw connections
         let mut frame = Frame::new(layout.bounds().size());
 
@@ -650,7 +655,7 @@ where B: Backend + iced_graphics::backend::Text
             // primitives.push(draw_point(from.into_array().into(), Color::from_rgb(1.0, 0.0, 0.0)));
             // primitives.push(draw_point(to.into_array().into(), Color::from_rgb(0.0, 0.0, 1.0)));
 
-            draw_connection(&mut frame, from, to, stroke);
+            ConnectionCurve { from, to }.draw(&mut frame, stroke);
 
             // Code to visualize finding the closest point to the curve
             // {
@@ -711,18 +716,14 @@ where B: Backend + iced_graphics::backend::Text
                 ChannelDirection::Out => (connected_position, target_position),
             };
 
-            draw_connection(
-                &mut frame,
-                from,
-                to,
-                // TODO: Store in `style`
-                Stroke {
-                    color: Color::from_rgba(1.0, 0.6, 0.0, 1.0),
-                    width: 3.0,
-                    line_cap: LineCap::Butt,
-                    line_join: LineJoin::Round,
-                },
-            );
+            let stroke = Stroke {
+                color: Color::from_rgba(1.0, 0.6, 0.0, 1.0),
+                width: 3.0,
+                line_cap: LineCap::Butt,
+                line_join: LineJoin::Round,
+            };
+
+            ConnectionCurve { from, to }.draw(&mut frame, stroke);
         }
 
         // Draw connection points
@@ -769,6 +770,93 @@ where B: Backend + iced_graphics::backend::Text
         primitives.push(frame.into_geometry().into_primitive());
 
         (Primitive::Group { primitives }, mouse_interaction)
+    }
+}
+
+pub struct ConnectionCurve {
+    pub from: Vec2<f32>,
+    pub to: Vec2<f32>,
+}
+
+impl ConnectionCurve {
+    fn from_channel_layouts<M: Clone, R: WidgetRenderer>(
+        output: ChannelLayout,
+        input: ChannelLayout,
+    ) -> Self
+    {
+        let from = NodeElement::<M, R>::get_connection_point(output, ChannelDirection::Out);
+        let to = NodeElement::<M, R>::get_connection_point(input, ChannelDirection::In);
+        Self { from, to }
+    }
+
+    fn draw(&self, frame: &mut Frame, stroke: Stroke) {
+        let segments = util::get_connection_curve(self.from, self.to);
+        let path = Path::new(|builder| {
+            builder.move_to(self.from.into_array().into());
+            segments.build_segments(builder);
+
+            // Debug control points
+            // for segment in &segments.segments {
+            //     let points = [&segment.from, &segment.ctrl, &segment.to];
+            //     for i in 0..points.len() {
+            //         let from = points[i];
+            //         let to = points[(i + 1) % points.len()];
+            //         builder.move_to(from.to_array().into());
+            //         builder.line_to(to.to_array().into());
+            //     }
+            // }
+
+            // Debug bounding box
+            // let aabb = Self::bounds_from_curve(&segments).grow_uniform(6.0);
+            // builder.line_segment_loop(&aabb.vertices()[..]);
+        });
+
+        frame.stroke(&path, stroke);
+    }
+
+    fn bounds_from_curve(segments: &Segments<QuadraticBezierSegment<f32>>) -> Rectangle {
+        let min = Vec2::<f32>::new(
+            [segments[0].from.x, segments[0].ctrl.x, segments[1].ctrl.x, segments[1].to.x]
+                .iter()
+                .copied()
+                .fold_first(util::partial_min)
+                .unwrap(),
+            util::partial_min(segments[0].from.y, segments[1].to.y),
+        );
+        let max = Vec2::<f32>::new(
+            [segments[0].from.x, segments[0].ctrl.x, segments[1].ctrl.x, segments[1].to.x]
+                .iter()
+                .copied()
+                .fold_first(util::partial_max)
+                .unwrap(),
+            util::partial_max(segments[0].from.y, segments[1].to.y),
+        );
+
+        Rectangle::from_min_max(min, max)
+    }
+
+    fn bounds(&self) -> Rectangle {
+        Self::bounds_from_curve(&util::get_connection_curve(self.from, self.to))
+    }
+
+    fn get_distance_squared(&self, point: Vec2<f32>, max_distance: f32) -> Option<f32> {
+        let segments = util::get_connection_curve(self.from, self.to);
+
+        // Before performing expensive computations, check whether the point is within the bounding
+        // box.
+        let bounds = Self::bounds_from_curve(&segments).grow_uniform(max_distance);
+
+        if bounds.contains(point.into_array().into()) {
+            let projection = segments.project_point(point);
+            let projection = segments.sample(projection.t);
+            let connection_distance_squared = projection.distance_squared(point);
+
+            if connection_distance_squared <= max_distance * max_distance {
+                return Some(connection_distance_squared);
+            }
+        }
+
+        None
     }
 }
 
