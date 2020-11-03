@@ -52,42 +52,45 @@ impl Application for ApplicationState {
         (
             Self {
                 graph: {
+                    use ChannelType::*;
+                    use OpaqueChannelType::*;
+                    use PrimitiveChannelType::*;
                     let mut graph = Graph::new();
 
-                    let node_a = graph.add_node(NodeData {
-                        title: "Node A".to_string(),
-                        element_state: Default::default(),
-                        floating_pane_state: FloatingPaneState::with_position([10.0, 10.0]),
-                        floating_pane_content_state: Default::default(),
-                        input_channels: vec![Channel::new("In A")],
-                        output_channels: vec![Channel::new("Out A"), Channel::new("Out B")],
-                    });
-
-                    let node_b = graph.add_node(NodeData {
-                        title: "Node B".to_string(),
-                        element_state: Default::default(),
-                        floating_pane_state: FloatingPaneState::with_position([100.0, 10.0]),
-                        floating_pane_content_state: Default::default(),
-                        input_channels: vec![
-                            Channel::new("In A"),
-                            Channel::new("In B"),
-                            Channel::new("In C"),
-                        ],
-                        output_channels: vec![Channel::new("Out A")],
-                    });
-
-                    let node_c = graph.add_node(NodeData {
-                        title: "Node C".to_string(),
-                        element_state: Default::default(),
-                        floating_pane_state: FloatingPaneState::with_position([200.0, 10.0]),
-                        floating_pane_content_state: Default::default(),
-                        input_channels: vec![Channel::new("In A"), Channel::new("In B")],
-                        output_channels: vec![
-                            Channel::new("Out A"),
-                            Channel::new("Out B"),
-                            Channel::new("Out C"),
-                        ],
-                    });
+                    let node_a = graph.add_node(NodeData::new(
+                        "Node A",
+                        [10.0, 10.0],
+                        Box::new(TestNodeBehaviour {
+                            name: "Behaviour A".to_string(),
+                            channels_input: vec![Primitive(U8)],
+                            channels_output: vec![Primitive(U8), Primitive(U32)],
+                        }),
+                    ));
+                    let node_b = graph.add_node(NodeData::new(
+                        "Node B",
+                        [110.0, 10.0],
+                        Box::new(TestNodeBehaviour {
+                            name: "Behaviour B".to_string(),
+                            channels_input: vec![Primitive(U8), Primitive(U8), Primitive(U32)],
+                            channels_output: vec![Primitive(U8)],
+                        }),
+                    ));
+                    let node_c = graph.add_node(NodeData::new(
+                        "Node C",
+                        [210.0, 10.0],
+                        Box::new(TestNodeBehaviour {
+                            name: "Behaviour C".to_string(),
+                            channels_input: vec![
+                                Primitive(U8),
+                                Array(ArrayChannelType::new(Array(ArrayChannelType::new(F32, 4)), 8)),
+                            ],
+                            channels_output: vec![
+                                Primitive(U8),
+                                Opaque(Texture(TextureChannelType {})),
+                                Array(ArrayChannelType::new(U8, 4)),
+                            ],
+                        }),
+                    ));
 
                     let node_indices: Vec<_> = graph.node_indices().collect();
                     for (node_index, node) in node_indices.iter().zip(graph.node_weights_mut()) {

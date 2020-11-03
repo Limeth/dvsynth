@@ -1,5 +1,6 @@
 use crate::node::*;
 use crate::*;
+use vek::Vec2;
 
 pub type NodeIndex = petgraph::graph::NodeIndex<u32>;
 pub type Graph = StableGraph<
@@ -14,11 +15,27 @@ pub struct NodeData {
     pub element_state: NodeElementState,
     pub floating_pane_state: FloatingPaneState,
     pub floating_pane_content_state: FloatingPaneBehaviourState,
-    pub input_channels: Vec<Channel>,
-    pub output_channels: Vec<Channel>,
+    pub behaviour: Box<dyn NodeBehaviour>,
+    pub configuration: NodeConfiguration,
 }
 
 impl NodeData {
+    pub fn new(
+        title: impl ToString,
+        position: impl Into<Vec2<f32>>,
+        mut behaviour: Box<dyn NodeBehaviour>,
+    ) -> Self
+    {
+        Self {
+            title: title.to_string(),
+            element_state: Default::default(),
+            floating_pane_state: FloatingPaneState::with_position(position),
+            floating_pane_content_state: Default::default(),
+            configuration: behaviour.update(),
+            behaviour,
+        }
+    }
+
     pub fn view(
         &mut self,
         index: NodeIndex,
@@ -27,11 +44,11 @@ impl NodeData {
     {
         let mut builder = NodeElement::builder(index, &mut self.element_state);
 
-        for input_channel in &self.input_channels {
+        for input_channel in &self.configuration.channels_input {
             builder = builder.push_input_channel(input_channel);
         }
 
-        for output_channel in &self.output_channels {
+        for output_channel in &self.configuration.channels_output {
             builder = builder.push_output_channel(output_channel);
         }
 
