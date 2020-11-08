@@ -3,8 +3,6 @@
 #![feature(iterator_fold_self)]
 //!
 //! Task list:
-//! * Use acceleration structures to check for incidence/highlights with connection points and
-//!   connections
 //! * Define channel types
 //! * Add `NodeElement` styles
 //!
@@ -92,10 +90,10 @@ impl Application for ApplicationState {
                         }),
                     ));
 
-                    let node_indices: Vec<_> = graph.node_indices().collect();
-                    for (node_index, node) in node_indices.iter().zip(graph.node_weights_mut()) {
-                        node.floating_pane_content_state.node_index = Some(*node_index);
-                    }
+                    // let node_indices: Vec<_> = graph.node_indices().collect();
+                    // for (node_index, node) in node_indices.iter().zip(graph.node_weights_mut()) {
+                    //     node.floating_pane_content_state.node_index = Some(*node_index);
+                    // }
 
                     graph.add_edge(node_a, node_b, EdgeData { channel_index_from: 0, channel_index_to: 2 });
 
@@ -166,8 +164,9 @@ impl Application for ApplicationState {
         let node_indices = self.graph.node_indices().collect::<Vec<_>>();
         // TODO: do not recompute every time `view` is called
         let Self { graph, floating_panes_content_state, .. } = self;
-        floating_panes_content_state.connections.clear();
-        floating_panes_content_state.connections.extend(graph.edge_indices().map(|edge_index| {
+        let mut connections = Vec::with_capacity(graph.edge_count());
+
+        connections.extend(graph.edge_indices().map(|edge_index| {
             let edge_data = &graph[edge_index];
             let (index_from, index_to) = graph.edge_endpoints(edge_index).unwrap();
             Connection([(index_from, edge_data.channel_index_from), (index_to, edge_data.channel_index_to)])
@@ -179,6 +178,7 @@ impl Application for ApplicationState {
             crate::widgets::node::FloatingPanesBehaviour {
                 on_channel_disconnect: |channel| Message::DisconnectChannel { channel },
                 on_connection_create: |connection| Message::InsertConnection { connection },
+                connections,
             },
         )
         .style(theme.floating_panes());

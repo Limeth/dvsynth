@@ -1,5 +1,5 @@
 use super::*;
-use crate::node::ChannelSlice;
+use crate::node::ChannelRef;
 use crate::util::{PathBuilderExt, RectangleExt, Segments};
 use crate::{style, util, ChannelDirection, ChannelIdentifier, Connection, Message, NodeMessage};
 use iced_graphics::canvas::{Fill, FillRule, Frame, LineCap, LineJoin, Path, Stroke};
@@ -19,7 +19,7 @@ use std::collections::HashMap;
 use std::hash::Hash;
 use vek::Vec2;
 
-impl<'a> ChannelSlice<'a> {
+impl<'a> ChannelRef<'a> {
     pub fn render<M: 'a + Clone, R: 'a + WidgetRenderer>(&self) -> Element<'a, M, R> {
         Text::new(self.title.to_string())
             .size(14) // FIXME: hardcoding bad >:(
@@ -39,8 +39,8 @@ pub struct NodeElementBuilder<'a, M: 'a + Clone, R: 'a + WidgetRenderer> {
     width: Length,
     height: Length,
     extents: Vec2<u32>,
-    input_channels: Vec<ChannelSlice<'a>>,
-    output_channels: Vec<ChannelSlice<'a>>,
+    input_channels: Vec<ChannelRef<'a>>,
+    output_channels: Vec<ChannelRef<'a>>,
     __marker: std::marker::PhantomData<&'a (M, R)>,
 }
 
@@ -48,6 +48,8 @@ pub struct NodeElementBuilder<'a, M: 'a + Clone, R: 'a + WidgetRenderer> {
 /// custom behaviour [`FloatingPanesBehaviour`] to function as a node graph editor.
 pub struct NodeElement<'a, M: 'a + Clone, R: 'a + WidgetRenderer> {
     index: NodeIndex,
+    input_channels: Vec<ChannelRef<'a>>,
+    output_channels: Vec<ChannelRef<'a>>,
     // state: &'a mut NodeElementState,
     width: Length,
     height: Length,
@@ -94,12 +96,12 @@ impl<'a, M: 'a + Clone, R: 'a + WidgetRenderer> NodeElementBuilder<'a, M, R> {
         self
     }
 
-    pub fn push_input_channel(mut self, channel: impl Into<ChannelSlice<'a>>) -> Self {
+    pub fn push_input_channel(mut self, channel: impl Into<ChannelRef<'a>>) -> Self {
         self.input_channels.push(channel.into());
         self
     }
 
-    pub fn push_output_channel(mut self, channel: impl Into<ChannelSlice<'a>>) -> Self {
+    pub fn push_output_channel(mut self, channel: impl Into<ChannelRef<'a>>) -> Self {
         self.output_channels.push(channel.into());
         self
     }
@@ -160,6 +162,8 @@ impl<'a, M: 'a + Clone, R: 'a + WidgetRenderer> NodeElementBuilder<'a, M, R> {
                 )
                 .into()
             },
+            input_channels: self.input_channels,
+            output_channels: self.output_channels,
         }
     }
 }
@@ -292,12 +296,33 @@ impl<'a, M: 'a + Clone, R: 'a + WidgetRenderer> From<NodeElement<'a, M, R>> for 
 pub struct FloatingPanesBehaviour<M> {
     pub on_channel_disconnect: fn(ChannelIdentifier) -> M,
     pub on_connection_create: fn(Connection) -> M,
+    pub connections: Vec<Connection>,
+}
+
+impl<M: Clone> FloatingPanesBehaviour<M> {
+    /// A reflexive function to check whether two channels can be connected
+    fn can_connect<'a, R: 'a + WidgetRenderer>(
+        panes: &FloatingPanes<'a, M, R, Self>,
+        from: ChannelIdentifier,
+        to: ChannelIdentifier,
+    ) -> bool
+    {
+        // TODO: Add borrow checking and type checking
+        from.node_index != to.node_index && from.channel_direction != to.channel_direction
+        // Allow, but disconnect previous connection
+        // && self.connections.iter().any(|connection| connection.to() == to)
+    }
+
+    fn is_connected(&self, channel: ChannelIdentifier) -> bool {
+        self.connections.iter().any(|connection| connection.channel(channel.channel_direction) == channel)
+    }
 }
 
 impl<'a, M: Clone + 'a, R: 'a + WidgetRenderer> floating_panes::FloatingPanesBehaviour<'a, M, R>
     for FloatingPanesBehaviour<M>
 {
     type FloatingPaneIndex = NodeIndex;
+    type FloatingPaneBehaviourData = FloatingPaneBehaviourData;
     type FloatingPaneBehaviourState = FloatingPaneBehaviourState;
     type FloatingPanesBehaviourState = FloatingPanesBehaviourState;
 
@@ -328,7 +353,7 @@ impl<'a, M: Clone + 'a, R: 'a + WidgetRenderer> floating_panes::FloatingPanesBeh
             Event::Mouse(MouseEvent::CursorMoved { x, y }) => {
                 let cursor_position = Vec2::new(x, y);
 
-                panes.content_state.highlight = None;
+                panes.behaviour_state.highlight = None;
 
                 // Highlight channel, if possible
                 for (pane_layout, node_index) in layout.panes().zip(panes.children.keys().copied()) {
@@ -356,14 +381,14 @@ impl<'a, M: Clone + 'a, R: 'a + WidgetRenderer> floating_panes::FloatingPanesBeh
                         .filter(|(channel_index, channel_layout, channel_direction)| {
                             // If a new connection is being formed, make sure the target channel
                             // can be connected to.
-                            if let Some(selected_channel) = panes.content_state.selected_channel.as_ref() {
+                            if let Some(selected_channel) = panes.behaviour_state.selected_channel.as_ref() {
                                 let channel = ChannelIdentifier {
                                     node_index,
                                     channel_index: *channel_index,
                                     channel_direction: *channel_direction,
                                 };
 
-                                if !panes.content_state.can_connect(*selected_channel, channel) {
+                                if !FloatingPanesBehaviour::can_connect(panes, *selected_channel, channel) {
                                     return false;
                                 }
                             }
@@ -382,16 +407,18 @@ impl<'a, M: Clone + 'a, R: 'a + WidgetRenderer> floating_panes::FloatingPanesBeh
                             channel_index,
                             channel_direction,
                         };
-                        panes.content_state.highlight = Some(Highlight::Channel(channel));
+                        panes.behaviour_state.highlight = Some(Highlight::Channel(channel));
                     }
                 }
 
                 // Otherwise, highlight a connection, if one is not being created
-                if panes.content_state.highlight.is_none() && panes.content_state.selected_channel.is_none() {
+                if panes.behaviour_state.highlight.is_none()
+                    && panes.behaviour_state.selected_channel.is_none()
+                {
                     const MAX_CONNECTION_HIGHLIGHT_DISTANCE: f32 = 6.0;
 
                     let closest_connection = panes
-                        .content_state
+                        .behaviour
                         .connections
                         .iter()
                         .map(|connection| {
@@ -435,28 +462,28 @@ impl<'a, M: Clone + 'a, R: 'a + WidgetRenderer> floating_panes::FloatingPanesBeh
                         .map(|(connection, _)| connection);
 
                     if let Some(closest_connection) = closest_connection {
-                        panes.content_state.highlight =
+                        panes.behaviour_state.highlight =
                             Some(Highlight::Connection(closest_connection.clone()));
                     }
                 }
             }
             Event::Mouse(MouseEvent::ButtonPressed(MouseButton::Left)) => {
-                if let Some(highlight) = panes.content_state.highlight.take() {
+                if let Some(highlight) = panes.behaviour_state.highlight.take() {
                     match highlight {
                         Highlight::Connection(highlighted_connection) => {
-                            panes.content_state.selected_channel = Some(highlighted_connection.from());
+                            panes.behaviour_state.selected_channel = Some(highlighted_connection.from());
                             messages
                                 .push((panes.behaviour.on_channel_disconnect)(highlighted_connection.to()));
                         }
                         Highlight::Channel(channel @ ChannelIdentifier { channel_direction, .. }) => {
                             let disconnect = match channel_direction {
-                                ChannelDirection::In => panes.content_state.is_connected(channel),
+                                ChannelDirection::In => panes.behaviour.is_connected(channel),
                                 ChannelDirection::Out => false,
                             };
 
                             // Is connection pending?
-                            if let Some(selected_channel) = panes.content_state.selected_channel.clone() {
-                                if panes.content_state.can_connect(selected_channel, channel) {
+                            if let Some(selected_channel) = panes.behaviour_state.selected_channel.clone() {
+                                if FloatingPanesBehaviour::can_connect(panes, selected_channel, channel) {
                                     if disconnect {
                                         messages.push((panes.behaviour.on_channel_disconnect)(channel));
                                     }
@@ -469,24 +496,24 @@ impl<'a, M: Clone + 'a, R: 'a + WidgetRenderer> floating_panes::FloatingPanesBeh
                                     messages.push((panes.behaviour.on_connection_create)(
                                         Connection::try_from_identifiers(channels).unwrap(),
                                     ));
-                                    panes.content_state.selected_channel = None;
+                                    panes.behaviour_state.selected_channel = None;
                                 }
                             } else {
                                 if disconnect {
                                     let connection = panes
-                                        .content_state
+                                        .behaviour
                                         .connections
                                         .iter()
                                         .find(|connection| connection.contains_channel(channel));
                                     if let Some(connection) = connection {
                                         let other_channel =
                                             connection.channel(channel.channel_direction.inverse());
-                                        panes.content_state.selected_channel = Some(other_channel);
+                                        panes.behaviour_state.selected_channel = Some(other_channel);
 
                                         messages.push((panes.behaviour.on_channel_disconnect)(channel));
                                     }
                                 } else {
-                                    panes.content_state.selected_channel = Some(channel);
+                                    panes.behaviour_state.selected_channel = Some(channel);
                                 }
                             }
                         }
@@ -508,7 +535,7 @@ impl<'a, M: Clone + 'a, R: 'a + WidgetRenderer> floating_panes::FloatingPanesBeh
                     return true;
                 }
 
-                panes.content_state.selected_channel = None;
+                panes.behaviour_state.selected_channel = None;
             }
             _ => (),
         }
@@ -518,9 +545,10 @@ impl<'a, M: Clone + 'a, R: 'a + WidgetRenderer> floating_panes::FloatingPanesBeh
 }
 
 #[derive(Default)]
-pub struct FloatingPaneBehaviourState {
-    pub node_index: Option<NodeIndex>,
-}
+pub struct FloatingPaneBehaviourData {}
+
+#[derive(Default)]
+pub struct FloatingPaneBehaviourState {}
 
 #[derive(Debug)]
 pub enum Highlight {
@@ -530,24 +558,23 @@ pub enum Highlight {
 
 #[derive(Default)]
 pub struct FloatingPanesBehaviourState {
-    pub connections: Vec<Connection>,
     pub selected_channel: Option<ChannelIdentifier>,
     pub highlight: Option<Highlight>,
 }
 
-impl FloatingPanesBehaviourState {
-    /// A reflexive function to check whether two channels can be connected
-    fn can_connect(&self, from: ChannelIdentifier, to: ChannelIdentifier) -> bool {
-        // TODO: Add borrow checking and type checking
-        from.node_index != to.node_index && from.channel_direction != to.channel_direction
-        // Allow, but disconnect previous connection
-        // && self.connections.iter().any(|connection| connection.to() == to)
-    }
+// impl FloatingPanesBehaviourState {
+//     /// A reflexive function to check whether two channels can be connected
+//     fn can_connect(&self, from: ChannelIdentifier, to: ChannelIdentifier) -> bool {
+//         // TODO: Add borrow checking and type checking
+//         from.node_index != to.node_index && from.channel_direction != to.channel_direction
+//         // Allow, but disconnect previous connection
+//         // && self.connections.iter().any(|connection| connection.to() == to)
+//     }
 
-    fn is_connected(&self, channel: ChannelIdentifier) -> bool {
-        self.connections.iter().any(|connection| connection.channel(channel.channel_direction) == channel)
-    }
-}
+//     fn is_connected(&self, channel: ChannelIdentifier) -> bool {
+//         self.connections.iter().any(|connection| connection.channel(channel.channel_direction) == channel)
+//     }
+// }
 
 /// Good practice: Rendering is made to be generic over the backend using this trait, which
 /// is to be implemented on the specific `Renderer`.
@@ -599,7 +626,7 @@ where B: Backend + iced_graphics::backend::Text
         let mut frame = Frame::new(layout.bounds().size());
 
         // Draw existing connections
-        for connection in &panes.content_state.connections {
+        for connection in &panes.behaviour.connections {
             let layout_from = layout.pane_with_index(
                 NodeElement::<M, Self>::get_layout_index_from_channel(panes, connection.from()).unwrap(),
             );
@@ -622,7 +649,7 @@ where B: Backend + iced_graphics::backend::Text
             let from = NodeElement::<M, Self>::get_connection_point(layout_output, ChannelDirection::Out);
             let to = NodeElement::<M, Self>::get_connection_point(layout_input, ChannelDirection::In);
 
-            let highlighted = if let Some(highlight) = panes.content_state.highlight.as_ref() {
+            let highlighted = if let Some(highlight) = panes.behaviour_state.highlight.as_ref() {
                 match highlight {
                     Highlight::Connection(highlighted_connection) => connection == highlighted_connection,
                     Highlight::Channel(highlighted_channel) => {
@@ -673,7 +700,7 @@ where B: Backend + iced_graphics::backend::Text
         }
 
         // Draw pending connection
-        if let Some(selected_channel) = panes.content_state.selected_channel.as_ref() {
+        if let Some(selected_channel) = panes.behaviour_state.selected_channel.as_ref() {
             let pane_layout = layout
                 .panes()
                 .nth(NodeElement::<M, Self>::get_layout_index_from_channel(panes, *selected_channel).unwrap())
@@ -687,7 +714,7 @@ where B: Backend + iced_graphics::backend::Text
                 selected_channel.channel_direction,
             );
             let target_position = if let Some(Highlight::Channel(highlighted_channel)) =
-                panes.content_state.highlight.as_ref()
+                panes.behaviour_state.highlight.as_ref()
             {
                 let child_layout = layout
                     .panes()
@@ -746,7 +773,7 @@ where B: Backend + iced_graphics::backend::Text
                         NodeElement::<M, Self>::get_connection_point(channel_layout, channel_direction);
                     let channel = ChannelIdentifier { node_index, channel_index, channel_direction };
                     let highlighted = if let Some(Highlight::Channel(highlighted_channel)) =
-                        panes.content_state.highlight.as_ref()
+                        panes.behaviour_state.highlight.as_ref()
                     {
                         *highlighted_channel == channel
                     } else {

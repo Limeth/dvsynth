@@ -14,7 +14,7 @@ pub struct NodeData {
     pub title: String,
     pub element_state: NodeElementState,
     pub floating_pane_state: FloatingPaneState,
-    pub floating_pane_content_state: FloatingPaneBehaviourState,
+    pub floating_pane_behaviour_state: FloatingPaneBehaviourState,
     pub behaviour: Box<dyn NodeBehaviour>,
     pub configuration: NodeConfiguration,
 }
@@ -30,7 +30,7 @@ impl NodeData {
             title: title.to_string(),
             element_state: Default::default(),
             floating_pane_state: FloatingPaneState::with_position(position),
-            floating_pane_content_state: Default::default(),
+            floating_pane_behaviour_state: Default::default(),
             configuration: behaviour.update(),
             behaviour,
         }
@@ -62,7 +62,8 @@ impl NodeData {
         FloatingPane::builder(
             node_element,
             &mut self.floating_pane_state,
-            &mut self.floating_pane_content_state,
+            &mut self.floating_pane_behaviour_state,
+            FloatingPaneBehaviourData { /*TODO*/ },
         )
         .title(Some(&self.title))
         .title_size(Some(16))

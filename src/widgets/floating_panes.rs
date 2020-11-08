@@ -14,7 +14,16 @@ use vek::Vec2;
 /// A widget-like trait for customizing the behaviour of the [`FloatingPanes`] widget
 pub trait FloatingPanesBehaviour<'a, M: 'a, R: 'a + WidgetRenderer>: Sized {
     type FloatingPaneIndex: Hash + Eq;
+
+    /// Additional data passed by value during construction of each pane.
+    /// Custom data to pass to the FloatingPanes widget (shared by all floating panes) can be
+    /// stored within the implementation of `Self`.
+    type FloatingPaneBehaviourData;
+
+    /// Mutable state of each pane stored externally from the widget.
     type FloatingPaneBehaviourState;
+
+    /// Mutable state of all floating panes stored externally from the widget.
     type FloatingPanesBehaviourState;
 
     fn draw_panes(
@@ -51,6 +60,7 @@ impl<'a, M: 'a, B: 'a + Backend + iced_graphics::backend::Text>
     FloatingPanesBehaviour<'a, M, iced_graphics::Renderer<B>> for FloatingPanesBehaviourDefault
 {
     type FloatingPaneIndex = u32;
+    type FloatingPaneBehaviourData = ();
     type FloatingPaneBehaviourState = ();
     type FloatingPanesBehaviourState = ();
 
@@ -116,7 +126,8 @@ impl<'a, M: 'a, B: 'a + Backend + iced_graphics::backend::Text>
 pub struct FloatingPaneBuilder<'a, M: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a, M, R>> {
     pub content: Element<'a, M, R>,
     pub state: &'a mut FloatingPaneState,
-    pub content_state: &'a mut C::FloatingPaneBehaviourState,
+    pub behaviour_state: &'a mut C::FloatingPaneBehaviourState,
+    pub behaviour_data: C::FloatingPaneBehaviourData,
     pub title: Option<&'a str>,
     pub title_size: Option<u16>,
     pub title_margin: Spacing,
@@ -130,13 +141,15 @@ impl<'a, M: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a, M, R>
     pub fn new(
         content: impl Into<Element<'a, M, R>>,
         state: &'a mut FloatingPaneState,
-        content_state: &'a mut C::FloatingPaneBehaviourState,
+        behaviour_state: &'a mut C::FloatingPaneBehaviourState,
+        behaviour_data: C::FloatingPaneBehaviourData,
     ) -> Self
     {
         Self {
             content: content.into(),
             state,
-            content_state,
+            behaviour_data,
+            behaviour_state,
             title: Default::default(),
             title_size: Default::default(),
             title_margin: Default::default(),
@@ -246,10 +259,11 @@ impl<'a, M: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a, M, R>
     pub fn builder(
         content: impl Into<Element<'a, M, R>>,
         state: &'a mut FloatingPaneState,
-        content_state: &'a mut C::FloatingPaneBehaviourState,
+        behaviour_state: &'a mut C::FloatingPaneBehaviourState,
+        behaviour_data: C::FloatingPaneBehaviourData,
     ) -> FloatingPaneBuilder<'a, M, R, C>
     {
-        FloatingPaneBuilder::new(content, state, content_state)
+        FloatingPaneBuilder::new(content, state, behaviour_state, behaviour_data)
     }
 }
 
@@ -270,7 +284,7 @@ impl Hash for FloatingPanesState {
 
 pub struct FloatingPanes<'a, M: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a, M, R>> {
     pub state: &'a mut FloatingPanesState,
-    pub content_state: &'a mut C::FloatingPanesBehaviourState,
+    pub behaviour_state: &'a mut C::FloatingPanesBehaviourState,
     pub behaviour: C,
     pub width: Length,
     pub height: Length,
@@ -282,13 +296,13 @@ pub struct FloatingPanes<'a, M: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPane
 impl<'a, M: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a, M, R>> FloatingPanes<'a, M, R, C> {
     pub fn new(
         state: &'a mut FloatingPanesState,
-        content_state: &'a mut C::FloatingPanesBehaviourState,
+        behaviour_state: &'a mut C::FloatingPanesBehaviourState,
         behaviour: C,
     ) -> Self
     {
         Self {
             state,
-            content_state,
+            behaviour_state,
             behaviour,
             width: Length::Shrink,
             height: Length::Shrink,

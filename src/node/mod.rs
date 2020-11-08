@@ -265,14 +265,19 @@ impl Channel {
     }
 }
 
-pub struct ChannelSlice<'a> {
+pub struct ChannelRef<'a> {
     pub title: &'a str,
     pub description: Option<&'a str>,
+    pub ty: &'a ChannelType,
 }
 
-impl<'a> From<&'a Channel> for ChannelSlice<'a> {
+impl<'a> From<&'a Channel> for ChannelRef<'a> {
     fn from(other: &'a Channel) -> Self {
-        Self { title: &other.title, description: other.description.as_ref().map(String::as_str) }
+        Self {
+            title: &other.title,
+            description: other.description.as_ref().map(String::as_str),
+            ty: &other.ty,
+        }
     }
 }
 
