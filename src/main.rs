@@ -55,7 +55,7 @@ impl Application for ApplicationState {
                     use PrimitiveChannelType::*;
                     let mut graph = Graph::new();
 
-                    let node_a = graph.add_node(NodeData::new(
+                    graph.add_node(NodeData::new(
                         "Node A",
                         [10.0, 10.0],
                         Box::new(TestNodeBehaviour {
@@ -64,7 +64,7 @@ impl Application for ApplicationState {
                             channels_output: vec![Primitive(U8), Primitive(U32)],
                         }),
                     ));
-                    let node_b = graph.add_node(NodeData::new(
+                    graph.add_node(NodeData::new(
                         "Node B",
                         [110.0, 10.0],
                         Box::new(TestNodeBehaviour {
@@ -73,7 +73,7 @@ impl Application for ApplicationState {
                             channels_output: vec![Primitive(U8)],
                         }),
                     ));
-                    let node_c = graph.add_node(NodeData::new(
+                    graph.add_node(NodeData::new(
                         "Node C",
                         [210.0, 10.0],
                         Box::new(TestNodeBehaviour {
@@ -89,15 +89,6 @@ impl Application for ApplicationState {
                             ],
                         }),
                     ));
-
-                    // let node_indices: Vec<_> = graph.node_indices().collect();
-                    // for (node_index, node) in node_indices.iter().zip(graph.node_weights_mut()) {
-                    //     node.floating_pane_content_state.node_index = Some(*node_index);
-                    // }
-
-                    graph.add_edge(node_a, node_b, EdgeData { channel_index_from: 0, channel_index_to: 2 });
-
-                    graph.add_edge(node_a, node_b, EdgeData { channel_index_from: 1, channel_index_to: 0 });
 
                     graph
                 },

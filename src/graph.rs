@@ -63,7 +63,7 @@ impl NodeData {
             node_element,
             &mut self.floating_pane_state,
             &mut self.floating_pane_behaviour_state,
-            FloatingPaneBehaviourData { /*TODO*/ },
+            FloatingPaneBehaviourData { node_configuration: self.configuration.clone() },
         )
         .title(Some(&self.title))
         .title_size(Some(16))

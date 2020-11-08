@@ -1,5 +1,5 @@
 use super::*;
-use crate::node::ChannelRef;
+use crate::node::{ChannelRef, ChannelType, ChannelTypeTrait, NodeConfiguration};
 use crate::util::{PathBuilderExt, RectangleExt, Segments};
 use crate::{style, util, ChannelDirection, ChannelIdentifier, Connection, Message, NodeMessage};
 use iced_graphics::canvas::{Fill, FillRule, Frame, LineCap, LineJoin, Path, Stroke};
@@ -308,7 +308,18 @@ impl<M: Clone> FloatingPanesBehaviour<M> {
     ) -> bool
     {
         // TODO: Add borrow checking and type checking
-        from.node_index != to.node_index && from.channel_direction != to.channel_direction
+        from.node_index != to.node_index && from.channel_direction != to.channel_direction && {
+            let pane_from = panes.children.get(&from.node_index).unwrap();
+            let pane_to = panes.children.get(&to.node_index).unwrap();
+            let channel_from = pane_from
+                .behaviour_data
+                .node_configuration
+                .channel(from.channel_direction, from.channel_index);
+            let channel_to =
+                pane_to.behaviour_data.node_configuration.channel(to.channel_direction, to.channel_index);
+
+            ChannelType::is_abi_compatible(&channel_from.ty, &channel_to.ty)
+        }
         // Allow, but disconnect previous connection
         // && self.connections.iter().any(|connection| connection.to() == to)
     }
@@ -544,8 +555,9 @@ impl<'a, M: Clone + 'a, R: 'a + WidgetRenderer> floating_panes::FloatingPanesBeh
     }
 }
 
-#[derive(Default)]
-pub struct FloatingPaneBehaviourData {}
+pub struct FloatingPaneBehaviourData {
+    pub node_configuration: NodeConfiguration,
+}
 
 #[derive(Default)]
 pub struct FloatingPaneBehaviourState {}
@@ -561,20 +573,6 @@ pub struct FloatingPanesBehaviourState {
     pub selected_channel: Option<ChannelIdentifier>,
     pub highlight: Option<Highlight>,
 }
-
-// impl FloatingPanesBehaviourState {
-//     /// A reflexive function to check whether two channels can be connected
-//     fn can_connect(&self, from: ChannelIdentifier, to: ChannelIdentifier) -> bool {
-//         // TODO: Add borrow checking and type checking
-//         from.node_index != to.node_index && from.channel_direction != to.channel_direction
-//         // Allow, but disconnect previous connection
-//         // && self.connections.iter().any(|connection| connection.to() == to)
-//     }
-
-//     fn is_connected(&self, channel: ChannelIdentifier) -> bool {
-//         self.connections.iter().any(|connection| connection.channel(channel.channel_direction) == channel)
-//     }
-// }
 
 /// Good practice: Rendering is made to be generic over the backend using this trait, which
 /// is to be implemented on the specific `Renderer`.

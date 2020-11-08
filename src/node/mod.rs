@@ -237,7 +237,13 @@ impl ChannelTypeTrait for ArrayChannelType {
             item_type_b = &array.item_type;
         }
 
-        item_type_a.is_abi_compatible(item_type_b)
+        if let (ChannelType::Primitive(primitive_type_a), ChannelType::Primitive(primitive_type_b)) =
+            (item_type_a.as_ref(), item_type_b.as_ref())
+        {
+            primitive_type_a.kind().is_abi_compatible(&primitive_type_b.kind())
+        } else {
+            item_type_a.is_abi_compatible(item_type_b)
+        }
     }
 }
 
@@ -247,7 +253,7 @@ impl From<ArrayChannelType> for ChannelType {
     }
 }
 
-#[derive(Debug, Hash, PartialEq, Eq)]
+#[derive(Debug, Hash, PartialEq, Eq, Clone)]
 pub struct Channel {
     pub title: String,
     pub description: Option<String>,
@@ -281,9 +287,34 @@ impl<'a> From<&'a Channel> for ChannelRef<'a> {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct NodeConfiguration {
     pub channels_input: Vec<Channel>,
     pub channels_output: Vec<Channel>,
+}
+
+impl NodeConfiguration {
+    pub fn channels(&self, direction: ChannelDirection) -> &Vec<Channel> {
+        match direction {
+            ChannelDirection::In => &self.channels_input,
+            ChannelDirection::Out => &self.channels_output,
+        }
+    }
+
+    pub fn channels_mut(&mut self, direction: ChannelDirection) -> &mut Vec<Channel> {
+        match direction {
+            ChannelDirection::In => &mut self.channels_input,
+            ChannelDirection::Out => &mut self.channels_output,
+        }
+    }
+
+    pub fn channel(&self, direction: ChannelDirection, index: usize) -> &Channel {
+        &self.channels(direction)[index]
+    }
+
+    pub fn channel_mut(&mut self, direction: ChannelDirection, index: usize) -> &mut Channel {
+        &mut self.channels_mut(direction)[index]
+    }
 }
 
 pub trait NodeBehaviour {

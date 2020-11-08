@@ -182,6 +182,7 @@ impl<'a, M: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a, M, R>
     pub fn build(mut self) -> FloatingPane<'a, M, R, C> {
         FloatingPane {
             state: self.state,
+            behaviour_data: self.behaviour_data,
             element_tree: {
                 let mut column = Column::<M, R>::new();
 
@@ -251,6 +252,7 @@ impl FloatingPaneState {
 /// A single floating pane within the [`FloatingPanes`] widget.
 pub struct FloatingPane<'a, M: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a, M, R>> {
     pub state: &'a mut FloatingPaneState,
+    pub behaviour_data: C::FloatingPaneBehaviourData,
     pub element_tree: Element<'a, M, R>,
     pub __marker: std::marker::PhantomData<C>,
 }
