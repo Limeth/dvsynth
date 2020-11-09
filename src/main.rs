@@ -3,7 +3,11 @@
 #![feature(iterator_fold_self)]
 //!
 //! Task list:
-//! * Define channel types
+//! * Custom UI rendering:
+//!     * Procedurally generated UI (Iced)
+//!     * CPU Canvas (WASM) https://github.com/embedded-graphics/embedded-graphics
+//!     * Node Definitions (displaying GPU-rendered texture)
+//! * Display type tooltips when hovering over channels
 //! * Add `NodeElement` styles
 //!
 
@@ -12,8 +16,9 @@ use iced::{window, Application, Command, Settings};
 use iced_wgpu::Renderer;
 use node::*;
 use petgraph::graph::NodeIndex;
-use petgraph::{stable_graph::StableGraph, Directed};
+use petgraph::{stable_graph::StableGraph, Directed, Direction};
 use std::borrow::Cow;
+use std::collections::HashSet;
 use style::*;
 use widgets::*;
 
@@ -22,12 +27,6 @@ pub mod node;
 pub mod style;
 pub mod util;
 pub mod widgets;
-
-struct ApplicationState {
-    graph: Graph,
-    floating_panes_state: FloatingPanesState,
-    floating_panes_content_state: FloatingPanesBehaviourState,
-}
 
 #[derive(Debug, Clone)]
 pub enum NodeMessage {
@@ -39,6 +38,89 @@ pub enum Message {
     NodeMessage { node: NodeIndex<u32>, message: NodeMessage },
     DisconnectChannel { channel: ChannelIdentifier },
     InsertConnection { connection: Connection },
+}
+
+struct ApplicationState {
+    graph: Graph,
+    floating_panes_state: FloatingPanesState,
+    floating_panes_content_state: FloatingPanesBehaviourState,
+}
+
+impl ApplicationState {
+    pub fn is_graph_complete(&self) -> bool {
+        for node_index in self.graph.node_indices() {
+            let node = self.graph.node_weight(node_index);
+            let node = node.as_ref().unwrap();
+            let mut input_channels =
+                (0..node.configuration.channels_input.len()).into_iter().collect::<HashSet<_>>();
+
+            for edge in self.graph.edges_directed(node_index, Direction::Incoming) {
+                input_channels.remove(&edge.weight().channel_index_to);
+            }
+
+            if !input_channels.is_empty() {
+                return false;
+            }
+        }
+
+        true
+    }
+
+    pub fn execute_graph(&mut self) {
+        if !self.is_graph_complete() {
+            return;
+        }
+
+        match petgraph::algo::toposort(&self.graph, None) {
+            Ok(ordered_node_indices) => {
+                for node_index in ordered_node_indices {
+                    {
+                        let mut node = self.graph.node_weight_mut(node_index);
+                        let node = node.as_mut().unwrap();
+
+                        node.ready_output_values();
+                    }
+
+                    let node = self.graph.node_weight(node_index);
+                    let node = node.as_ref().unwrap();
+                    // FIXME: Because StableGraph::find_edge returns an `Option<_>` rather than
+                    // `Vec<_>`, we must iterate over all edges
+                    let input_values = ChannelValues {
+                        values: {
+                            let mut input_values: Vec<Option<ChannelValue>> =
+                                vec![None; node.configuration.channels_input.len()];
+                            for edge_index in self.graph.edge_indices() {
+                                let (from_index, to_index) = self.graph.edge_endpoints(edge_index).unwrap();
+
+                                if to_index == node_index {
+                                    let from = self.graph.node_weight(from_index).unwrap();
+                                    let edge = self.graph.edge_weight(edge_index).unwrap();
+
+                                    input_values[edge.channel_index_to] = Some(
+                                        from.execution_output_values.as_ref().unwrap().borrow().values
+                                            [edge.channel_index_from]
+                                            .clone(),
+                                    );
+                                }
+                            }
+
+                            input_values
+                                .into_iter()
+                                .map(|value| value.expect("An input channel is missing a value."))
+                                .collect::<Vec<_>>()
+                                .into_boxed_slice()
+                        },
+                    };
+                    let mut output_values = node.execution_output_values.as_ref().unwrap().borrow_mut();
+                    node.behaviour.execute(&input_values, &mut output_values);
+                }
+            }
+            Err(cycle) => {
+                // FIXME
+                panic!("Found a cycle in the graph.");
+            }
+        }
+    }
 }
 
 impl Application for ApplicationState {
@@ -55,39 +137,57 @@ impl Application for ApplicationState {
                     use PrimitiveChannelType::*;
                     let mut graph = Graph::new();
 
+                    // graph.add_node(NodeData::new(
+                    //     "Node A",
+                    //     [10.0, 10.0],
+                    //     Box::new(TestNodeBehaviour {
+                    //         name: "Behaviour A".to_string(),
+                    //         channels_input: vec![Primitive(U8)],
+                    //         channels_output: vec![Primitive(U8), Primitive(U32)],
+                    //     }),
+                    // ));
+                    // graph.add_node(NodeData::new(
+                    //     "Node B",
+                    //     [110.0, 10.0],
+                    //     Box::new(TestNodeBehaviour {
+                    //         name: "Behaviour B".to_string(),
+                    //         channels_input: vec![Primitive(U8), Primitive(U8), Primitive(U32)],
+                    //         channels_output: vec![Primitive(U8)],
+                    //     }),
+                    // ));
+                    // graph.add_node(NodeData::new(
+                    //     "Node C",
+                    //     [210.0, 10.0],
+                    //     Box::new(TestNodeBehaviour {
+                    //         name: "Behaviour C".to_string(),
+                    //         channels_input: vec![
+                    //             Primitive(U8),
+                    //             Array(ArrayChannelType::new(Array(ArrayChannelType::new(F32, 4)), 8)),
+                    //         ],
+                    //         channels_output: vec![
+                    //             Primitive(U8),
+                    //             Opaque(Texture(TextureChannelType {})),
+                    //             Array(ArrayChannelType::new(U8, 4)),
+                    //         ],
+                    //     }),
+                    // ));
+
                     graph.add_node(NodeData::new(
-                        "Node A",
-                        [10.0, 10.0],
-                        Box::new(TestNodeBehaviour {
-                            name: "Behaviour A".to_string(),
-                            channels_input: vec![Primitive(U8)],
-                            channels_output: vec![Primitive(U8), Primitive(U32)],
-                        }),
-                    ));
-                    graph.add_node(NodeData::new(
-                        "Node B",
-                        [110.0, 10.0],
-                        Box::new(TestNodeBehaviour {
-                            name: "Behaviour B".to_string(),
-                            channels_input: vec![Primitive(U8), Primitive(U8), Primitive(U32)],
-                            channels_output: vec![Primitive(U8)],
-                        }),
-                    ));
-                    graph.add_node(NodeData::new(
-                        "Node C",
+                        "My Constant Node #1",
                         [210.0, 10.0],
-                        Box::new(TestNodeBehaviour {
-                            name: "Behaviour C".to_string(),
-                            channels_input: vec![
-                                Primitive(U8),
-                                Array(ArrayChannelType::new(Array(ArrayChannelType::new(F32, 4)), 8)),
-                            ],
-                            channels_output: vec![
-                                Primitive(U8),
-                                Opaque(Texture(TextureChannelType {})),
-                                Array(ArrayChannelType::new(U8, 4)),
-                            ],
-                        }),
+                        Box::new(ConstantNodeBehaviour { value: 42 }),
+                    ));
+
+                    graph.add_node(NodeData::new(
+                        "My Constant Node #2",
+                        [10.0, 10.0],
+                        Box::new(ConstantNodeBehaviour { value: 84 }),
+                    ));
+
+                    graph.add_node(NodeData::new(
+                        "My Bin Op #1",
+                        [410.0, 10.0],
+                        Box::new(BinaryOpNodeBehaviour { op: BinaryOp::Add }),
                     ));
 
                     graph
@@ -151,6 +251,9 @@ impl Application for ApplicationState {
     }
 
     fn view(&mut self) -> iced::Element<Message> {
+        // FIXME: Decouple from UI rendering loop
+        self.execute_graph();
+
         let theme: Box<dyn Theme> = Box::new(style::Dark);
         let node_indices = self.graph.node_indices().collect::<Vec<_>>();
         // TODO: do not recompute every time `view` is called

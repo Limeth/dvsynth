@@ -1,5 +1,6 @@
 use crate::node::*;
 use crate::*;
+use std::cell::RefCell;
 use vek::Vec2;
 
 pub type NodeIndex = petgraph::graph::NodeIndex<u32>;
@@ -17,6 +18,8 @@ pub struct NodeData {
     pub floating_pane_behaviour_state: FloatingPaneBehaviourState,
     pub behaviour: Box<dyn NodeBehaviour>,
     pub configuration: NodeConfiguration,
+    /// Output values computed during graph execution.
+    pub execution_output_values: Option<RefCell<ChannelValues>>,
 }
 
 impl NodeData {
@@ -33,7 +36,13 @@ impl NodeData {
             floating_pane_behaviour_state: Default::default(),
             configuration: behaviour.update(),
             behaviour,
+            execution_output_values: None,
         }
+    }
+
+    pub fn ready_output_values(&mut self) {
+        self.execution_output_values =
+            Some(RefCell::new(ChannelValues::zeroed(&self.configuration.channels_output)));
     }
 
     pub fn view(

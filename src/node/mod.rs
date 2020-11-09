@@ -1,5 +1,8 @@
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::borrow::Cow;
 use std::fmt::Display;
+use std::io::Cursor;
+use std::ops::{Add, Deref, DerefMut, Div, Index, IndexMut, Mul, Sub};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChannelDirection {
@@ -261,8 +264,8 @@ pub struct Channel {
 }
 
 impl Channel {
-    pub fn new(title: impl ToString, ty: ChannelType) -> Self {
-        Self { title: title.to_string(), description: None, ty }
+    pub fn new(title: impl ToString, ty: impl Into<ChannelType>) -> Self {
+        Self { title: title.to_string(), description: None, ty: ty.into() }
     }
 
     pub fn with_description(mut self, description: impl ToString) -> Self {
@@ -317,38 +320,187 @@ impl NodeConfiguration {
     }
 }
 
+/// Data passed from/to a channel
+#[derive(Clone)]
+pub struct ChannelValue {
+    pub data: Box<[u8]>,
+}
+
+impl ChannelValue {
+    pub fn as_ref(&self) -> &[u8] {
+        self.data.as_ref()
+    }
+
+    pub fn as_mut(&mut self) -> &mut [u8] {
+        self.data.as_mut()
+    }
+}
+
+impl ChannelValue {
+    pub fn zeroed(ty: &ChannelType) -> Self {
+        Self { data: vec![0_u8; ty.value_size()].into_boxed_slice() }
+    }
+}
+
+impl Deref for ChannelValue {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        self.data.as_ref()
+    }
+}
+
+impl DerefMut for ChannelValue {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.data.as_mut()
+    }
+}
+
+/// `ChannelValue`s for multiple channels
+pub struct ChannelValues {
+    pub values: Box<[ChannelValue]>,
+}
+
+impl ChannelValues {
+    pub fn zeroed(channels: &[Channel]) -> Self {
+        Self {
+            values: channels
+                .iter()
+                .map(|channel| ChannelValue::zeroed(&channel.ty))
+                .collect::<Vec<_>>()
+                .into_boxed_slice(),
+        }
+    }
+}
+
+impl Index<usize> for ChannelValues {
+    type Output = ChannelValue;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.values[index]
+    }
+}
+
+impl IndexMut<usize> for ChannelValues {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        &mut self.values[index]
+    }
+}
+
 pub trait NodeBehaviour {
     fn name(&self) -> &str;
     fn update(&mut self) -> NodeConfiguration;
+    fn execute(&self, inputs: &ChannelValues, outputs: &mut ChannelValues);
 }
 
-pub struct TestNodeBehaviour {
-    pub name: String,
-    pub channels_input: Vec<ChannelType>,
-    pub channels_output: Vec<ChannelType>,
+pub struct ConstantNodeBehaviour {
+    pub value: u32,
 }
 
-impl NodeBehaviour for TestNodeBehaviour {
+impl NodeBehaviour for ConstantNodeBehaviour {
     fn name(&self) -> &str {
-        &self.name
+        "Constant"
     }
 
     fn update(&mut self) -> NodeConfiguration {
         NodeConfiguration {
-            channels_input: self
-                .channels_input
-                .iter()
-                .cloned()
-                .enumerate()
-                .map(|(i, ty)| Channel { title: format!("In {}: {}", i, ty), description: None, ty })
-                .collect(),
-            channels_output: self
-                .channels_output
-                .iter()
-                .cloned()
-                .enumerate()
-                .map(|(i, ty)| Channel { title: format!("Out {}: {}", i, ty), description: None, ty })
-                .collect(),
+            channels_input: Vec::new(),
+            channels_output: vec![Channel::new("value", PrimitiveChannelType::U32)],
+        }
+    }
+
+    fn execute(&self, _inputs: &ChannelValues, outputs: &mut ChannelValues) {
+        let mut cursor = Cursor::new(outputs[0].as_mut());
+
+        cursor.write_u32::<LittleEndian>(self.value).unwrap();
+    }
+}
+
+#[derive(PartialEq, Eq, Copy, Clone, Debug)]
+pub enum BinaryOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    // Or,
+    // And,
+    // Xor,
+}
+
+impl BinaryOp {
+    pub fn apply<T>(self, lhs: T, rhs: T) -> T
+    where T: Add<Output = T> + Sub<Output = T> + Mul<Output = T> + Div<Output = T> {
+        match self {
+            BinaryOp::Add => Add::add(lhs, rhs),
+            BinaryOp::Sub => Sub::sub(lhs, rhs),
+            BinaryOp::Mul => Mul::mul(lhs, rhs),
+            BinaryOp::Div => Div::div(lhs, rhs),
         }
     }
 }
+
+pub struct BinaryOpNodeBehaviour {
+    pub op: BinaryOp,
+}
+
+impl NodeBehaviour for BinaryOpNodeBehaviour {
+    fn name(&self) -> &str {
+        "Binary Operation"
+    }
+
+    fn update(&mut self) -> NodeConfiguration {
+        NodeConfiguration {
+            channels_input: vec![
+                Channel::new("lhs", PrimitiveChannelType::U32),
+                Channel::new("rhs", PrimitiveChannelType::U32),
+            ],
+            channels_output: vec![Channel::new("result", PrimitiveChannelType::U32)],
+        }
+    }
+
+    fn execute(&self, inputs: &ChannelValues, outputs: &mut ChannelValues) {
+        let lhs: u32 = inputs[0].as_ref().read_u32::<LittleEndian>().unwrap();
+        let rhs: u32 = inputs[1].as_ref().read_u32::<LittleEndian>().unwrap();
+        let result = self.op.apply(lhs, rhs);
+        let mut output_cursor = Cursor::new(outputs[0].as_mut());
+
+        dbg!(result);
+
+        output_cursor.write_u32::<LittleEndian>(result).unwrap();
+    }
+}
+
+// pub struct TestNodeBehaviour {
+//     pub name: String,
+//     pub channels_input: Vec<ChannelType>,
+//     pub channels_output: Vec<ChannelType>,
+// }
+
+// impl NodeBehaviour for TestNodeBehaviour {
+//     fn name(&self) -> &str {
+//         &self.name
+//     }
+
+//     fn update(&mut self) -> NodeConfiguration {
+//         NodeConfiguration {
+//             channels_input: self
+//                 .channels_input
+//                 .iter()
+//                 .cloned()
+//                 .enumerate()
+//                 .map(|(i, ty)| Channel { title: format!("In {}: {}", i, ty), description: None, ty })
+//                 .collect(),
+//             channels_output: self
+//                 .channels_output
+//                 .iter()
+//                 .cloned()
+//                 .enumerate()
+//                 .map(|(i, ty)| Channel { title: format!("Out {}: {}", i, ty), description: None, ty })
+//                 .collect(),
+//         }
+//     }
+
+//     fn execute(&self, inputs: &ChannelValues, outputs: &mut ChannelValues) {
+
+//     }
+// }
