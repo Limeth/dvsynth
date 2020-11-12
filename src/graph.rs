@@ -1,5 +1,6 @@
 use crate::node::*;
 use crate::*;
+use iced::Element;
 use std::cell::RefCell;
 use vek::Vec2;
 
@@ -29,14 +30,26 @@ impl NodeData {
         mut behaviour: Box<dyn NodeBehaviour>,
     ) -> Self
     {
-        Self {
+        let mut result = Self {
             title: title.to_string(),
             element_state: Default::default(),
             floating_pane_state: FloatingPaneState::with_position(position),
             floating_pane_behaviour_state: Default::default(),
-            configuration: behaviour.update(),
+            configuration: Default::default(),
             behaviour,
             execution_output_values: None,
+        };
+
+        result.update(NodeEvent::Update);
+
+        result
+    }
+
+    pub fn update(&mut self, event: NodeEvent) {
+        for command in self.behaviour.update(event) {
+            match command {
+                NodeCommand::Configure(configuration) => self.configuration = configuration,
+            }
         }
     }
 
@@ -51,7 +64,14 @@ impl NodeData {
         theme: &dyn Theme,
     ) -> FloatingPane<'_, Message, Renderer, crate::widgets::node::FloatingPanesBehaviour<Message>>
     {
-        let mut builder = NodeElement::builder(index, &mut self.element_state);
+        let mut builder = NodeElement::builder(index, &mut self.element_state).node_behaviour_element(
+            self.behaviour.view().map(Element::from).map(move |element| {
+                element.map(move |message| Message::NodeMessage {
+                    node: index,
+                    message: NodeMessage::NodeBehaviourMessage(message),
+                })
+            }),
+        );
 
         for input_channel in &self.configuration.channels_input {
             builder = builder.push_input_channel(input_channel);
@@ -75,7 +95,7 @@ impl NodeData {
             FloatingPaneBehaviourData { node_configuration: self.configuration.clone() },
         )
         .title(Some(&self.title))
-        .title_size(Some(16))
+        .title_size(Some(style::consts::TEXT_SIZE_TITLE))
         .title_margin(consts::SPACING)
         .style(Some(theme.floating_pane()))
         .build()

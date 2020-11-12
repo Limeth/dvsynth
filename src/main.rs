@@ -1,10 +1,13 @@
 #![feature(const_fn_floating_point_arithmetic)]
 #![feature(bindings_after_at)]
 #![feature(iterator_fold_self)]
+#![feature(trivial_bounds)]
 //!
 //! Task list:
+//! * Mark invalid connections and cycles in the graph
+//! * Do not copy input values, take pass as references
+//! * Fix the node layout when the title is wider than the content
 //! * Custom UI rendering:
-//!     * Procedurally generated UI (Iced)
 //!     * CPU Canvas (WASM) https://github.com/embedded-graphics/embedded-graphics
 //!     * Node Definitions (displaying GPU-rendered texture)
 //! * Display type tooltips when hovering over channels
@@ -16,6 +19,7 @@ use iced::{window, Application, Command, Settings};
 use iced_wgpu::Renderer;
 use node::*;
 use petgraph::graph::NodeIndex;
+use petgraph::visit::EdgeRef;
 use petgraph::{stable_graph::StableGraph, Directed, Direction};
 use std::borrow::Cow;
 use std::collections::HashSet;
@@ -30,6 +34,7 @@ pub mod widgets;
 
 #[derive(Debug, Clone)]
 pub enum NodeMessage {
+    NodeBehaviourMessage(Box<dyn NodeBehaviourMessage>),
     UpdateTextInput(String),
 }
 
@@ -47,15 +52,24 @@ struct ApplicationState {
 }
 
 impl ApplicationState {
-    pub fn is_graph_complete(&self) -> bool {
+    pub fn is_graph_complete(&mut self) -> bool {
         for node_index in self.graph.node_indices() {
             let node = self.graph.node_weight(node_index);
             let node = node.as_ref().unwrap();
             let mut input_channels =
                 (0..node.configuration.channels_input.len()).into_iter().collect::<HashSet<_>>();
 
-            for edge in self.graph.edges_directed(node_index, Direction::Incoming) {
-                input_channels.remove(&edge.weight().channel_index_to);
+            for edge_ref in self.graph.edges_directed(node_index, Direction::Incoming) {
+                let edge = edge_ref.weight();
+                let source_index = edge_ref.source();
+                let source_node: &NodeData = self.graph.node_weight(source_index).unwrap();
+                let source_channel =
+                    source_node.configuration.channel(ChannelDirection::Out, edge.channel_index_from);
+                let target_channel = node.configuration.channel(ChannelDirection::In, edge.channel_index_to);
+
+                if source_channel.ty.is_abi_compatible(&target_channel.ty) {
+                    input_channels.remove(&edge.channel_index_to);
+                }
             }
 
             if !input_channels.is_empty() {
@@ -175,19 +189,19 @@ impl Application for ApplicationState {
                     graph.add_node(NodeData::new(
                         "My Constant Node #1",
                         [210.0, 10.0],
-                        Box::new(ConstantNodeBehaviour { value: 42 }),
+                        Box::new(ConstantNodeBehaviour::new(PrimitiveChannelValue::U32(42))),
                     ));
 
                     graph.add_node(NodeData::new(
                         "My Constant Node #2",
                         [10.0, 10.0],
-                        Box::new(ConstantNodeBehaviour { value: 84 }),
+                        Box::new(ConstantNodeBehaviour::new(PrimitiveChannelValue::U32(84))),
                     ));
 
                     graph.add_node(NodeData::new(
                         "My Bin Op #1",
                         [410.0, 10.0],
-                        Box::new(BinaryOpNodeBehaviour { op: BinaryOp::Add }),
+                        Box::new(BinaryOpNodeBehaviour::default()),
                     ));
 
                     graph
@@ -207,6 +221,11 @@ impl Application for ApplicationState {
         match message {
             Message::NodeMessage { node, message } => {
                 match message {
+                    NodeMessage::NodeBehaviourMessage(message) => {
+                        if let Some(node_data) = self.graph.node_weight_mut(node) {
+                            node_data.update(NodeEvent::Message(message));
+                        }
+                    }
                     NodeMessage::UpdateTextInput(new_value) => {
                         if let Some(node_data) = self.graph.node_weight_mut(node) {
                             // node_data.element_state.text_input_value = new_value;

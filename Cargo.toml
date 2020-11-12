@@ -17,6 +17,7 @@ iced_graphics = { git = "https://github.com/Limeth/iced.git", features = ["canva
 iced_native = { git = "https://github.com/Limeth/iced.git" }
 iced_wgpu = { git = "https://github.com/Limeth/iced.git", features = ["canvas"] }
 byteorder = "1"
+downcast-rs = "1.2.0"
 indexmap = "1.6"
 lyon_geom = "0.16"
 ordered-float = "2"

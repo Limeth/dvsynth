@@ -1,8 +1,14 @@
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use byteorder::{ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
+use downcast_rs::{impl_downcast, Downcast};
+use iced::widget::pick_list::{PickList, State as PickListState};
+use iced::Element;
 use std::borrow::Cow;
-use std::fmt::Display;
-use std::io::Cursor;
+use std::fmt::{Debug, Display};
+use std::io::{Cursor, Read, Write};
 use std::ops::{Add, Deref, DerefMut, Div, Index, IndexMut, Mul, Sub};
+
+pub use binary_op::*;
+pub use constant::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChannelDirection {
@@ -94,6 +100,79 @@ impl PrimitiveKind {
     }
 }
 
+/// Should not be used for large data storage, as the size is defined by the largest variant.
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub enum PrimitiveChannelValue {
+    U8(u8),
+    U16(u16),
+    U32(u32),
+    U64(u64),
+    U128(u128),
+    I8(i8),
+    I16(i16),
+    I32(i32),
+    I64(i64),
+    I128(i128),
+    F32(f32),
+    F64(f64),
+}
+
+impl PrimitiveChannelValue {
+    pub fn ty(&self) -> PrimitiveChannelType {
+        use PrimitiveChannelValue::*;
+        match self {
+            U8(_) => PrimitiveChannelType::U8,
+            U16(_) => PrimitiveChannelType::U16,
+            U32(_) => PrimitiveChannelType::U32,
+            U64(_) => PrimitiveChannelType::U64,
+            U128(_) => PrimitiveChannelType::U128,
+            I8(_) => PrimitiveChannelType::I8,
+            I16(_) => PrimitiveChannelType::I16,
+            I32(_) => PrimitiveChannelType::I32,
+            I64(_) => PrimitiveChannelType::I64,
+            I128(_) => PrimitiveChannelType::I128,
+            F32(_) => PrimitiveChannelType::F32,
+            F64(_) => PrimitiveChannelType::F64,
+        }
+    }
+
+    pub fn value_to_string(&self) -> String {
+        use PrimitiveChannelValue::*;
+        match self {
+            U8(value) => value.to_string(),
+            U16(value) => value.to_string(),
+            U32(value) => value.to_string(),
+            U64(value) => value.to_string(),
+            U128(value) => value.to_string(),
+            I8(value) => value.to_string(),
+            I16(value) => value.to_string(),
+            I32(value) => value.to_string(),
+            I64(value) => value.to_string(),
+            I128(value) => value.to_string(),
+            F32(value) => value.to_string(),
+            F64(value) => value.to_string(),
+        }
+    }
+
+    pub fn write<E: ByteOrder>(&self, write: &mut dyn Write) -> std::io::Result<()> {
+        use PrimitiveChannelValue::*;
+        match self {
+            U8(value) => write.write_u8(*value),
+            U16(value) => write.write_u16::<E>(*value),
+            U32(value) => write.write_u32::<E>(*value),
+            U64(value) => write.write_u64::<E>(*value),
+            U128(value) => write.write_u128::<E>(*value),
+            I8(value) => write.write_i8(*value),
+            I16(value) => write.write_i16::<E>(*value),
+            I32(value) => write.write_i32::<E>(*value),
+            I64(value) => write.write_i64::<E>(*value),
+            I128(value) => write.write_i128::<E>(*value),
+            F32(value) => write.write_f32::<E>(*value),
+            F64(value) => write.write_f64::<E>(*value),
+        }
+    }
+}
+
 #[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
 pub enum PrimitiveChannelType {
     U8,
@@ -111,6 +190,11 @@ pub enum PrimitiveChannelType {
 }
 
 impl PrimitiveChannelType {
+    pub const VALUES: [PrimitiveChannelType; 12] = {
+        use PrimitiveChannelType::*;
+        [U8, U16, U32, U64, U128, I8, I16, I32, I64, I128, F32, F64]
+    };
+
     pub fn kind(&self) -> PrimitiveKind {
         use PrimitiveChannelType::*;
         match self {
@@ -118,6 +202,62 @@ impl PrimitiveChannelType {
             I8 | I16 | I32 | I64 | I128 => PrimitiveKind::SignedInteger,
             F32 | F64 => PrimitiveKind::Float,
         }
+    }
+
+    pub fn default_value(&self) -> PrimitiveChannelValue {
+        use PrimitiveChannelType::*;
+        match self {
+            U8 => PrimitiveChannelValue::U8(Default::default()),
+            U16 => PrimitiveChannelValue::U16(Default::default()),
+            U32 => PrimitiveChannelValue::U32(Default::default()),
+            U64 => PrimitiveChannelValue::U64(Default::default()),
+            U128 => PrimitiveChannelValue::U128(Default::default()),
+            I8 => PrimitiveChannelValue::I8(Default::default()),
+            I16 => PrimitiveChannelValue::I16(Default::default()),
+            I32 => PrimitiveChannelValue::I32(Default::default()),
+            I64 => PrimitiveChannelValue::I64(Default::default()),
+            I128 => PrimitiveChannelValue::I128(Default::default()),
+            F32 => PrimitiveChannelValue::F32(Default::default()),
+            F64 => PrimitiveChannelValue::F64(Default::default()),
+        }
+    }
+
+    pub fn parse(&self, from: impl AsRef<str>) -> Option<PrimitiveChannelValue> {
+        use PrimitiveChannelType::*;
+        Some(match self {
+            U8 => PrimitiveChannelValue::U8(from.as_ref().parse().ok()?),
+            U16 => PrimitiveChannelValue::U16(from.as_ref().parse().ok()?),
+            U32 => PrimitiveChannelValue::U32(from.as_ref().parse().ok()?),
+            U64 => PrimitiveChannelValue::U64(from.as_ref().parse().ok()?),
+            U128 => PrimitiveChannelValue::U128(from.as_ref().parse().ok()?),
+            I8 => PrimitiveChannelValue::I8(from.as_ref().parse().ok()?),
+            I16 => PrimitiveChannelValue::I16(from.as_ref().parse().ok()?),
+            I32 => PrimitiveChannelValue::I32(from.as_ref().parse().ok()?),
+            I64 => PrimitiveChannelValue::I64(from.as_ref().parse().ok()?),
+            I128 => PrimitiveChannelValue::I128(from.as_ref().parse().ok()?),
+            F32 => PrimitiveChannelValue::F32(from.as_ref().parse().ok()?),
+            F64 => PrimitiveChannelValue::F64(from.as_ref().parse().ok()?),
+        })
+    }
+
+    pub fn read<E: ByteOrder, R>(&self, read: R) -> std::io::Result<PrimitiveChannelValue>
+    where Cursor<R>: Read {
+        use PrimitiveChannelType::*;
+        let mut read = Cursor::new(read);
+        Ok(match self {
+            U8 => PrimitiveChannelValue::U8(read.read_u8()?),
+            U16 => PrimitiveChannelValue::U16(read.read_u16::<E>()?),
+            U32 => PrimitiveChannelValue::U32(read.read_u32::<E>()?),
+            U64 => PrimitiveChannelValue::U64(read.read_u64::<E>()?),
+            U128 => PrimitiveChannelValue::U128(read.read_u128::<E>()?),
+            I8 => PrimitiveChannelValue::I8(read.read_i8()?),
+            I16 => PrimitiveChannelValue::I16(read.read_i16::<E>()?),
+            I32 => PrimitiveChannelValue::I32(read.read_i32::<E>()?),
+            I64 => PrimitiveChannelValue::I64(read.read_i64::<E>()?),
+            I128 => PrimitiveChannelValue::I128(read.read_i128::<E>()?),
+            F32 => PrimitiveChannelValue::F32(read.read_f32::<E>()?),
+            F64 => PrimitiveChannelValue::F64(read.read_f64::<E>()?),
+        })
     }
 }
 
@@ -290,7 +430,7 @@ impl<'a> From<&'a Channel> for ChannelRef<'a> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct NodeConfiguration {
     pub channels_input: Vec<Channel>,
     pub channels_output: Vec<Channel>,
@@ -387,120 +527,44 @@ impl IndexMut<usize> for ChannelValues {
     }
 }
 
+pub enum NodeCommand {
+    Configure(NodeConfiguration),
+}
+
+pub trait NodeBehaviourMessage: Downcast + Debug + Send {
+    fn dyn_clone(&self) -> Box<dyn NodeBehaviourMessage>;
+}
+
+impl_downcast!(NodeBehaviourMessage);
+
+macro_rules! impl_node_behaviour_message {
+    ($target_type:ident) => {
+        impl NodeBehaviourMessage for $target_type {
+            fn dyn_clone(&self) -> Box<dyn NodeBehaviourMessage> {
+                Box::new(self.clone())
+            }
+        }
+    };
+}
+
+impl Clone for Box<dyn NodeBehaviourMessage> {
+    fn clone(&self) -> Self {
+        NodeBehaviourMessage::dyn_clone(self.as_ref())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum NodeEvent {
+    Update,
+    Message(Box<dyn NodeBehaviourMessage>),
+}
+
 pub trait NodeBehaviour {
     fn name(&self) -> &str;
-    fn update(&mut self) -> NodeConfiguration;
+    fn update(&mut self, event: NodeEvent) -> Vec<NodeCommand>;
+    fn view(&mut self) -> Option<Element<Box<dyn NodeBehaviourMessage>>>;
     fn execute(&self, inputs: &ChannelValues, outputs: &mut ChannelValues);
 }
 
-pub struct ConstantNodeBehaviour {
-    pub value: u32,
-}
-
-impl NodeBehaviour for ConstantNodeBehaviour {
-    fn name(&self) -> &str {
-        "Constant"
-    }
-
-    fn update(&mut self) -> NodeConfiguration {
-        NodeConfiguration {
-            channels_input: Vec::new(),
-            channels_output: vec![Channel::new("value", PrimitiveChannelType::U32)],
-        }
-    }
-
-    fn execute(&self, _inputs: &ChannelValues, outputs: &mut ChannelValues) {
-        let mut cursor = Cursor::new(outputs[0].as_mut());
-
-        cursor.write_u32::<LittleEndian>(self.value).unwrap();
-    }
-}
-
-#[derive(PartialEq, Eq, Copy, Clone, Debug)]
-pub enum BinaryOp {
-    Add,
-    Sub,
-    Mul,
-    Div,
-    // Or,
-    // And,
-    // Xor,
-}
-
-impl BinaryOp {
-    pub fn apply<T>(self, lhs: T, rhs: T) -> T
-    where T: Add<Output = T> + Sub<Output = T> + Mul<Output = T> + Div<Output = T> {
-        match self {
-            BinaryOp::Add => Add::add(lhs, rhs),
-            BinaryOp::Sub => Sub::sub(lhs, rhs),
-            BinaryOp::Mul => Mul::mul(lhs, rhs),
-            BinaryOp::Div => Div::div(lhs, rhs),
-        }
-    }
-}
-
-pub struct BinaryOpNodeBehaviour {
-    pub op: BinaryOp,
-}
-
-impl NodeBehaviour for BinaryOpNodeBehaviour {
-    fn name(&self) -> &str {
-        "Binary Operation"
-    }
-
-    fn update(&mut self) -> NodeConfiguration {
-        NodeConfiguration {
-            channels_input: vec![
-                Channel::new("lhs", PrimitiveChannelType::U32),
-                Channel::new("rhs", PrimitiveChannelType::U32),
-            ],
-            channels_output: vec![Channel::new("result", PrimitiveChannelType::U32)],
-        }
-    }
-
-    fn execute(&self, inputs: &ChannelValues, outputs: &mut ChannelValues) {
-        let lhs: u32 = inputs[0].as_ref().read_u32::<LittleEndian>().unwrap();
-        let rhs: u32 = inputs[1].as_ref().read_u32::<LittleEndian>().unwrap();
-        let result = self.op.apply(lhs, rhs);
-        let mut output_cursor = Cursor::new(outputs[0].as_mut());
-
-        dbg!(result);
-
-        output_cursor.write_u32::<LittleEndian>(result).unwrap();
-    }
-}
-
-// pub struct TestNodeBehaviour {
-//     pub name: String,
-//     pub channels_input: Vec<ChannelType>,
-//     pub channels_output: Vec<ChannelType>,
-// }
-
-// impl NodeBehaviour for TestNodeBehaviour {
-//     fn name(&self) -> &str {
-//         &self.name
-//     }
-
-//     fn update(&mut self) -> NodeConfiguration {
-//         NodeConfiguration {
-//             channels_input: self
-//                 .channels_input
-//                 .iter()
-//                 .cloned()
-//                 .enumerate()
-//                 .map(|(i, ty)| Channel { title: format!("In {}: {}", i, ty), description: None, ty })
-//                 .collect(),
-//             channels_output: self
-//                 .channels_output
-//                 .iter()
-//                 .cloned()
-//                 .enumerate()
-//                 .map(|(i, ty)| Channel { title: format!("Out {}: {}", i, ty), description: None, ty })
-//                 .collect(),
-//         }
-//     }
-
-//     fn execute(&self, inputs: &ChannelValues, outputs: &mut ChannelValues) {
-
-//     }
-// }
+pub mod binary_op;
+pub mod constant;

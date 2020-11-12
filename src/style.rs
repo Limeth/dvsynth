@@ -5,6 +5,8 @@ use iced::{button, checkbox, container, progress_bar, radio, rule, scrollable, s
 pub mod consts {
     use super::*;
 
+    pub const TEXT_SIZE_REGULAR: u16 = 14;
+    pub const TEXT_SIZE_TITLE: u16 = 16;
     pub const SPACING_VERTICAL: u16 = 4;
     pub const SPACING_HORIZONTAL: u16 = SPACING_VERTICAL * 2;
     pub const SPACING: Spacing = Spacing::from_axes(SPACING_HORIZONTAL, SPACING_VERTICAL);

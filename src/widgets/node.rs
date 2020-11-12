@@ -1,7 +1,8 @@
 use super::*;
-use crate::node::{ChannelRef, ChannelType, ChannelTypeTrait, NodeConfiguration};
+use crate::node::{ChannelRef, ChannelType, ChannelTypeTrait, NodeBehaviourMessage, NodeConfiguration};
 use crate::util::{PathBuilderExt, RectangleExt, Segments};
 use crate::{style, util, ChannelDirection, ChannelIdentifier, Connection, Message, NodeMessage};
+use iced::widget::Space;
 use iced_graphics::canvas::{Fill, FillRule, Frame, LineCap, LineJoin, Path, Stroke};
 use iced_graphics::{self, Backend, Defaults, Primitive};
 use iced_native::layout::{Layout, Limits, Node};
@@ -21,9 +22,7 @@ use vek::Vec2;
 
 impl<'a> ChannelRef<'a> {
     pub fn render<M: 'a + Clone, R: 'a + WidgetRenderer>(&self) -> Element<'a, M, R> {
-        Text::new(self.title.to_string())
-            .size(14) // FIXME: hardcoding bad >:(
-            .into()
+        Text::new(self.title.to_string()).size(style::consts::TEXT_SIZE_REGULAR).into()
     }
 }
 
@@ -36,6 +35,7 @@ pub struct NodeElementState {
 pub struct NodeElementBuilder<'a, M: 'a + Clone, R: 'a + WidgetRenderer> {
     index: NodeIndex,
     state: &'a mut NodeElementState,
+    node_behaviour_element: Option<Element<'a, M, R>>,
     width: Length,
     height: Length,
     extents: Vec2<u32>,
@@ -62,6 +62,7 @@ impl<'a, M: 'a + Clone, R: 'a + WidgetRenderer> NodeElementBuilder<'a, M, R> {
         Self {
             index,
             state,
+            node_behaviour_element: None,
             width: Length::Shrink,
             height: Length::Shrink,
             extents: [u32::MAX, u32::MAX].into(),
@@ -69,6 +70,15 @@ impl<'a, M: 'a + Clone, R: 'a + WidgetRenderer> NodeElementBuilder<'a, M, R> {
             output_channels: Default::default(),
             __marker: Default::default(),
         }
+    }
+
+    pub fn node_behaviour_element(
+        mut self,
+        node_behaviour_element: impl Into<Option<Element<'a, M, R>>>,
+    ) -> Self
+    {
+        self.node_behaviour_element = node_behaviour_element.into();
+        self
     }
 
     pub fn width(mut self, width: Length) -> Self {
@@ -118,46 +128,61 @@ impl<'a, M: 'a + Clone, R: 'a + WidgetRenderer> NodeElementBuilder<'a, M, R> {
             element_tree: {
                 // Element { Margin { Row [ Column [ .. ], Column [ .. ] ] } }
                 Margin::new(
-                    Row::new()
-                        .spacing(style::consts::SPACING_HORIZONTAL)
-                        .push({
-                            // input channels
-                            let mut column = Column::new()
-                                .spacing(style::consts::SPACING_VERTICAL)
-                                .align_items(Align::Start);
+                    {
+                        let mut column = Column::new().spacing(style::consts::SPACING_VERTICAL);
 
-                            for input_channel in &self.input_channels {
-                                column = column.push(input_channel.render());
-                            }
+                        if let Some(node_behaviour_element) = self.node_behaviour_element {
+                            column = column.push(node_behaviour_element);
+                        } else {
+                            // insert space to keep layout indices consistent
+                            column = column.push(Space::new(Length::Shrink, Length::Shrink));
+                        }
 
-                            column
-                        })
-                        .push({
-                            // output channels
-                            let mut column = Column::new()
-                                .spacing(style::consts::SPACING_VERTICAL)
-                                .align_items(Align::End);
+                        column = column.push(
+                            Row::new()
+                                .spacing(style::consts::SPACING_HORIZONTAL)
+                                .push({
+                                    // input channels
+                                    let mut column = Column::new()
+                                        .spacing(style::consts::SPACING_VERTICAL)
+                                        .align_items(Align::Start);
 
-                            for output_channel in &self.output_channels {
-                                column = column.push(output_channel.render());
-                            }
+                                    for input_channel in &self.input_channels {
+                                        column = column.push(input_channel.render());
+                                    }
 
-                            // let text_input = iced_native::widget::TextInput::<M, R>::new(
-                            //     &mut self.state.text_input_state,
-                            //     "",
-                            //     &self.state.text_input_value,
-                            //     {
-                            //         let index = self.index;
-                            //         move |new_value| {
-                            //             (text_input_callback)(index, new_value)
-                            //         }
-                            //     },
-                            // );
+                                    column
+                                })
+                                .push({
+                                    // output channels
+                                    let mut column = Column::new()
+                                        .spacing(style::consts::SPACING_VERTICAL)
+                                        .align_items(Align::End);
 
-                            // column = column.push(text_input);
+                                    for output_channel in &self.output_channels {
+                                        column = column.push(output_channel.render());
+                                    }
 
-                            column
-                        }),
+                                    // let text_input = iced_native::widget::TextInput::<M, R>::new(
+                                    //     &mut self.state.text_input_state,
+                                    //     "",
+                                    //     &self.state.text_input_value,
+                                    //     {
+                                    //         let index = self.index;
+                                    //         move |new_value| {
+                                    //             (text_input_callback)(index, new_value)
+                                    //         }
+                                    //     },
+                                    // );
+
+                                    // column = column.push(text_input);
+
+                                    column
+                                }),
+                        );
+
+                        column
+                    },
                     style::consts::SPACING,
                 )
                 .into()
@@ -890,6 +915,9 @@ typed_layout! {
             fn_args: [channel_direction: ChannelDirection],
             fn: |parent: Layout<'a>, channel_direction: ChannelDirection| {
                 parent
+                    .children()
+                    .nth(1)
+                    .unwrap()
                     .children()
                     .nth(1)
                     .unwrap()

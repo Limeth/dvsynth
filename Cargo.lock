@@ -512,6 +512,7 @@ name = "dvsynth"
 version = "0.1.0"
 dependencies = [
  "byteorder",
+ "downcast-rs",
  "iced",
  "iced_graphics",
  "iced_native",
