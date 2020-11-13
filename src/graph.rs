@@ -65,7 +65,7 @@ impl NodeData {
     ) -> FloatingPane<'_, Message, Renderer, crate::widgets::node::FloatingPanesBehaviour<Message>>
     {
         let mut builder = NodeElement::builder(index, &mut self.element_state).node_behaviour_element(
-            self.behaviour.view().map(Element::from).map(move |element| {
+            self.behaviour.view(theme).map(Element::from).map(move |element| {
                 element.map(move |message| Message::NodeMessage {
                     node: index,
                     message: NodeMessage::NodeBehaviourMessage(message),

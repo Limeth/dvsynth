@@ -66,7 +66,7 @@ impl NodeBehaviour for BinaryOpNodeBehaviour {
         }
     }
 
-    fn view(&mut self) -> Option<Element<Box<dyn NodeBehaviourMessage>>> {
+    fn view(&mut self, theme: &dyn Theme) -> Option<Element<Box<dyn NodeBehaviourMessage>>> {
         Some(
             Row::new()
                 .push(
@@ -82,7 +82,8 @@ impl NodeBehaviour for BinaryOpNodeBehaviour {
                             },
                         )
                         .width(Length::Fill)
-                        .text_size(style::consts::TEXT_SIZE_REGULAR),
+                        .text_size(style::consts::TEXT_SIZE_REGULAR)
+                        .style(theme.pick_list()),
                     )
                     .width(Length::Fill),
                 )
@@ -98,7 +99,8 @@ impl NodeBehaviour for BinaryOpNodeBehaviour {
                             },
                         )
                         .width(Length::Fill)
-                        .text_size(style::consts::TEXT_SIZE_REGULAR),
+                        .text_size(style::consts::TEXT_SIZE_REGULAR)
+                        .style(theme.pick_list()),
                     )
                     .width(Length::Units(48)),
                 )

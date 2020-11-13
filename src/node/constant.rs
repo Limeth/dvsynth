@@ -89,7 +89,7 @@ impl NodeBehaviour for ConstantNodeBehaviour {
         }
     }
 
-    fn view(&mut self) -> Option<Element<Box<dyn NodeBehaviourMessage>>> {
+    fn view(&mut self, theme: &dyn Theme) -> Option<Element<Box<dyn NodeBehaviourMessage>>> {
         Some(
             Row::new()
                 .push(
@@ -103,7 +103,9 @@ impl NodeBehaviour for ConstantNodeBehaviour {
                         },
                     )
                     .width(Length::Units(64))
-                    .text_size(style::consts::TEXT_SIZE_REGULAR),
+                    .text_size(style::consts::TEXT_SIZE_REGULAR)
+                    .padding(style::consts::SPACING_VERTICAL)
+                    .style(theme.pick_list()),
                 )
                 .push(
                     TextInput::new(
@@ -116,7 +118,9 @@ impl NodeBehaviour for ConstantNodeBehaviour {
                         },
                     )
                     .width(Length::Fill)
-                    .size(style::consts::TEXT_SIZE_REGULAR),
+                    .size(style::consts::TEXT_SIZE_REGULAR)
+                    .padding(style::consts::SPACING_VERTICAL)
+                    .style(theme.text_input()),
                 )
                 .align_items(Align::Center)
                 .width(Length::Fill)

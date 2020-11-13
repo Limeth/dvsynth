@@ -1,3 +1,4 @@
+use crate::style::Theme;
 use byteorder::{ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
 use downcast_rs::{impl_downcast, Downcast};
 use iced::widget::pick_list::{PickList, State as PickListState};
@@ -562,7 +563,7 @@ pub enum NodeEvent {
 pub trait NodeBehaviour {
     fn name(&self) -> &str;
     fn update(&mut self, event: NodeEvent) -> Vec<NodeCommand>;
-    fn view(&mut self) -> Option<Element<Box<dyn NodeBehaviourMessage>>>;
+    fn view(&mut self, theme: &dyn Theme) -> Option<Element<Box<dyn NodeBehaviourMessage>>>;
     fn execute(&self, inputs: &ChannelValues, outputs: &mut ChannelValues);
 }
 

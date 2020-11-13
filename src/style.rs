@@ -1,6 +1,8 @@
 use crate::widgets::floating_panes;
 use crate::Spacing;
-use iced::{button, checkbox, container, progress_bar, radio, rule, scrollable, slider, text_input, Color};
+use iced::{
+    button, checkbox, container, pick_list, progress_bar, radio, rule, scrollable, slider, text_input, Color,
+};
 
 pub mod consts {
     use super::*;
@@ -14,6 +16,7 @@ pub mod consts {
 
 pub trait Theme: std::fmt::Debug {
     fn container_pane(&self) -> Box<dyn container::StyleSheet>;
+    fn pick_list(&self) -> Box<dyn pick_list::StyleSheet>;
     fn text_input(&self) -> Box<dyn text_input::StyleSheet>;
     fn floating_panes(&self) -> Box<dyn floating_panes::FloatingPanesStyleSheet>;
     fn floating_pane(&self) -> Box<dyn floating_panes::FloatingPaneStyleSheet>;
@@ -40,16 +43,22 @@ macro_rules! themes {
                 )*
 
                 pub const TEXT_COLOR: Color = COLORS[10];
+                pub const PICK_LIST_ICON_SIZE: f32 = 0.5;
                 pub const TEXT_INPUT_COLOR: Color = TEXT_COLOR;
                 pub const TEXT_INPUT_COLOR_PLACEHOLDER: Color = COLORS[4];
                 pub const TEXT_INPUT_COLOR_SELECTION: Color = COLORS[5];
                 pub const TEXT_INPUT_COLOR_BACKGROUND: Color = COLORS[2];
-                pub const TEXT_INPUT_ACTIVE_COLOR_BORDER: Color = TEXT_INPUT_COLOR_BACKGROUND;
-                pub const TEXT_INPUT_HOVERED_COLOR_BORDER: Color = COLORS[5];
-                pub const TEXT_INPUT_FOCUSED_COLOR_BORDER: Color = COLORS[8];
                 pub const FLOATING_PANE_TITLE_COLOR_BACKGROUND: Color = COLORS[4];
                 pub const FLOATING_PANE_BODY_COLOR_BACKGROUND: Color = COLORS[3];
                 pub const FLOATING_PANES_COLOR_BACKGROUND: Color = COLORS[1];
+                pub const BORDER_WIDTH: u16 = 1;
+                pub const BORDER_RADIUS: u16 = 2;
+                pub const BORDER_COLOR_IDLE: Color = COLORS[1];
+                pub const BORDER_COLOR_HOVERED: Color = COLORS[5];
+                pub const BORDER_COLOR_FOCUSED: Color = COLORS[8];
+                pub const BACKGROUND_COLOR_IDLE: Color = COLORS[2];
+                pub const BACKGROUND_COLOR_HOVERED: Color = COLORS[2];
+                pub const BACKGROUND_COLOR_FOCUSED: Color = COLORS[2];
 
 
                 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -73,30 +82,51 @@ macro_rules! themes {
                         Box::new(Container)
                     }
 
+                    fn pick_list(&self) -> Box<dyn pick_list::StyleSheet> {
+                        pub struct PickList;
+
+                        impl pick_list::StyleSheet for PickList {
+                            fn active(&self) -> pick_list::Style {
+                                pick_list::Style {
+                                    text_color: TEXT_COLOR,
+                                    background: BACKGROUND_COLOR_IDLE.into(),
+                                    border_radius: BORDER_RADIUS,
+                                    border_width: BORDER_WIDTH,
+                                    border_color: BORDER_COLOR_IDLE,
+                                    icon_size: PICK_LIST_ICON_SIZE,
+                                }
+                            }
+
+                            fn hovered(&self) -> pick_list::Style {
+                                pick_list::Style {
+                                    text_color: TEXT_COLOR,
+                                    background: BACKGROUND_COLOR_HOVERED.into(),
+                                    border_radius: BORDER_RADIUS,
+                                    border_width: BORDER_WIDTH,
+                                    border_color: BORDER_COLOR_HOVERED,
+                                    icon_size: PICK_LIST_ICON_SIZE,
+                                }
+                            }
+
+                            fn menu(&self) -> pick_list::Menu {
+                                pick_list::Menu {
+                                    text_color: TEXT_COLOR,
+                                    background: BACKGROUND_COLOR_FOCUSED.into(),
+                                    border_width: BORDER_WIDTH,
+                                    border_color: BORDER_COLOR_FOCUSED,
+                                    selected_text_color: COLORS[COLORS.len() - 1],
+                                    selected_background: COLORS[3].into(),
+                                }
+                            }
+                        }
+
+                        Box::new(PickList)
+                    }
+
                     fn text_input(&self) -> Box<dyn text_input::StyleSheet> {
                         pub struct TextInput;
 
                         impl text_input::StyleSheet for TextInput {
-                            fn active(&self) -> text_input::Style {
-                                text_input::Style {
-                                    background: TEXT_INPUT_COLOR_BACKGROUND.into(),
-                                    border_radius: 2,
-                                    border_width: 1,
-                                    border_color: TEXT_INPUT_ACTIVE_COLOR_BORDER,
-                                    ..Default::default()
-                                }
-                            }
-
-                            fn focused(&self) -> text_input::Style {
-                                text_input::Style {
-                                    background: TEXT_INPUT_COLOR_BACKGROUND.into(),
-                                    border_radius: 2,
-                                    border_width: 1,
-                                    border_color: TEXT_INPUT_FOCUSED_COLOR_BORDER,
-                                    ..Default::default()
-                                }
-                            }
-
                             fn placeholder_color(&self) -> Color {
                                 TEXT_INPUT_COLOR_PLACEHOLDER
                             }
@@ -109,12 +139,32 @@ macro_rules! themes {
                                 TEXT_INPUT_COLOR_SELECTION
                             }
 
+                            fn active(&self) -> text_input::Style {
+                                text_input::Style {
+                                    background: BACKGROUND_COLOR_IDLE.into(),
+                                    border_radius: BORDER_RADIUS,
+                                    border_width: BORDER_WIDTH,
+                                    border_color: BORDER_COLOR_IDLE,
+                                    ..Default::default()
+                                }
+                            }
+
                             fn hovered(&self) -> text_input::Style {
                                 text_input::Style {
-                                    background: TEXT_INPUT_COLOR_BACKGROUND.into(),
-                                    border_radius: 2,
-                                    border_width: 1,
-                                    border_color: TEXT_INPUT_HOVERED_COLOR_BORDER,
+                                    background: BACKGROUND_COLOR_HOVERED.into(),
+                                    border_radius: BORDER_RADIUS,
+                                    border_width: BORDER_WIDTH,
+                                    border_color: BORDER_COLOR_HOVERED,
+                                    ..Default::default()
+                                }
+                            }
+
+                            fn focused(&self) -> text_input::Style {
+                                text_input::Style {
+                                    background: BACKGROUND_COLOR_FOCUSED.into(),
+                                    border_radius: BORDER_RADIUS,
+                                    border_width: BORDER_WIDTH,
+                                    border_color: BORDER_COLOR_FOCUSED,
                                     ..Default::default()
                                 }
                             }
