@@ -6,7 +6,6 @@
 //! Task list:
 //! * Mark invalid connections and cycles in the graph
 //! * Do not copy input values, take pass as references
-//! * Fix the node layout when the title is wider than the content
 //! * Custom UI rendering:
 //!     * CPU Canvas (WASM) https://github.com/embedded-graphics/embedded-graphics
 //!     * Node Definitions (displaying GPU-rendered texture)

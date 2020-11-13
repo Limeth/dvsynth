@@ -370,7 +370,7 @@ impl<'a, M: Clone + 'a, R: 'a + WidgetRenderer> floating_panes::FloatingPanesBeh
         defaults: &<R as iced_native::Renderer>::Defaults,
         layout: FloatingPanesLayout<'_>,
         cursor_position: Point,
-    ) -> <R as iced_native::Renderer>::Output
+    ) -> ContentDrawResult<R>
     {
         <R as WidgetRenderer>::draw_panes(renderer, panes, defaults, layout, cursor_position)
     }
@@ -619,7 +619,7 @@ pub trait WidgetRenderer:
         defaults: &Self::Defaults,
         layout: FloatingPanesLayout<'_>,
         cursor_position: Point,
-    ) -> Self::Output;
+    ) -> ContentDrawResult<Self>;
 }
 
 impl<B> WidgetRenderer for iced_graphics::Renderer<B>
@@ -631,7 +631,7 @@ where B: Backend + iced_graphics::backend::Text
         defaults: &Self::Defaults,
         layout: FloatingPanesLayout<'_>,
         cursor_position: Point,
-    ) -> Self::Output
+    ) -> ContentDrawResult<Self>
     {
         let mut mouse_interaction = mouse::Interaction::default();
         let mut primitives = Vec::new();
@@ -817,7 +817,10 @@ where B: Backend + iced_graphics::backend::Text
 
         primitives.push(frame.into_geometry().into_primitive());
 
-        (Primitive::Group { primitives }, mouse_interaction)
+        ContentDrawResult {
+            override_parent_cursor: panes.behaviour_state.highlight.is_some(),
+            output: (Primitive::Group { primitives }, mouse_interaction),
+        }
     }
 }
 

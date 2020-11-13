@@ -97,6 +97,8 @@ impl NodeData {
         .title(Some(&self.title))
         .title_size(Some(style::consts::TEXT_SIZE_TITLE))
         .title_margin(consts::SPACING)
+        .width_resizeable(true)
+        .min_width(128.0)
         .style(Some(theme.floating_pane()))
         .build()
     }

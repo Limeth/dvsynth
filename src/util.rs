@@ -261,7 +261,7 @@ pub fn draw_point(position: Vec2<f32>, color: Color, radius: f32) -> Primitive {
     }
 }
 
-pub fn draw_bounds(layout: Layout<'_>, color: Color) -> Primitive {
+pub fn draw_rectangle(rectangle: Rectangle<f32>, color: Color) -> Primitive {
     // let layout_position = Vector::new(layout.position().x, layout.position().y);
     // let layout_size = Vector::new(layout.bounds().size().width, layout.bounds().size().height);
 
@@ -278,12 +278,16 @@ pub fn draw_bounds(layout: Layout<'_>, color: Color) -> Primitive {
     //     ],
     // }
     Primitive::Quad {
-        bounds: layout.bounds(),
+        bounds: rectangle,
         background: Background::Color(Color::TRANSPARENT),
         border_radius: 0,
         border_width: 1,
         border_color: color,
     }
+}
+
+pub fn draw_bounds(layout: Layout<'_>, color: Color) -> Primitive {
+    draw_rectangle(layout.bounds(), color)
 }
 
 pub fn partial_min<T: PartialOrd>(a: T, b: T) -> T {
@@ -305,9 +309,19 @@ pub fn partial_max<T: PartialOrd>(a: T, b: T) -> T {
 pub trait RectangleExt: Sized {
     fn from_min_max(min: Vec2<f32>, max: Vec2<f32>) -> Self;
     fn grow(&self, right: f32, up: f32, left: f32, down: f32) -> Self;
-    fn min(&self) -> Vec2<f32>;
-    fn max(&self) -> Vec2<f32>;
+    fn min_x(&self) -> f32;
+    fn min_y(&self) -> f32;
+    fn max_x(&self) -> f32;
+    fn max_y(&self) -> f32;
     fn vertices(&self) -> [Vec2<f32>; 4];
+
+    fn min(&self) -> Vec2<f32> {
+        Vec2::new(self.min_x(), self.min_y())
+    }
+
+    fn max(&self) -> Vec2<f32> {
+        Vec2::new(self.max_x(), self.max_y())
+    }
 
     fn grow_symmetrical(&self, horizontally: f32, vertically: f32) -> Self {
         self.grow(horizontally, vertically, horizontally, vertically)
@@ -332,12 +346,20 @@ impl RectangleExt for Rectangle {
         }
     }
 
-    fn min(&self) -> Vec2<f32> {
-        Vec2::new(self.x, self.y)
+    fn min_x(&self) -> f32 {
+        self.x
     }
 
-    fn max(&self) -> Vec2<f32> {
-        Vec2::new(self.x + self.width, self.y + self.height)
+    fn min_y(&self) -> f32 {
+        self.y
+    }
+
+    fn max_x(&self) -> f32 {
+        self.x + self.width
+    }
+
+    fn max_y(&self) -> f32 {
+        self.y + self.height
     }
 
     fn vertices(&self) -> [Vec2<f32>; 4] {
