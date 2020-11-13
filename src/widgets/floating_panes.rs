@@ -833,10 +833,18 @@ impl<'a, M: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a, M, R>
                 });
 
                 if self.state.gesture.is_none() {
-                    self.state.gesture = Some(Gesture::GrabBackground(GrabStateMove {
-                        grab_mouse_position: self.state.cursor_position,
-                        grab_element_position: self.state.panes_offset,
-                    }));
+                    let mouse_on_top_of_pane = layout.panes().any({
+                        let panes_state = &self.state;
+                        let cursor_point: Point = panes_state.cursor_position.into_array().into();
+                        move |pane_layout| pane_layout.bounds().contains(cursor_point)
+                    });
+
+                    if !mouse_on_top_of_pane {
+                        self.state.gesture = Some(Gesture::GrabBackground(GrabStateMove {
+                            grab_mouse_position: self.state.cursor_position,
+                            grab_element_position: self.state.panes_offset,
+                        }));
+                    }
                 }
             }
             Event::Mouse(MouseEvent::ButtonReleased(MouseButton::Left)) => {
