@@ -1,6 +1,6 @@
 use super::*;
 use crate::style;
-use iced::{Align, Length, Row};
+use iced::{Align, Container, Length, Row};
 
 #[derive(Debug, Clone)]
 pub enum BinaryOpMessage {
@@ -70,27 +70,40 @@ impl NodeBehaviour for BinaryOpNodeBehaviour {
         Some(
             Row::new()
                 .push(
-                    PickList::new(
-                        &mut self.pick_list_ty_state,
-                        &PrimitiveChannelType::VALUES[..],
-                        Some(self.pick_list_ty_value),
-                        |new_value| {
-                            Box::new(BinaryOpMessage::UpdateType(new_value)) as Box<dyn NodeBehaviourMessage>
-                        },
+                    // Wrap PickList in a container because PickList's width resolution is buggy
+                    Container::new(
+                        PickList::new(
+                            &mut self.pick_list_ty_state,
+                            &PrimitiveChannelType::VALUES[..],
+                            Some(self.pick_list_ty_value),
+                            |new_value| {
+                                Box::new(BinaryOpMessage::UpdateType(new_value))
+                                    as Box<dyn NodeBehaviourMessage>
+                            },
+                        )
+                        .width(Length::Fill)
+                        .text_size(style::consts::TEXT_SIZE_REGULAR),
                     )
-                    .text_size(style::consts::TEXT_SIZE_REGULAR),
+                    .width(Length::Fill),
                 )
                 .push(
-                    PickList::new(
-                        &mut self.pick_list_op_state,
-                        &BinaryOp::VALUES[..],
-                        Some(self.op),
-                        |value| Box::new(BinaryOpMessage::UpdateOp(value)) as Box<dyn NodeBehaviourMessage>,
+                    // Wrap PickList in a container because PickList's width resolution is buggy
+                    Container::new(
+                        PickList::new(
+                            &mut self.pick_list_op_state,
+                            &BinaryOp::VALUES[..],
+                            Some(self.op),
+                            |value| {
+                                Box::new(BinaryOpMessage::UpdateOp(value)) as Box<dyn NodeBehaviourMessage>
+                            },
+                        )
+                        .width(Length::Fill)
+                        .text_size(style::consts::TEXT_SIZE_REGULAR),
                     )
-                    .text_size(style::consts::TEXT_SIZE_REGULAR),
+                    .width(Length::Units(48)),
                 )
                 .align_items(Align::Center)
-                .width(Length::Units(100))
+                .width(Length::Fill)
                 .spacing(style::consts::SPACING_HORIZONTAL)
                 .into(),
         )

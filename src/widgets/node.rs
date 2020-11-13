@@ -129,7 +129,8 @@ impl<'a, M: 'a + Clone, R: 'a + WidgetRenderer> NodeElementBuilder<'a, M, R> {
                 // Element { Margin { Row [ Column [ .. ], Column [ .. ] ] } }
                 Margin::new(
                     {
-                        let mut column = Column::new().spacing(style::consts::SPACING_VERTICAL);
+                        let mut column =
+                            Column::new().width(Length::Fill).spacing(style::consts::SPACING_VERTICAL);
 
                         if let Some(node_behaviour_element) = self.node_behaviour_element {
                             column = column.push(node_behaviour_element);
@@ -153,6 +154,7 @@ impl<'a, M: 'a + Clone, R: 'a + WidgetRenderer> NodeElementBuilder<'a, M, R> {
 
                                     column
                                 })
+                                .push(Space::with_width(Length::Fill))
                                 .push({
                                     // output channels
                                     let mut column = Column::new()
@@ -927,7 +929,7 @@ typed_layout! {
                     .children()
                     .nth(match channel_direction {
                         ChannelDirection::In => 0,
-                        ChannelDirection::Out => 1,
+                        ChannelDirection::Out => 2,
                     })
                     .unwrap()
             },

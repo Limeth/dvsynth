@@ -27,13 +27,13 @@ impl NodeData {
     pub fn new(
         title: impl ToString,
         position: impl Into<Vec2<f32>>,
-        mut behaviour: Box<dyn NodeBehaviour>,
+        behaviour: Box<dyn NodeBehaviour>,
     ) -> Self
     {
         let mut result = Self {
             title: title.to_string(),
             element_state: Default::default(),
-            floating_pane_state: FloatingPaneState::with_position(position),
+            floating_pane_state: FloatingPaneState::new().with_position(position).with_width(200),
             floating_pane_behaviour_state: Default::default(),
             configuration: Default::default(),
             behaviour,

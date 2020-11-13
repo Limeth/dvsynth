@@ -123,6 +123,24 @@ impl<'a, M: 'a, B: 'a + Backend + iced_graphics::backend::Text>
     // }
 }
 
+#[derive(PartialEq, Eq, Debug, Clone, Copy)]
+pub enum FloatingPaneLength {
+    Shrink,
+    Units(u16),
+}
+
+impl Default for FloatingPaneLength {
+    fn default() -> Self {
+        FloatingPaneLength::Shrink
+    }
+}
+
+impl From<u16> for FloatingPaneLength {
+    fn from(other: u16) -> Self {
+        FloatingPaneLength::Units(other)
+    }
+}
+
 pub struct FloatingPaneBuilder<'a, M: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a, M, R>> {
     pub content: Element<'a, M, R>,
     pub state: &'a mut FloatingPaneState,
@@ -132,6 +150,8 @@ pub struct FloatingPaneBuilder<'a, M: 'a, R: 'a + WidgetRenderer, C: 'a + Floati
     pub title_size: Option<u16>,
     pub title_margin: Spacing,
     pub style: Option<<R as WidgetRenderer>::StyleFloatingPane>,
+    /// Whether the floating pane is resizeable in each axis
+    pub resizeable: Vec2<bool>,
     pub __marker: std::marker::PhantomData<(M, C)>,
 }
 
@@ -154,6 +174,7 @@ impl<'a, M: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a, M, R>
             title_size: Default::default(),
             title_margin: Default::default(),
             style: Default::default(),
+            resizeable: Default::default(),
             __marker: Default::default(),
         }
     }
@@ -179,9 +200,18 @@ impl<'a, M: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a, M, R>
         self
     }
 
+    pub fn width_resizeable(mut self, resizeable: bool) -> Self {
+        self.resizeable[0] = resizeable;
+        self
+    }
+
+    pub fn height_resizeable(mut self, resizeable: bool) -> Self {
+        self.resizeable[1] = resizeable;
+        self
+    }
+
     pub fn build(mut self) -> FloatingPane<'a, M, R, C> {
         FloatingPane {
-            state: self.state,
             behaviour_data: self.behaviour_data,
             element_tree: {
                 let mut column = Column::<M, R>::new();
@@ -208,8 +238,19 @@ impl<'a, M: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a, M, R>
                     container = container.style(style.root_container_style());
                 }
 
+                container = match self.state.size[0] {
+                    FloatingPaneLength::Shrink => container,
+                    FloatingPaneLength::Units(units) => container.width(Length::Units(units)),
+                };
+
+                container = match self.state.size[1] {
+                    FloatingPaneLength::Shrink => container,
+                    FloatingPaneLength::Units(units) => container.height(Length::Units(units)),
+                };
+
                 container.into() // Container { Column [ title, Container { element } ] }
             },
+            state: self.state,
             __marker: Default::default(),
         }
     }
@@ -232,6 +273,7 @@ impl Hash for GrabState {
 #[derive(Default, Debug)]
 pub struct FloatingPaneState {
     pub position: Vec2<f32>,
+    pub size: Vec2<FloatingPaneLength>,
     pub grab_state: Option<GrabState>, // to move this pane around
 }
 
@@ -244,8 +286,23 @@ impl Hash for FloatingPaneState {
 }
 
 impl FloatingPaneState {
-    pub fn with_position(position: impl Into<Vec2<f32>>) -> Self {
-        Self { position: position.into(), grab_state: Default::default() }
+    pub fn new() -> Self {
+        Default::default()
+    }
+
+    pub fn with_position(mut self, position: impl Into<Vec2<f32>>) -> Self {
+        self.position = position.into();
+        self
+    }
+
+    pub fn with_width(mut self, width: impl Into<FloatingPaneLength>) -> Self {
+        self.size[0] = width.into();
+        self
+    }
+
+    pub fn with_height(mut self, height: impl Into<FloatingPaneLength>) -> Self {
+        self.size[1] = height.into();
+        self
     }
 }
 

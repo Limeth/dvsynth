@@ -102,6 +102,7 @@ impl NodeBehaviour for ConstantNodeBehaviour {
                                 as Box<dyn NodeBehaviourMessage>
                         },
                     )
+                    .width(Length::Units(64))
                     .text_size(style::consts::TEXT_SIZE_REGULAR),
                 )
                 .push(
@@ -114,10 +115,11 @@ impl NodeBehaviour for ConstantNodeBehaviour {
                                 as Box<dyn NodeBehaviourMessage>
                         },
                     )
+                    .width(Length::Fill)
                     .size(style::consts::TEXT_SIZE_REGULAR),
                 )
                 .align_items(Align::Center)
-                .width(Length::Units(100))
+                .width(Length::Fill)
                 .spacing(style::consts::SPACING_HORIZONTAL)
                 .into(),
         )
