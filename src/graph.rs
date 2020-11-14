@@ -1,10 +1,13 @@
 use crate::node::*;
 use crate::*;
+use dyn_clone::DynClone;
 use iced::Element;
+use std::any::Any;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::ops::{Deref, DerefMut};
+use std::sync::RwLock;
 use vek::Vec2;
 
 pub type NodeIndex = petgraph::graph::NodeIndex<u32>;
@@ -15,20 +18,56 @@ pub type Graph = StableGraph<
     u32,      // Node Index
 >;
 
-pub struct PreparedExecution {
-    pub generation: usize,
-    /// Output values for each task
-    pub output_values: Box<[ChannelValues]>,
+pub struct PreparedTask {
+    pub node_index: NodeIndex,
+    pub state: Option<Box<dyn NodeExecutorState>>,
+    pub output_values: ChannelValues,
 }
 
-impl<'a> From<&'a Schedule> for PreparedExecution {
-    fn from(schedule: &'a Schedule) -> Self {
+/// Data ready for the execution of a [`Schedule`].
+/// Accessible by all render threads.
+pub struct PreparedExecution {
+    pub generation: usize,
+    pub tasks: Box<[RwLock<PreparedTask>]>,
+}
+
+static_assertions::assert_impl_all!(Arc<PreparedExecution>: Send, Sync);
+
+impl PreparedExecution {
+    fn from(schedule: &Schedule, previous: Option<Self>) -> Self {
+        let previous_node_index_map: Option<HashMap<NodeIndex, usize>> =
+            previous.as_ref().map(|prepared_execution| {
+                prepared_execution
+                    .tasks
+                    .iter()
+                    .enumerate()
+                    .map(|(enumeration_index, task)| (task.read().unwrap().node_index, enumeration_index))
+                    .collect()
+            });
+
         Self {
             generation: schedule.generation,
-            output_values: schedule
+            tasks: schedule
                 .tasks
                 .iter()
-                .map(|task| ChannelValues::zeroed(&task.configuration.channels_output))
+                .map(|task| {
+                    let state = previous_node_index_map
+                        .as_ref()
+                        .and_then(|previous_node_index_map| previous_node_index_map.get(&task.node_index))
+                        .and_then(|task_index| {
+                            let previous_task =
+                                &previous.as_ref().unwrap().tasks[*task_index].read().unwrap();
+
+                            previous_task.state.as_ref().map(|state| dyn_clone::clone_box(&**state))
+                        })
+                        .or_else(|| task.init_state.as_ref().map(|state| dyn_clone::clone_box(&**state)));
+
+                    RwLock::new(PreparedTask {
+                        node_index: task.node_index,
+                        state,
+                        output_values: ChannelValues::zeroed(&task.configuration.channels_output),
+                    })
+                })
                 .collect::<Vec<_>>()
                 .into_boxed_slice(),
         }
@@ -38,23 +77,30 @@ impl<'a> From<&'a Schedule> for PreparedExecution {
 impl PreparedExecution {
     pub fn execute(&mut self, schedule: &Schedule) {
         for (task_index, task) in schedule.tasks.iter().enumerate() {
-            let (output_values_preceding, output_values_following) =
-                self.output_values.split_at_mut(task_index);
+            let (tasks_preceding, tasks_following) = self.tasks.split_at_mut(task_index);
+            let input_value_guards = task
+                .inputs
+                .iter()
+                .map(|input| tasks_preceding[input.source_task_index].read().unwrap())
+                .collect::<Vec<_>>()
+                .into_boxed_slice();
             let input_values = ChannelValueRefs {
-                values: task
-                    .inputs
+                values: input_value_guards
                     .iter()
-                    .map(|input| {
-                        output_values_preceding[input.source_task_index].values[input.source_channel_index]
+                    .zip(&*task.inputs)
+                    .map(|(input_value_guard, input)| {
+                        input_value_guard.output_values.values[input.source_channel_index]
                             .as_channel_value_ref()
                     })
                     .collect::<Vec<_>>()
                     .into_boxed_slice(),
             };
 
-            let mut output_values = &mut output_values_following[0];
+            let current_task: &mut PreparedTask = &mut tasks_following[0].write().unwrap();
+            let output_values = &mut current_task.output_values;
+            let task_state = current_task.state.as_mut().map(|state| state.as_mut());
 
-            task.executor.execute(&input_values, &mut output_values);
+            task.executor.execute(task_state, &input_values, output_values);
         }
     }
 }
@@ -65,17 +111,32 @@ pub struct TaskInput {
     pub source_channel_index: usize,
 }
 
-#[derive(Clone)]
 pub struct Task {
+    pub node_index: NodeIndex,
     pub configuration: NodeConfiguration,
+    pub init_state: Option<Box<dyn NodeExecutorState>>,
     pub inputs: Box<[TaskInput]>,
     pub executor: Arc<dyn NodeExecutor + Send + Sync>,
+}
+
+impl Clone for Task {
+    fn clone(&self) -> Self {
+        Self {
+            node_index: self.node_index.clone(),
+            configuration: self.configuration.clone(),
+            init_state: self.init_state.as_ref().map(|state| dyn_clone::clone_box(&**state)),
+            inputs: self.inputs.clone(),
+            executor: self.executor.clone(),
+        }
+    }
 }
 
 impl Debug for Task {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Task")
+            .field("node_index", &self.node_index)
             .field("configuration", &self.configuration)
+            .field("init_state", &self.init_state)
             .field("inputs", &self.inputs)
             .finish()
     }
@@ -89,15 +150,9 @@ pub struct Schedule {
     pub tasks: Box<[Task]>,
 }
 
-impl Schedule {
-    pub fn prepare_execution(&self) -> PreparedExecution {
-        PreparedExecution::from(self)
-    }
-}
-
 pub struct ExecutionGraph {
     pub graph: Graph,
-    pub active_schedule: Arc<ArcSwapOption<Schedule>>,
+    active_schedule: Arc<ArcSwapOption<Schedule>>,
 }
 
 impl ExecutionGraph {
@@ -184,7 +239,9 @@ impl ExecutionGraph {
                 };
 
                 Task {
+                    node_index,
                     configuration: node.configuration.clone(),
+                    init_state: node.behaviour.init_state(),
                     inputs,
                     executor: node.behaviour.create_executor(),
                 }
@@ -234,6 +291,47 @@ impl Deref for ExecutionGraph {
 impl DerefMut for ExecutionGraph {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.graph
+    }
+}
+
+pub struct GraphExecutor {
+    active_schedule: Arc<ArcSwapOption<Schedule>>,
+}
+
+impl GraphExecutor {
+    pub fn new(active_schedule: Arc<ArcSwapOption<Schedule>>) -> Self {
+        Self { active_schedule }
+    }
+
+    pub fn spawn(graph: &ExecutionGraph) -> std::thread::JoinHandle<()> {
+        let active_schedule = graph.active_schedule.clone();
+        thread::spawn(move || Self::new(active_schedule).run())
+    }
+
+    pub fn run(&mut self) {
+        let mut prepared_execution: Option<PreparedExecution> = None;
+        let mut last_prepared_execution: Option<PreparedExecution> = None;
+
+        loop {
+            if let Some(active_schedule) = self.active_schedule.load().as_ref() {
+                if prepared_execution.is_none()
+                    || prepared_execution.as_ref().unwrap().generation != active_schedule.generation
+                {
+                    prepared_execution = Some(PreparedExecution::from(
+                        &active_schedule,
+                        prepared_execution.or(last_prepared_execution.take()),
+                    ));
+                }
+
+                let prepared_execution = prepared_execution.as_mut().unwrap();
+
+                prepared_execution.execute(active_schedule);
+            } else {
+                if let Some(prepared_execution) = prepared_execution.take() {
+                    last_prepared_execution = Some(prepared_execution);
+                }
+            }
+        }
     }
 }
 

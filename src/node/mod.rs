@@ -1,8 +1,10 @@
 use crate::style::Theme;
 use byteorder::{ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
 use downcast_rs::{impl_downcast, Downcast};
+use dyn_clone::DynClone;
 use iced::widget::pick_list::{PickList, State as PickListState};
 use iced::Element;
+use std::any::Any;
 use std::borrow::Cow;
 use std::fmt::{Debug, Display};
 use std::io::{Cursor, Read, Write};
@@ -11,6 +13,7 @@ use std::sync::Arc;
 
 pub use binary_op::*;
 pub use constant::*;
+pub use counter::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChannelDirection {
@@ -625,15 +628,35 @@ pub enum NodeEvent {
     Message(Box<dyn NodeBehaviourMessage>),
 }
 
+// Should the state be cloneable?
+// It should be serializable and deserializable, so probably cloneable as well?
+// What about windows? Those should not be cloned?
+pub trait NodeExecutorState: Downcast + DynClone + Debug + Send + Sync {}
+
+impl<T> NodeExecutorState for T where T: Downcast + DynClone + Debug + Send + Sync {}
+
+impl_downcast!(NodeExecutorState);
+
 pub trait NodeExecutor: Send {
-    fn execute(&self, inputs: &ChannelValueRefs, outputs: &mut ChannelValues);
+    fn execute(
+        &self,
+        state: Option<&mut dyn NodeExecutorState>,
+        inputs: &ChannelValueRefs,
+        outputs: &mut ChannelValues,
+    );
 }
 
 impl<T> NodeExecutor for T
-where T: Send + Fn(&ChannelValueRefs, &mut ChannelValues)
+where T: Send + Fn(Option<&mut dyn NodeExecutorState>, &ChannelValueRefs, &mut ChannelValues)
 {
-    fn execute(&self, inputs: &ChannelValueRefs, outputs: &mut ChannelValues) {
-        (self)(inputs, outputs)
+    fn execute(
+        &self,
+        state: Option<&mut dyn NodeExecutorState>,
+        inputs: &ChannelValueRefs,
+        outputs: &mut ChannelValues,
+    )
+    {
+        (self)(state, inputs, outputs)
     }
 }
 
@@ -643,8 +666,10 @@ pub trait NodeBehaviour {
     fn name(&self) -> &str;
     fn update(&mut self, event: NodeEvent) -> Vec<NodeCommand>;
     fn view(&mut self, theme: &dyn Theme) -> Option<Element<Box<dyn NodeBehaviourMessage>>>;
+    fn init_state(&self) -> Option<Box<dyn NodeExecutorState>>;
     fn create_executor(&self) -> ArcNodeExecutor;
 }
 
 pub mod binary_op;
 pub mod constant;
+pub mod counter;

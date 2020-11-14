@@ -520,6 +520,7 @@ dependencies = [
  "arc-swap",
  "byteorder",
  "downcast-rs",
+ "dyn-clone",
  "iced",
  "iced_graphics",
  "iced_native",
@@ -531,6 +532,7 @@ dependencies = [
  "petgraph",
  "roots",
  "smallvec",
+ "static_assertions",
  "vek",
 ]
 
@@ -545,6 +547,12 @@ dependencies = [
  "winapi 0.3.9",
  "wio",
 ]
+
+[[package]]
+name = "dyn-clone"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d55796afa1b20c2945ca8eabfc421839f2b766619209f1ede813cf2484f31804"
 
 [[package]]
 name = "either"

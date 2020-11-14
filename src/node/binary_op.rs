@@ -111,19 +111,27 @@ impl NodeBehaviour for BinaryOpNodeBehaviour {
         )
     }
 
+    fn init_state(&self) -> Option<Box<dyn NodeExecutorState>> {
+        None
+    }
+
     fn create_executor(&self) -> ArcNodeExecutor {
         let pick_list_ty_value = self.pick_list_ty_value;
         let op = self.op;
-        Arc::new(move |inputs: &ChannelValueRefs, outputs: &mut ChannelValues| {
-            let lhs = pick_list_ty_value.read::<LittleEndian, _>(&inputs[0].as_ref()).unwrap();
-            let rhs = pick_list_ty_value.read::<LittleEndian, _>(&inputs[1].as_ref()).unwrap();
-            let result = op.apply_dyn(lhs, rhs);
-            let mut output_cursor = Cursor::new(outputs[0].as_mut());
+        Arc::new(
+            move |_state: Option<&mut dyn NodeExecutorState>,
+                  inputs: &ChannelValueRefs,
+                  outputs: &mut ChannelValues| {
+                let lhs = pick_list_ty_value.read::<LittleEndian, _>(&inputs[0].as_ref()).unwrap();
+                let rhs = pick_list_ty_value.read::<LittleEndian, _>(&inputs[1].as_ref()).unwrap();
+                let result = op.apply_dyn(lhs, rhs);
+                let mut output_cursor = Cursor::new(outputs[0].as_mut());
 
-            dbg!(result);
+                // dbg!(result);
 
-            result.write::<LittleEndian>(&mut output_cursor).unwrap();
-        })
+                result.write::<LittleEndian>(&mut output_cursor).unwrap();
+            },
+        )
     }
 }
 

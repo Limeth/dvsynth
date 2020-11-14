@@ -131,7 +131,7 @@ impl Application for ApplicationState {
                     EdgeData { channel_index_from: from.channel_index, channel_index_to: to.channel_index },
                 );
             }
-            RecomputeLayout => (),
+            Message::RecomputeLayout => (),
         }
 
         Command::none()
@@ -193,37 +193,18 @@ fn main() {
             Box::new(BinaryOpNodeBehaviour::default()),
         ));
 
-        graph.add_node(NodeData::new(
-            "My Bin Op #2",
-            [610.0, 10.0],
-            Box::new(BinaryOpNodeBehaviour::default()),
-        ));
+        // graph.add_node(NodeData::new(
+        //     "My Bin Op #2",
+        //     [610.0, 10.0],
+        //     Box::new(BinaryOpNodeBehaviour::default()),
+        // ));
+
+        graph.add_node(NodeData::new("My Counter", [810.0, 10.0], Box::new(CounterNodeBehaviour::default())));
 
         graph.into()
     };
 
-    thread::spawn({
-        let active_schedule = graph.active_schedule.clone();
-        move || {
-            let mut prepared_execution: Option<PreparedExecution> = None;
-
-            loop {
-                if let Some(active_schedule) = active_schedule.load().as_ref() {
-                    if prepared_execution.is_none()
-                        || prepared_execution.as_ref().unwrap().generation != active_schedule.generation
-                    {
-                        prepared_execution = Some(active_schedule.prepare_execution());
-                    }
-
-                    let prepared_execution = prepared_execution.as_mut().unwrap();
-
-                    prepared_execution.execute(active_schedule);
-                } else {
-                    prepared_execution = None;
-                }
-            }
-        }
-    });
+    GraphExecutor::spawn(&graph);
 
     ApplicationState::run(Settings {
         window: window::Settings {

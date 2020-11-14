@@ -129,12 +129,20 @@ impl NodeBehaviour for ConstantNodeBehaviour {
         )
     }
 
+    fn init_state(&self) -> Option<Box<dyn NodeExecutorState>> {
+        None
+    }
+
     fn create_executor(&self) -> ArcNodeExecutor {
         let value = self.value;
-        Arc::new(move |_inputs: &ChannelValueRefs, outputs: &mut ChannelValues| {
-            let mut cursor = Cursor::new(outputs[0].as_mut());
+        Arc::new(
+            move |_state: Option<&mut dyn NodeExecutorState>,
+                  _inputs: &ChannelValueRefs,
+                  outputs: &mut ChannelValues| {
+                let mut cursor = Cursor::new(outputs[0].as_mut());
 
-            value.write::<LittleEndian>(&mut cursor).unwrap();
-        })
+                value.write::<LittleEndian>(&mut cursor).unwrap();
+            },
+        )
     }
 }
