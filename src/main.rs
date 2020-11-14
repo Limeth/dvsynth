@@ -40,9 +40,18 @@ pub enum NodeMessage {
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    NodeMessage { node: NodeIndex<u32>, message: NodeMessage },
-    DisconnectChannel { channel: ChannelIdentifier },
-    InsertConnection { connection: Connection },
+    NodeMessage {
+        node: NodeIndex<u32>,
+        message: NodeMessage,
+    },
+    DisconnectChannel {
+        channel: ChannelIdentifier,
+    },
+    InsertConnection {
+        connection: Connection,
+    },
+    /// Workaround for layouts not being updated when we only change its mutable state
+    RecomputeLayout,
 }
 
 pub struct ApplicationFlags {
@@ -122,6 +131,7 @@ impl Application for ApplicationState {
                     EdgeData { channel_index_from: from.channel_index, channel_index_to: to.channel_index },
                 );
             }
+            RecomputeLayout => (),
         }
 
         Command::none()
@@ -149,6 +159,7 @@ impl Application for ApplicationState {
                 on_connection_create: |connection| Message::InsertConnection { connection },
                 connections,
             },
+            Box::new(|| Message::RecomputeLayout),
         )
         .style(theme.floating_panes());
 

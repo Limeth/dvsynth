@@ -1,4 +1,6 @@
+use iced::Rectangle;
 use iced_graphics::{Backend, Defaults, Primitive, Renderer};
+use iced_native::event::Status;
 use iced_native::layout::{Layout, Limits, Node};
 use iced_native::widget::Widget;
 use iced_native::widget::{Column, Row, Space};
@@ -67,9 +69,10 @@ impl<'a, M: 'a, R: WidgetRenderer + 'a> Widget<M, R> for Margin<'a, M, R> {
         defaults: &R::Defaults,
         layout: Layout<'_>,
         cursor_position: Point,
+        viewport: &Rectangle,
     ) -> R::Output
     {
-        self.child.draw(renderer, defaults, layout, cursor_position)
+        self.child.draw(renderer, defaults, layout, cursor_position, viewport)
     }
 
     fn hash_layout(&self, state: &mut Hasher) {
@@ -84,7 +87,7 @@ impl<'a, M: 'a, R: WidgetRenderer + 'a> Widget<M, R> for Margin<'a, M, R> {
         messages: &mut Vec<M>,
         renderer: &R,
         clipboard: Option<&dyn Clipboard>,
-    )
+    ) -> Status
     {
         self.child.on_event(event, layout, cursor_position, messages, renderer, clipboard)
     }

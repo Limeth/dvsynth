@@ -1,6 +1,8 @@
 use super::*;
 use crate::util::RectangleExt;
+use crate::Message;
 use iced_graphics::{self, Backend, Background, Color, Defaults, Primitive, Rectangle};
+use iced_native::event::Status;
 use iced_native::layout::{Layout, Limits, Node};
 use iced_native::mouse::{self, Button as MouseButton, Event as MouseEvent};
 use iced_native::widget::{Container, Widget};
@@ -39,6 +41,7 @@ pub trait FloatingPanesBehaviour<'a, M: 'a, R: 'a + WidgetRenderer>: Sized {
         defaults: &R::Defaults,
         layout: FloatingPanesLayout<'_>,
         cursor_position: Point,
+        viewport: &Rectangle,
     ) -> ContentDrawResult<R>;
 
     fn hash_panes(panes: &FloatingPanes<'a, M, R, Self>, state: &mut Hasher);
@@ -53,7 +56,7 @@ pub trait FloatingPanesBehaviour<'a, M: 'a, R: 'a + WidgetRenderer>: Sized {
         messages: &mut Vec<M>,
         renderer: &R,
         clipboard: Option<&dyn Clipboard>,
-    ) -> bool;
+    ) -> Status;
 
     // fn overlay<'b: 'a>(
     //     panes: &mut FloatingPanes<'a, M, R, Self>,
@@ -77,6 +80,7 @@ impl<'a, M: 'a, B: 'a + Backend + iced_graphics::backend::Text>
         defaults: &<iced_graphics::Renderer<B> as iced_native::Renderer>::Defaults,
         layout: FloatingPanesLayout<'_>,
         cursor_position: Point,
+        viewport: &Rectangle,
     ) -> ContentDrawResult<iced_graphics::Renderer<B>>
     {
         let mut mouse_interaction = mouse::Interaction::default();
@@ -90,8 +94,13 @@ impl<'a, M: 'a, B: 'a + Backend + iced_graphics::backend::Text>
                         .iter()
                         .zip(layout.panes())
                         .map(|((_, child), layout)| {
-                            let (primitive, new_mouse_interaction) =
-                                child.element_tree.draw(renderer, defaults, layout.into(), cursor_position);
+                            let (primitive, new_mouse_interaction) = child.element_tree.draw(
+                                renderer,
+                                defaults,
+                                layout.into(),
+                                cursor_position,
+                                viewport,
+                            );
 
                             if new_mouse_interaction > mouse_interaction {
                                 mouse_interaction = new_mouse_interaction;
@@ -116,9 +125,9 @@ impl<'a, M: 'a, B: 'a + Backend + iced_graphics::backend::Text>
         messages: &mut Vec<M>,
         renderer: &iced_graphics::Renderer<B>,
         clipboard: Option<&dyn Clipboard>,
-    ) -> bool
+    ) -> Status
     {
-        false
+        Status::Ignored
     }
 
     // fn overlay<'b: 'a>(
@@ -557,6 +566,7 @@ pub struct FloatingPanes<'a, M: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPane
     pub extents: Vec2<u32>,
     pub style: Option<<R as WidgetRenderer>::StyleFloatingPanes>,
     pub children: IndexMap<C::FloatingPaneIndex, FloatingPane<'a, M, R, C>>,
+    pub on_layout_change: Box<dyn Fn() -> M>,
 }
 
 impl<'a, M: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a, M, R>> FloatingPanes<'a, M, R, C> {
@@ -564,6 +574,7 @@ impl<'a, M: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a, M, R>
         state: &'a mut FloatingPanesState,
         behaviour_state: &'a mut C::FloatingPanesBehaviourState,
         behaviour: C,
+        on_layout_change: Box<dyn Fn() -> M>,
     ) -> Self
     {
         Self {
@@ -575,6 +586,7 @@ impl<'a, M: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a, M, R>
             extents: [u32::MAX, u32::MAX].into(),
             style: None,
             children: Default::default(),
+            on_layout_change,
         }
     }
 
@@ -691,9 +703,10 @@ impl<'a, M: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a, M, R>
         defaults: &<R as iced_native::Renderer>::Defaults,
         layout: Layout<'_>,
         cursor_position: Point,
+        viewport: &Rectangle,
     ) -> <R as iced_native::Renderer>::Output
     {
-        <R as WidgetRenderer>::draw(renderer, defaults, layout.into(), cursor_position, self)
+        <R as WidgetRenderer>::draw(renderer, self, defaults, layout.into(), cursor_position, viewport)
     }
 
     fn hash_layout(&self, state: &mut Hasher) {
@@ -721,16 +734,18 @@ impl<'a, M: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a, M, R>
         messages: &mut Vec<M>,
         renderer: &R,
         clipboard: Option<&dyn Clipboard>,
-    )
+    ) -> Status
     {
         let layout: FloatingPanesLayout = layout.into();
 
-        if C::on_event(self, event.clone(), layout, cursor_position, messages, renderer, clipboard) {
-            return;
+        if C::on_event(self, event.clone(), layout, cursor_position, messages, renderer, clipboard)
+            == Status::Captured
+        {
+            return Status::Captured;
         }
 
         // Set to `true`, if the event should not be propagated to child panes.
-        let mut consume_event = false;
+        let mut status = Status::Ignored;
 
         // TODO: Make it possible to bind keyboard/mouse buttons to pan regardless of whether the
         // cursor is on top of a pane.
@@ -744,12 +759,14 @@ impl<'a, M: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a, M, R>
                             pane.state.position = self.state.cursor_position.as_::<f32>()
                                 + grab_state.grab_element_position
                                 - grab_state.grab_mouse_position;
+                            messages.push((self.on_layout_change)());
                         }
                     }
                     Some(Gesture::GrabBackground(grab_state)) => {
                         self.state.panes_offset = self.state.cursor_position.as_::<f32>()
                             + grab_state.grab_element_position
                             - grab_state.grab_mouse_position;
+                        messages.push((self.on_layout_change)());
                     }
                     Some(Gesture::ResizePane { pending: false, pane_index, grab_state, directions }) => {
                         if let Some((_, pane)) = self.children.get_index_mut(pane_index) {
@@ -791,6 +808,8 @@ impl<'a, M: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a, M, R>
                                     *pane_size = new_element_size as u16;
                                 }
                             }
+
+                            messages.push((self.on_layout_change)());
                         }
                     }
                     _ => {
@@ -846,6 +865,8 @@ impl<'a, M: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a, M, R>
                         }));
                     }
                 }
+
+                if !self.state.gesture.is_none() {}
             }
             Event::Mouse(MouseEvent::ButtonReleased(MouseButton::Left)) => {
                 self.update_pending_gestures(layout);
@@ -853,18 +874,23 @@ impl<'a, M: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a, M, R>
             _ => (),
         }
 
-        if !consume_event {
-            for ((_, pane), pane_layout) in self.children.iter_mut().zip(layout.panes()) {
-                pane.element_tree.on_event(
-                    event.clone(),
-                    pane_layout.into(),
-                    cursor_position,
-                    messages,
-                    renderer,
-                    clipboard,
-                );
-            }
+        if status == Status::Ignored {
+            status = self.children.iter_mut().zip(layout.panes()).fold(
+                Status::Ignored,
+                |status, ((_, pane), pane_layout)| {
+                    status.merge(pane.element_tree.on_event(
+                        event.clone(),
+                        pane_layout.into(),
+                        cursor_position,
+                        messages,
+                        renderer,
+                        clipboard,
+                    ))
+                },
+            );
         }
+
+        status
     }
 
     fn overlay(&mut self, layout: Layout<'_>) -> Option<overlay::Element<'_, M, R>> {
@@ -899,10 +925,11 @@ pub trait WidgetRenderer:
 
     fn draw<'a, M: 'a, C: 'a + FloatingPanesBehaviour<'a, M, Self>>(
         &mut self,
+        element: &FloatingPanes<'a, M, Self, C>,
         defaults: &Self::Defaults,
         layout: FloatingPanesLayout<'_>,
         cursor_position: Point,
-        element: &FloatingPanes<'a, M, Self, C>,
+        viewport: &Rectangle,
     ) -> Self::Output;
 }
 
@@ -914,10 +941,11 @@ where B: Backend + iced_graphics::backend::Text
 
     fn draw<'a, M: 'a, C: 'a + FloatingPanesBehaviour<'a, M, Self>>(
         &mut self,
+        element: &FloatingPanes<'a, M, Self, C>,
         defaults: &Self::Defaults,
         layout: FloatingPanesLayout<'_>,
         cursor_position: Point,
-        element: &FloatingPanes<'a, M, Self, C>,
+        viewport: &Rectangle,
     ) -> Self::Output
     {
         let mut mouse_interaction = element
@@ -944,7 +972,7 @@ where B: Backend + iced_graphics::backend::Text
         let ContentDrawResult {
             override_parent_cursor,
             output: (panes_primitive, content_mouse_interaction),
-        } = C::draw_panes(element, self, defaults, layout, cursor_position);
+        } = C::draw_panes(element, self, defaults, layout, cursor_position, viewport);
 
         if override_parent_cursor {
             mouse_interaction = content_mouse_interaction;

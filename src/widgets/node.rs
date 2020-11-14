@@ -5,6 +5,7 @@ use crate::{style, util, ChannelDirection, ChannelIdentifier, Connection, Messag
 use iced::widget::Space;
 use iced_graphics::canvas::{Fill, FillRule, Frame, LineCap, LineJoin, Path, Stroke};
 use iced_graphics::{self, Backend, Defaults, Primitive};
+use iced_native::event::Status;
 use iced_native::layout::{Layout, Limits, Node};
 use iced_native::mouse::{self, Button as MouseButton, Event as MouseEvent};
 use iced_native::widget::{Container, Widget};
@@ -284,9 +285,10 @@ impl<'a, M: 'a + Clone, R: 'a + WidgetRenderer> Widget<M, R> for NodeElement<'a,
         defaults: &<R as iced_native::Renderer>::Defaults,
         layout: Layout<'_>,
         cursor_position: Point,
+        viewport: &Rectangle,
     ) -> <R as iced_native::Renderer>::Output
     {
-        self.element_tree.draw(renderer, defaults, layout, cursor_position)
+        self.element_tree.draw(renderer, defaults, layout, cursor_position, viewport)
     }
 
     fn hash_layout(&self, state: &mut Hasher) {
@@ -304,9 +306,9 @@ impl<'a, M: 'a + Clone, R: 'a + WidgetRenderer> Widget<M, R> for NodeElement<'a,
         messages: &mut Vec<M>,
         renderer: &R,
         clipboard: Option<&dyn Clipboard>,
-    )
+    ) -> Status
     {
-        self.element_tree.on_event(event, layout, cursor_position, messages, renderer, clipboard);
+        self.element_tree.on_event(event, layout, cursor_position, messages, renderer, clipboard)
     }
 
     fn overlay(&mut self, layout: Layout<'_>) -> Option<overlay::Element<'_, M, R>> {
@@ -370,9 +372,10 @@ impl<'a, M: Clone + 'a, R: 'a + WidgetRenderer> floating_panes::FloatingPanesBeh
         defaults: &<R as iced_native::Renderer>::Defaults,
         layout: FloatingPanesLayout<'_>,
         cursor_position: Point,
+        viewport: &Rectangle,
     ) -> ContentDrawResult<R>
     {
-        <R as WidgetRenderer>::draw_panes(renderer, panes, defaults, layout, cursor_position)
+        <R as WidgetRenderer>::draw_panes(renderer, panes, defaults, layout, cursor_position, viewport)
     }
 
     fn hash_panes(panes: &FloatingPanes<'a, M, R, Self>, state: &mut Hasher) {}
@@ -385,7 +388,7 @@ impl<'a, M: Clone + 'a, R: 'a + WidgetRenderer> floating_panes::FloatingPanesBeh
         messages: &mut Vec<M>,
         renderer: &R,
         clipboard: Option<&dyn Clipboard>,
-    ) -> bool
+    ) -> Status
     {
         match event {
             Event::Mouse(MouseEvent::CursorMoved { x, y }) => {
@@ -570,7 +573,7 @@ impl<'a, M: Clone + 'a, R: 'a + WidgetRenderer> floating_panes::FloatingPanesBeh
                         renderer,
                         clipboard,
                     );
-                    return true;
+                    return Status::Captured;
                 }
 
                 panes.behaviour_state.selected_channel = None;
@@ -578,7 +581,7 @@ impl<'a, M: Clone + 'a, R: 'a + WidgetRenderer> floating_panes::FloatingPanesBeh
             _ => (),
         }
 
-        false
+        Status::Ignored
     }
 }
 
@@ -619,6 +622,7 @@ pub trait WidgetRenderer:
         defaults: &Self::Defaults,
         layout: FloatingPanesLayout<'_>,
         cursor_position: Point,
+        viewport: &Rectangle,
     ) -> ContentDrawResult<Self>;
 }
 
@@ -631,6 +635,7 @@ where B: Backend + iced_graphics::backend::Text
         defaults: &Self::Defaults,
         layout: FloatingPanesLayout<'_>,
         cursor_position: Point,
+        viewport: &Rectangle,
     ) -> ContentDrawResult<Self>
     {
         let mut mouse_interaction = mouse::Interaction::default();
@@ -638,7 +643,7 @@ where B: Backend + iced_graphics::backend::Text
 
         primitives.extend(panes.children.iter().zip(layout.panes()).map(|((child_index, child), layout)| {
             let (primitive, new_mouse_interaction) =
-                child.element_tree.draw(self, defaults, layout.into(), cursor_position);
+                child.element_tree.draw(self, defaults, layout.into(), cursor_position, viewport);
 
             if new_mouse_interaction > mouse_interaction {
                 mouse_interaction = new_mouse_interaction;
