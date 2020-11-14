@@ -33,9 +33,9 @@ impl Default for ConstantNodeBehaviour {
 }
 
 impl ConstantNodeBehaviour {
-    pub fn new(value: PrimitiveChannelValue) -> Self {
+    pub fn new(value: impl Into<PrimitiveChannelValue>) -> Self {
         let mut result = Self::default();
-        result.set_value(value);
+        result.set_value(value.into());
         result.text_input_value = result.value.value_to_string();
         result
     }
@@ -129,9 +129,12 @@ impl NodeBehaviour for ConstantNodeBehaviour {
         )
     }
 
-    fn execute(&self, _inputs: &ChannelValues, outputs: &mut ChannelValues) {
-        let mut cursor = Cursor::new(outputs[0].as_mut());
+    fn create_executor(&self) -> ArcNodeExecutor {
+        let value = self.value;
+        Arc::new(move |_inputs: &ChannelValueRefs, outputs: &mut ChannelValues| {
+            let mut cursor = Cursor::new(outputs[0].as_mut());
 
-        self.value.write::<LittleEndian>(&mut cursor).unwrap();
+            value.write::<LittleEndian>(&mut cursor).unwrap();
+        })
     }
 }

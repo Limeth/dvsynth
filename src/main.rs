@@ -5,14 +5,13 @@
 //!
 //! Task list:
 //! * Mark invalid connections and cycles in the graph
-//! * Do not copy input values, take pass as references
 //! * Custom UI rendering:
 //!     * CPU Canvas (WASM) https://github.com/embedded-graphics/embedded-graphics
 //!     * Node Definitions (displaying GPU-rendered texture)
 //! * Display type tooltips when hovering over channels
-//! * Add `NodeElement` styles
 //!
 
+use arc_swap::ArcSwapOption;
 use graph::*;
 use iced::{window, Application, Command, Settings};
 use iced_wgpu::Renderer;
@@ -22,6 +21,8 @@ use petgraph::visit::EdgeRef;
 use petgraph::{stable_graph::StableGraph, Directed, Direction};
 use std::borrow::Cow;
 use std::collections::HashSet;
+use std::sync::Arc;
+use std::thread::{self, Thread};
 use style::*;
 use widgets::*;
 
@@ -44,167 +45,25 @@ pub enum Message {
     InsertConnection { connection: Connection },
 }
 
-struct ApplicationState {
-    graph: Graph,
-    floating_panes_state: FloatingPanesState,
-    floating_panes_content_state: FloatingPanesBehaviourState,
+pub struct ApplicationFlags {
+    graph: ExecutionGraph,
 }
 
-impl ApplicationState {
-    pub fn is_graph_complete(&mut self) -> bool {
-        for node_index in self.graph.node_indices() {
-            let node = self.graph.node_weight(node_index);
-            let node = node.as_ref().unwrap();
-            let mut input_channels =
-                (0..node.configuration.channels_input.len()).into_iter().collect::<HashSet<_>>();
-
-            for edge_ref in self.graph.edges_directed(node_index, Direction::Incoming) {
-                let edge = edge_ref.weight();
-                let source_index = edge_ref.source();
-                let source_node: &NodeData = self.graph.node_weight(source_index).unwrap();
-                let source_channel =
-                    source_node.configuration.channel(ChannelDirection::Out, edge.channel_index_from);
-                let target_channel = node.configuration.channel(ChannelDirection::In, edge.channel_index_to);
-
-                if source_channel.ty.is_abi_compatible(&target_channel.ty) {
-                    input_channels.remove(&edge.channel_index_to);
-                }
-            }
-
-            if !input_channels.is_empty() {
-                return false;
-            }
-        }
-
-        true
-    }
-
-    pub fn execute_graph(&mut self) {
-        if !self.is_graph_complete() {
-            return;
-        }
-
-        match petgraph::algo::toposort(&self.graph, None) {
-            Ok(ordered_node_indices) => {
-                for node_index in ordered_node_indices {
-                    {
-                        let mut node = self.graph.node_weight_mut(node_index);
-                        let node = node.as_mut().unwrap();
-
-                        node.ready_output_values();
-                    }
-
-                    let node = self.graph.node_weight(node_index);
-                    let node = node.as_ref().unwrap();
-                    // FIXME: Because StableGraph::find_edge returns an `Option<_>` rather than
-                    // `Vec<_>`, we must iterate over all edges
-                    let input_values = ChannelValues {
-                        values: {
-                            let mut input_values: Vec<Option<ChannelValue>> =
-                                vec![None; node.configuration.channels_input.len()];
-                            for edge_index in self.graph.edge_indices() {
-                                let (from_index, to_index) = self.graph.edge_endpoints(edge_index).unwrap();
-
-                                if to_index == node_index {
-                                    let from = self.graph.node_weight(from_index).unwrap();
-                                    let edge = self.graph.edge_weight(edge_index).unwrap();
-
-                                    input_values[edge.channel_index_to] = Some(
-                                        from.execution_output_values.as_ref().unwrap().borrow().values
-                                            [edge.channel_index_from]
-                                            .clone(),
-                                    );
-                                }
-                            }
-
-                            input_values
-                                .into_iter()
-                                .map(|value| value.expect("An input channel is missing a value."))
-                                .collect::<Vec<_>>()
-                                .into_boxed_slice()
-                        },
-                    };
-                    let mut output_values = node.execution_output_values.as_ref().unwrap().borrow_mut();
-                    node.behaviour.execute(&input_values, &mut output_values);
-                }
-            }
-            Err(cycle) => {
-                // FIXME
-                panic!("Found a cycle in the graph.");
-            }
-        }
-    }
+pub struct ApplicationState {
+    graph: ExecutionGraph,
+    floating_panes_state: FloatingPanesState,
+    floating_panes_content_state: FloatingPanesBehaviourState,
 }
 
 impl Application for ApplicationState {
     type Executor = iced::executor::Default;
     type Message = Message;
-    type Flags = (); // The data needed to initialize your Application.
+    type Flags = ApplicationFlags; // The data needed to initialize your Application.
 
-    fn new(_flags: ()) -> (Self, Command<Self::Message>) {
+    fn new(flags: ApplicationFlags) -> (Self, Command<Self::Message>) {
         (
             Self {
-                graph: {
-                    use ChannelType::*;
-                    use OpaqueChannelType::*;
-                    use PrimitiveChannelType::*;
-                    let mut graph = Graph::new();
-
-                    // graph.add_node(NodeData::new(
-                    //     "Node A",
-                    //     [10.0, 10.0],
-                    //     Box::new(TestNodeBehaviour {
-                    //         name: "Behaviour A".to_string(),
-                    //         channels_input: vec![Primitive(U8)],
-                    //         channels_output: vec![Primitive(U8), Primitive(U32)],
-                    //     }),
-                    // ));
-                    // graph.add_node(NodeData::new(
-                    //     "Node B",
-                    //     [110.0, 10.0],
-                    //     Box::new(TestNodeBehaviour {
-                    //         name: "Behaviour B".to_string(),
-                    //         channels_input: vec![Primitive(U8), Primitive(U8), Primitive(U32)],
-                    //         channels_output: vec![Primitive(U8)],
-                    //     }),
-                    // ));
-                    // graph.add_node(NodeData::new(
-                    //     "Node C",
-                    //     [210.0, 10.0],
-                    //     Box::new(TestNodeBehaviour {
-                    //         name: "Behaviour C".to_string(),
-                    //         channels_input: vec![
-                    //             Primitive(U8),
-                    //             Array(ArrayChannelType::new(Array(ArrayChannelType::new(F32, 4)), 8)),
-                    //         ],
-                    //         channels_output: vec![
-                    //             Primitive(U8),
-                    //             Opaque(Texture(TextureChannelType {})),
-                    //             Array(ArrayChannelType::new(U8, 4)),
-                    //         ],
-                    //     }),
-                    // ));
-
-                    graph.add_node(NodeData::new(
-                        "My Constant Node #1",
-                        [210.0, 10.0],
-                        Box::new(ConstantNodeBehaviour::new(PrimitiveChannelValue::U32(42))),
-                    ));
-
-                    graph.add_node(NodeData::new(
-                        "My Constant Node #2",
-                        [10.0, 10.0],
-                        Box::new(ConstantNodeBehaviour::new(PrimitiveChannelValue::U32(84))),
-                    ));
-
-                    graph.add_node(NodeData::new(
-                        "My Bin Op #1",
-                        [410.0, 10.0],
-                        Box::new(BinaryOpNodeBehaviour::default()),
-                    ));
-
-                    graph
-                },
+                graph: flags.graph,
                 floating_panes_state: Default::default(),
                 floating_panes_content_state: FloatingPanesBehaviourState::default(),
             },
@@ -270,17 +129,15 @@ impl Application for ApplicationState {
 
     fn view(&mut self) -> iced::Element<Message> {
         // FIXME: Decouple from UI rendering loop
-        self.execute_graph();
+        self.graph.update_schedule();
 
         let theme: Box<dyn Theme> = Box::new(style::Dark);
         let node_indices = self.graph.node_indices().collect::<Vec<_>>();
-        // TODO: do not recompute every time `view` is called
-        let Self { graph, floating_panes_content_state, .. } = self;
-        let mut connections = Vec::with_capacity(graph.edge_count());
+        let mut connections = Vec::with_capacity(self.graph.edge_count());
 
-        connections.extend(graph.edge_indices().map(|edge_index| {
-            let edge_data = &graph[edge_index];
-            let (index_from, index_to) = graph.edge_endpoints(edge_index).unwrap();
+        connections.extend(self.graph.edge_indices().map(|edge_index| {
+            let edge_data = &self.graph[edge_index];
+            let (index_from, index_to) = self.graph.edge_endpoints(edge_index).unwrap();
             Connection([(index_from, edge_data.channel_index_from), (index_to, edge_data.channel_index_to)])
         }));
 
@@ -304,13 +161,66 @@ impl Application for ApplicationState {
 }
 
 fn main() {
+    let graph: ExecutionGraph = {
+        let mut graph = Graph::new();
+
+        graph.add_node(NodeData::new(
+            "My Constant Node #1",
+            [210.0, 10.0],
+            Box::new(ConstantNodeBehaviour::new(42.0_f32)),
+        ));
+
+        graph.add_node(NodeData::new(
+            "My Constant Node #2",
+            [10.0, 10.0],
+            Box::new(ConstantNodeBehaviour::new(84.0_f32)),
+        ));
+
+        graph.add_node(NodeData::new(
+            "My Bin Op #1",
+            [410.0, 10.0],
+            Box::new(BinaryOpNodeBehaviour::default()),
+        ));
+
+        graph.add_node(NodeData::new(
+            "My Bin Op #2",
+            [610.0, 10.0],
+            Box::new(BinaryOpNodeBehaviour::default()),
+        ));
+
+        graph.into()
+    };
+
+    thread::spawn({
+        let active_schedule = graph.active_schedule.clone();
+        move || {
+            let mut prepared_execution: Option<PreparedExecution> = None;
+
+            loop {
+                if let Some(active_schedule) = active_schedule.load().as_ref() {
+                    if prepared_execution.is_none()
+                        || prepared_execution.as_ref().unwrap().generation != active_schedule.generation
+                    {
+                        prepared_execution = Some(active_schedule.prepare_execution());
+                    }
+
+                    let prepared_execution = prepared_execution.as_mut().unwrap();
+
+                    prepared_execution.execute(active_schedule);
+                } else {
+                    prepared_execution = None;
+                }
+            }
+        }
+    });
+
     ApplicationState::run(Settings {
         window: window::Settings {
             icon: None, // TODO
             ..window::Settings::default()
         },
         antialiasing: true,
-        ..Settings::default()
+        ..Settings::with_flags(ApplicationFlags { graph })
     })
     .unwrap();
 }

@@ -7,6 +7,7 @@ use std::borrow::Cow;
 use std::fmt::{Debug, Display};
 use std::io::{Cursor, Read, Write};
 use std::ops::{Add, Deref, DerefMut, Div, Index, IndexMut, Mul, Sub};
+use std::sync::Arc;
 
 pub use binary_op::*;
 pub use constant::*;
@@ -172,6 +173,35 @@ impl PrimitiveChannelValue {
             F64(value) => write.write_f64::<E>(*value),
         }
     }
+}
+
+macro_rules! impl_primitive_conversions {
+    {
+        $($enum_variant:ident ($primitive_type:ident)),*$(,)?
+    } => {
+        $(
+            impl From<$primitive_type> for PrimitiveChannelValue {
+                fn from(primitive: $primitive_type) -> Self {
+                    PrimitiveChannelValue::$enum_variant(primitive)
+                }
+            }
+        )*
+    }
+}
+
+impl_primitive_conversions! {
+    U8(u8),
+    U16(u16),
+    U32(u32),
+    U64(u64),
+    U128(u128),
+    I8(i8),
+    I16(i16),
+    I32(i32),
+    I64(i64),
+    I128(i128),
+    F32(f32),
+    F64(f64),
 }
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
@@ -468,6 +498,10 @@ pub struct ChannelValue {
 }
 
 impl ChannelValue {
+    pub fn as_channel_value_ref(&self) -> ChannelValueRef {
+        ChannelValueRef { data: &self.data }
+    }
+
     pub fn as_ref(&self) -> &[u8] {
         self.data.as_ref()
     }
@@ -497,6 +531,19 @@ impl DerefMut for ChannelValue {
     }
 }
 
+#[derive(Clone, Copy)]
+pub struct ChannelValueRef<'a> {
+    pub data: &'a [u8],
+}
+
+impl<'a> Deref for ChannelValueRef<'a> {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        self.data
+    }
+}
+
 /// `ChannelValue`s for multiple channels
 pub struct ChannelValues {
     pub values: Box<[ChannelValue]>,
@@ -523,6 +570,24 @@ impl Index<usize> for ChannelValues {
 }
 
 impl IndexMut<usize> for ChannelValues {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        &mut self.values[index]
+    }
+}
+
+pub struct ChannelValueRefs<'a> {
+    pub values: Box<[ChannelValueRef<'a>]>,
+}
+
+impl<'a> Index<usize> for ChannelValueRefs<'a> {
+    type Output = ChannelValueRef<'a>;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.values[index]
+    }
+}
+
+impl<'a> IndexMut<usize> for ChannelValueRefs<'a> {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
         &mut self.values[index]
     }
@@ -560,11 +625,25 @@ pub enum NodeEvent {
     Message(Box<dyn NodeBehaviourMessage>),
 }
 
+pub trait NodeExecutor: Send {
+    fn execute(&self, inputs: &ChannelValueRefs, outputs: &mut ChannelValues);
+}
+
+impl<T> NodeExecutor for T
+where T: Send + Fn(&ChannelValueRefs, &mut ChannelValues)
+{
+    fn execute(&self, inputs: &ChannelValueRefs, outputs: &mut ChannelValues) {
+        (self)(inputs, outputs)
+    }
+}
+
+pub type ArcNodeExecutor = Arc<dyn NodeExecutor + Send + Sync>;
+
 pub trait NodeBehaviour {
     fn name(&self) -> &str;
     fn update(&mut self, event: NodeEvent) -> Vec<NodeCommand>;
     fn view(&mut self, theme: &dyn Theme) -> Option<Element<Box<dyn NodeBehaviourMessage>>>;
-    fn execute(&self, inputs: &ChannelValues, outputs: &mut ChannelValues);
+    fn create_executor(&self) -> ArcNodeExecutor;
 }
 
 pub mod binary_op;
