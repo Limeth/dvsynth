@@ -111,15 +111,16 @@ impl NodeBehaviour for BinaryOpNodeBehaviour {
         )
     }
 
-    fn init_state(&self) -> Option<Box<dyn NodeExecutorState>> {
+    fn create_state_initializer(&self) -> Option<Arc<NodeStateInitializer>> {
         None
     }
 
-    fn create_executor(&self) -> ArcNodeExecutor {
+    fn create_executor(&self) -> Arc<NodeExecutor> {
         let pick_list_ty_value = self.pick_list_ty_value;
         let op = self.op;
         Arc::new(
-            move |_state: Option<&mut dyn NodeExecutorState>,
+            move |_context: &ExecutionContext,
+                  _state: Option<&mut dyn NodeExecutorState>,
                   inputs: &ChannelValueRefs,
                   outputs: &mut ChannelValues| {
                 let lhs = pick_list_ty_value.read::<LittleEndian, _>(&inputs[0].as_ref()).unwrap();

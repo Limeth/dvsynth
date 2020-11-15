@@ -1,19 +1,24 @@
+use crate::graph::ExecutionContext;
 use crate::style::Theme;
 use byteorder::{ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
 use downcast_rs::{impl_downcast, Downcast};
 use dyn_clone::DynClone;
 use iced::widget::pick_list::{PickList, State as PickListState};
 use iced::Element;
+use iced_winit::winit::event_loop::{EventLoop, EventLoopWindowTarget};
+use iced_winit::winit::window::{Window, WindowAttributes};
 use std::any::Any;
 use std::borrow::Cow;
 use std::fmt::{Debug, Display};
 use std::io::{Cursor, Read, Write};
 use std::ops::{Add, Deref, DerefMut, Div, Index, IndexMut, Mul, Sub};
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
 
 pub use binary_op::*;
 pub use constant::*;
 pub use counter::*;
+pub use window::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChannelDirection {
@@ -370,6 +375,12 @@ impl Display for TextureChannelType {
     }
 }
 
+impl From<TextureChannelType> for ChannelType {
+    fn from(other: TextureChannelType) -> Self {
+        OpaqueChannelType::Texture(other).into()
+    }
+}
+
 #[derive(Debug, Hash, PartialEq, Eq, Clone)]
 pub struct ArrayChannelType {
     pub item_type: Box<ChannelType>,
@@ -628,48 +639,39 @@ pub enum NodeEvent {
     Message(Box<dyn NodeBehaviourMessage>),
 }
 
-// Should the state be cloneable?
-// It should be serializable and deserializable, so probably cloneable as well?
-// What about windows? Those should not be cloned?
-pub trait NodeExecutorState: Downcast + DynClone + Debug + Send + Sync {}
-
-impl<T> NodeExecutorState for T where T: Downcast + DynClone + Debug + Send + Sync {}
-
+pub trait NodeExecutorState: Downcast + Debug + Send + Sync {}
+impl<T> NodeExecutorState for T where T: Downcast + Debug + Send + Sync {}
 impl_downcast!(NodeExecutorState);
 
-pub trait NodeExecutor: Send {
-    fn execute(
-        &self,
-        state: Option<&mut dyn NodeExecutorState>,
-        inputs: &ChannelValueRefs,
-        outputs: &mut ChannelValues,
+// pub trait NodeExecutorSettings: Downcast + Debug + DynClone + Send {}
+// impl<T> NodeExecutorSettings for T where T: Downcast + Debug + DynClone + Send {}
+// impl_downcast!(NodeExecutorSettings);
+
+pub type NodeExecutor = dyn Send
+    + Sync
+    + Fn(
+        &ExecutionContext,                  // context
+        Option<&mut dyn NodeExecutorState>, // state
+        &ChannelValueRefs,                  // inputs
+        &mut ChannelValues,                 // outputs
     );
-}
 
-impl<T> NodeExecutor for T
-where T: Send + Fn(Option<&mut dyn NodeExecutorState>, &ChannelValueRefs, &mut ChannelValues)
-{
-    fn execute(
-        &self,
-        state: Option<&mut dyn NodeExecutorState>,
-        inputs: &ChannelValueRefs,
-        outputs: &mut ChannelValues,
-    )
-    {
-        (self)(state, inputs, outputs)
-    }
-}
+pub type NodeStateInitializer = dyn Send + Sync + Fn(&ExecutionContext) -> Box<dyn NodeExecutorState>;
 
-pub type ArcNodeExecutor = Arc<dyn NodeExecutor + Send + Sync>;
+pub type MainThreadTask = dyn Send + FnOnce(&EventLoopWindowTarget<crate::Message>);
 
 pub trait NodeBehaviour {
     fn name(&self) -> &str;
     fn update(&mut self, event: NodeEvent) -> Vec<NodeCommand>;
     fn view(&mut self, theme: &dyn Theme) -> Option<Element<Box<dyn NodeBehaviourMessage>>>;
-    fn init_state(&self) -> Option<Box<dyn NodeExecutorState>>;
-    fn create_executor(&self) -> ArcNodeExecutor;
+    fn create_executor(&self) -> Arc<NodeExecutor>;
+
+    fn create_state_initializer(&self) -> Option<Arc<NodeStateInitializer>> {
+        None
+    }
 }
 
 pub mod binary_op;
 pub mod constant;
 pub mod counter;
+pub mod window;

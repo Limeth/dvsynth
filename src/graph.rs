@@ -2,11 +2,15 @@ use crate::node::*;
 use crate::*;
 use dyn_clone::DynClone;
 use iced::Element;
+use iced_winit::winit::event_loop::EventLoopWindowTarget;
+use iced_winit::winit::platform::desktop::EventLoopExtDesktop;
+use iced_winit::winit::window::{Window, WindowAttributes};
 use std::any::Any;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::ops::{Deref, DerefMut};
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::RwLock;
 use vek::Vec2;
 
@@ -34,7 +38,7 @@ pub struct PreparedExecution {
 static_assertions::assert_impl_all!(Arc<PreparedExecution>: Send, Sync);
 
 impl PreparedExecution {
-    fn from(schedule: &Schedule, previous: Option<Self>) -> Self {
+    fn from(schedule: &Schedule, context: &mut ExecutionContext, mut previous: Option<Self>) -> Self {
         let previous_node_index_map: Option<HashMap<NodeIndex, usize>> =
             previous.as_ref().map(|prepared_execution| {
                 prepared_execution
@@ -56,11 +60,15 @@ impl PreparedExecution {
                         .and_then(|previous_node_index_map| previous_node_index_map.get(&task.node_index))
                         .and_then(|task_index| {
                             let previous_task =
-                                &previous.as_ref().unwrap().tasks[*task_index].read().unwrap();
+                                &mut previous.as_mut().unwrap().tasks[*task_index].write().unwrap();
 
-                            previous_task.state.as_ref().map(|state| dyn_clone::clone_box(&**state))
+                            previous_task.state.take()
                         })
-                        .or_else(|| task.init_state.as_ref().map(|state| dyn_clone::clone_box(&**state)));
+                        .or_else(|| {
+                            task.state_initializer
+                                .as_ref()
+                                .map(|state_initializer| (state_initializer)(&context))
+                        });
 
                     RwLock::new(PreparedTask {
                         node_index: task.node_index,
@@ -75,7 +83,7 @@ impl PreparedExecution {
 }
 
 impl PreparedExecution {
-    pub fn execute(&mut self, schedule: &Schedule) {
+    pub fn execute(&mut self, schedule: &Schedule, context: &mut ExecutionContext) {
         for (task_index, task) in schedule.tasks.iter().enumerate() {
             let (tasks_preceding, tasks_following) = self.tasks.split_at_mut(task_index);
             let input_value_guards = task
@@ -100,7 +108,7 @@ impl PreparedExecution {
             let output_values = &mut current_task.output_values;
             let task_state = current_task.state.as_mut().map(|state| state.as_mut());
 
-            task.executor.execute(task_state, &input_values, output_values);
+            (task.executor)(&context, task_state, &input_values, output_values);
         }
     }
 }
@@ -111,32 +119,33 @@ pub struct TaskInput {
     pub source_channel_index: usize,
 }
 
+#[derive(Clone)]
 pub struct Task {
     pub node_index: NodeIndex,
     pub configuration: NodeConfiguration,
-    pub init_state: Option<Box<dyn NodeExecutorState>>,
+    pub state_initializer: Option<Arc<NodeStateInitializer>>,
     pub inputs: Box<[TaskInput]>,
-    pub executor: Arc<dyn NodeExecutor + Send + Sync>,
+    pub executor: Arc<NodeExecutor>,
 }
 
-impl Clone for Task {
-    fn clone(&self) -> Self {
-        Self {
-            node_index: self.node_index.clone(),
-            configuration: self.configuration.clone(),
-            init_state: self.init_state.as_ref().map(|state| dyn_clone::clone_box(&**state)),
-            inputs: self.inputs.clone(),
-            executor: self.executor.clone(),
-        }
-    }
-}
+// impl Clone for Task {
+//     fn clone(&self) -> Self {
+//         Self {
+//             node_index: self.node_index.clone(),
+//             configuration: self.configuration.clone(),
+//             init_state: self.init_state.as_ref().map(|state| dyn_clone::clone_box(&**state)),
+//             inputs: self.inputs.clone(),
+//             executor: self.executor.clone(),
+//         }
+//     }
+// }
 
 impl Debug for Task {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Task")
             .field("node_index", &self.node_index)
             .field("configuration", &self.configuration)
-            .field("init_state", &self.init_state)
+            .field("state_initializer.is_some()", &self.state_initializer.is_some())
             .field("inputs", &self.inputs)
             .finish()
     }
@@ -241,7 +250,7 @@ impl ExecutionGraph {
                 Task {
                     node_index,
                     configuration: node.configuration.clone(),
-                    init_state: node.behaviour.init_state(),
+                    state_initializer: node.behaviour.create_state_initializer(),
                     inputs,
                     executor: node.behaviour.create_executor(),
                 }
@@ -294,21 +303,36 @@ impl DerefMut for ExecutionGraph {
     }
 }
 
+pub struct ExecutionContext {
+    pub main_thread_task_sender: Sender<Box<MainThreadTask>>,
+}
+
+impl ExecutionContext {
+    pub fn new() -> (Self, Receiver<Box<MainThreadTask>>) {
+        let (main_thread_task_sender, main_thread_task_receiver) = mpsc::channel();
+        let context = Self { main_thread_task_sender };
+        (context, main_thread_task_receiver)
+    }
+}
+
 pub struct GraphExecutor {
+    execution_context: ExecutionContext,
     active_schedule: Arc<ArcSwapOption<Schedule>>,
 }
 
 impl GraphExecutor {
-    pub fn new(active_schedule: Arc<ArcSwapOption<Schedule>>) -> Self {
-        Self { active_schedule }
+    pub fn new(execution_context: ExecutionContext, active_schedule: Arc<ArcSwapOption<Schedule>>) -> Self {
+        Self { active_schedule, execution_context }
     }
 
-    pub fn spawn(graph: &ExecutionGraph) -> std::thread::JoinHandle<()> {
+    pub fn spawn(graph: &ExecutionGraph) -> (std::thread::JoinHandle<()>, Receiver<Box<MainThreadTask>>) {
+        let (execution_context, main_thread_task_receiver) = ExecutionContext::new();
         let active_schedule = graph.active_schedule.clone();
-        thread::spawn(move || Self::new(active_schedule).run())
+        let join_handle = thread::spawn(move || Self::new(execution_context, active_schedule).run());
+        (join_handle, main_thread_task_receiver)
     }
 
-    pub fn run(&mut self) {
+    pub fn run(mut self) {
         let mut prepared_execution: Option<PreparedExecution> = None;
         let mut last_prepared_execution: Option<PreparedExecution> = None;
 
@@ -319,13 +343,14 @@ impl GraphExecutor {
                 {
                     prepared_execution = Some(PreparedExecution::from(
                         &active_schedule,
+                        &mut self.execution_context,
                         prepared_execution.or(last_prepared_execution.take()),
                     ));
                 }
 
                 let prepared_execution = prepared_execution.as_mut().unwrap();
 
-                prepared_execution.execute(active_schedule);
+                prepared_execution.execute(active_schedule, &mut self.execution_context);
             } else {
                 if let Some(prepared_execution) = prepared_execution.take() {
                     last_prepared_execution = Some(prepared_execution);

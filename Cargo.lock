@@ -124,6 +124,20 @@ name = "bytemuck"
 version = "1.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "41aa2ec95ca3b5c54cf73c91acf06d24f4495d5f1b1c12506ae3483d646177ac"
+dependencies = [
+ "bytemuck_derive",
+]
+
+[[package]]
+name = "bytemuck_derive"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "28dae23a39becf0b1c8f9198d7e9fc80aaf1ec1ee7428ec570f6a0269e59a9cc"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
 
 [[package]]
 name = "byteorder"
@@ -521,12 +535,14 @@ dependencies = [
  "byteorder",
  "downcast-rs",
  "dyn-clone",
+ "flume",
  "iced",
  "iced_graphics",
  "iced_native",
  "iced_wgpu",
+ "iced_winit",
  "indexmap",
- "lyon_geom 0.16.2",
+ "lyon_geom",
  "ordered-float 2.0.0",
  "paste",
  "petgraph",
@@ -538,9 +554,9 @@ dependencies = [
 
 [[package]]
 name = "dwrote"
-version = "0.10.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bcdf488e3a52a7aa30a05732a3e58420e22acb4b2b75635a561fc6ffbcab59ef"
+checksum = "439a1c2ba5611ad3ed731280541d36d2e9c4ac5e7fb818a27b604bdc5a6aa65b"
 dependencies = [
  "lazy_static",
  "libc",
@@ -568,15 +584,6 @@ checksum = "b49c94f66f2d2c5ee8685039e458b4e6c9f13af7c28736baf10ce42966a5ab52"
 dependencies = [
  "libc",
  "str-buf",
-]
-
-[[package]]
-name = "euclid"
-version = "0.20.14"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2bb7ef65b3777a325d1eeefefab5b6d4959da54747e33bd6258e789640f307ad"
-dependencies = [
- "num-traits 0.2.12",
 ]
 
 [[package]]
@@ -611,6 +618,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7bad48618fdb549078c333a7a8528acb57af271d0433bdecd523eb620628364e"
 
 [[package]]
+name = "flume"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d9e818efa7776f4dd7df0e542f877f7a5a87bddd6a1a10f59a7732b71ffb9d55"
+dependencies = [
+ "spinning_top",
+]
+
+[[package]]
 name = "fnv"
 version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -618,9 +634,9 @@ checksum = "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1"
 
 [[package]]
 name = "font-kit"
-version = "0.6.0"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8f953474ebbe3460775ed2da52435477cc029493284d6ceb635598586a2c6298"
+checksum = "4c04f5c358473b358c4bb8e5c72f1a25f51d4ca6ad76b2261e1f3b81937faae7"
 dependencies = [
  "bitflags",
  "byteorder",
@@ -943,9 +959,12 @@ dependencies = [
 
 [[package]]
 name = "glam"
-version = "0.9.5"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8637c7ec4fd0776c51eeab3e0d5d1aa7e440ece3fc2ee7d674e13c957287bfc1"
+checksum = "668e725370f2b2243a5f43c6e4be6be3d501fb2441b81f7ee604ef766b5ab91b"
+dependencies = [
+ "version_check",
+]
 
 [[package]]
 name = "glyph_brush"
@@ -988,11 +1007,11 @@ dependencies = [
 
 [[package]]
 name = "guillotiere"
-version = "0.5.2"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "47065d052e2f000066c4ffbea7051e55bff5c1532c400fc1e269492b2474ccc1"
+checksum = "bc7cccefbf418f663e11e9500326f46a44273dc598210bbedc8bbe95e696531f"
 dependencies = [
- "euclid 0.20.14",
+ "euclid",
  "svg_fmt",
 ]
 
@@ -1023,7 +1042,7 @@ dependencies = [
 [[package]]
 name = "iced"
 version = "0.1.1"
-source = "git+https://github.com/Limeth/iced.git#1d51025993fa3819695bf27e1e4ecee56d3e324a"
+source = "git+https://github.com/Limeth/iced.git?branch=feature-event-handler#e400389836a4b992ab7a31250a944b3229d9c914"
 dependencies = [
  "iced_core",
  "iced_futures",
@@ -1036,12 +1055,12 @@ dependencies = [
 [[package]]
 name = "iced_core"
 version = "0.2.1"
-source = "git+https://github.com/Limeth/iced.git#1d51025993fa3819695bf27e1e4ecee56d3e324a"
+source = "git+https://github.com/Limeth/iced.git?branch=feature-event-handler#e400389836a4b992ab7a31250a944b3229d9c914"
 
 [[package]]
 name = "iced_futures"
 version = "0.1.2"
-source = "git+https://github.com/Limeth/iced.git#1d51025993fa3819695bf27e1e4ecee56d3e324a"
+source = "git+https://github.com/Limeth/iced.git?branch=feature-event-handler#e400389836a4b992ab7a31250a944b3229d9c914"
 dependencies = [
  "futures",
  "log",
@@ -1051,7 +1070,7 @@ dependencies = [
 [[package]]
 name = "iced_graphics"
 version = "0.1.0"
-source = "git+https://github.com/Limeth/iced.git#1d51025993fa3819695bf27e1e4ecee56d3e324a"
+source = "git+https://github.com/Limeth/iced.git?branch=feature-event-handler#e400389836a4b992ab7a31250a944b3229d9c914"
 dependencies = [
  "bytemuck",
  "font-kit",
@@ -1066,7 +1085,7 @@ dependencies = [
 [[package]]
 name = "iced_native"
 version = "0.2.2"
-source = "git+https://github.com/Limeth/iced.git#1d51025993fa3819695bf27e1e4ecee56d3e324a"
+source = "git+https://github.com/Limeth/iced.git?branch=feature-event-handler#e400389836a4b992ab7a31250a944b3229d9c914"
 dependencies = [
  "iced_core",
  "iced_futures",
@@ -1078,7 +1097,7 @@ dependencies = [
 [[package]]
 name = "iced_style"
 version = "0.1.0"
-source = "git+https://github.com/Limeth/iced.git#1d51025993fa3819695bf27e1e4ecee56d3e324a"
+source = "git+https://github.com/Limeth/iced.git?branch=feature-event-handler#e400389836a4b992ab7a31250a944b3229d9c914"
 dependencies = [
  "iced_core",
 ]
@@ -1086,7 +1105,7 @@ dependencies = [
 [[package]]
 name = "iced_web"
 version = "0.2.1"
-source = "git+https://github.com/Limeth/iced.git#1d51025993fa3819695bf27e1e4ecee56d3e324a"
+source = "git+https://github.com/Limeth/iced.git?branch=feature-event-handler#e400389836a4b992ab7a31250a944b3229d9c914"
 dependencies = [
  "dodrio",
  "iced_core",
@@ -1102,7 +1121,7 @@ dependencies = [
 [[package]]
 name = "iced_wgpu"
 version = "0.2.2"
-source = "git+https://github.com/Limeth/iced.git#1d51025993fa3819695bf27e1e4ecee56d3e324a"
+source = "git+https://github.com/Limeth/iced.git?branch=feature-event-handler#e400389836a4b992ab7a31250a944b3229d9c914"
 dependencies = [
  "bytemuck",
  "futures",
@@ -1114,13 +1133,12 @@ dependencies = [
  "raw-window-handle",
  "wgpu",
  "wgpu_glyph",
- "zerocopy",
 ]
 
 [[package]]
 name = "iced_winit"
 version = "0.1.1"
-source = "git+https://github.com/Limeth/iced.git#1d51025993fa3819695bf27e1e4ecee56d3e324a"
+source = "git+https://github.com/Limeth/iced.git?branch=feature-event-handler#e400389836a4b992ab7a31250a944b3229d9c914"
 dependencies = [
  "iced_futures",
  "iced_graphics",
@@ -1286,9 +1304,9 @@ checksum = "b3bd0dd2cd90571056fdb71f6275fada10131182f84899f4b2a916e565d81d86"
 
 [[package]]
 name = "lyon"
-version = "0.15.9"
+version = "0.16.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ed142d912ddc611081d50acd84ce1b8612da909aa4cf369642ba92cf51f09b40"
+checksum = "28d083e12e9e22298eec27751ec4a0975abac5873a3b0dcdbbecc608d333f0e9"
 dependencies = [
  "lyon_algorithms",
  "lyon_tessellation",
@@ -1296,23 +1314,12 @@ dependencies = [
 
 [[package]]
 name = "lyon_algorithms"
-version = "0.15.1"
+version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef5d79947342462427efed6f49b1361d700c0f5dad97a1bac96a5f84d2d1abb1"
+checksum = "11033936a5e9d7bf35b7ba71a19f8b6bc838f3206304175dc5b3524ca16672a8"
 dependencies = [
  "lyon_path",
  "sid",
-]
-
-[[package]]
-name = "lyon_geom"
-version = "0.15.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9962a2ba81382716b87d7d358493cb71844c1f9165ddad763cd9f4d3f5474df2"
-dependencies = [
- "arrayvec",
- "euclid 0.20.14",
- "num-traits 0.2.12",
 ]
 
 [[package]]
@@ -1322,24 +1329,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6ce4e12203c428a58200b8cf1c0a3aad1cda907008ea11310bb3729593e5f933"
 dependencies = [
  "arrayvec",
- "euclid 0.22.1",
+ "euclid",
  "num-traits 0.2.12",
 ]
 
 [[package]]
 name = "lyon_path"
-version = "0.15.2"
+version = "0.16.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c81a044414965c051b7b4785770820d23146480a2d8573cd825f03a00a5b8dd8"
+checksum = "243c71fff16677ecde2d38794a0253a8f0417cebaacc6390677c30733831d8cb"
 dependencies = [
- "lyon_geom 0.15.3",
+ "lyon_geom",
 ]
 
 [[package]]
 name = "lyon_tessellation"
-version = "0.15.9"
+version = "0.16.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "71c45e7eb8cf9cba513aa72efd59894f861a91acabc9a100caeb0fe6e6315b71"
+checksum = "6ecf3d769bec66396957d7c5cb91f998c4182e53fdc96cc435b6ebcd46a63cd9"
 dependencies = [
  "arrayvec",
  "lyon_path",
@@ -2140,6 +2147,15 @@ checksum = "b9e9db50a9b272938b767b731a1291f22f407315def4049db93871e8828034d5"
 dependencies = [
  "smithay-client-toolkit 0.11.0",
  "wayland-client 0.27.0",
+]
+
+[[package]]
+name = "spinning_top"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7e529d73e80d64b5f2631f9035113347c578a1c9c7774b83a2b880788459ab36"
+dependencies = [
+ "lock_api",
 ]
 
 [[package]]

@@ -26,15 +26,16 @@ impl NodeBehaviour for CounterNodeBehaviour {
         None
     }
 
-    fn init_state(&self) -> Option<Box<dyn NodeExecutorState>> {
-        Some(Box::new(State::default()) as Box<dyn NodeExecutorState>)
+    fn create_state_initializer(&self) -> Option<Arc<NodeStateInitializer>> {
+        Some(Arc::new(|_context: &ExecutionContext| Box::new(State::default()) as Box<dyn NodeExecutorState>))
     }
 
-    fn create_executor(&self) -> ArcNodeExecutor {
+    fn create_executor(&self) -> Arc<NodeExecutor> {
         Arc::new(
-            move |state: Option<&mut dyn NodeExecutorState>,
-                  _inputs: &ChannelValueRefs,
-                  outputs: &mut ChannelValues| {
+            |_context: &ExecutionContext,
+             state: Option<&mut dyn NodeExecutorState>,
+             _inputs: &ChannelValueRefs,
+             outputs: &mut ChannelValues| {
                 let state = state.unwrap();
                 let state = state.downcast_mut::<State>().unwrap();
                 let mut cursor = Cursor::new(outputs[0].as_mut());

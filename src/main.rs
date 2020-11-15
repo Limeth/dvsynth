@@ -15,6 +15,8 @@ use arc_swap::ArcSwapOption;
 use graph::*;
 use iced::{window, Application, Command, Settings};
 use iced_wgpu::Renderer;
+use iced_winit::winit;
+use iced_winit::winit::window::{Window, WindowAttributes, WindowBuilder};
 use node::*;
 use petgraph::graph::NodeIndex;
 use petgraph::visit::EdgeRef;
@@ -85,6 +87,8 @@ impl Application for ApplicationState {
     }
 
     fn update(&mut self, message: Self::Message) -> Command<Self::Message> {
+        let mut update_schedule = false;
+
         match message {
             Message::NodeMessage { node, message } => {
                 match message {
@@ -99,6 +103,8 @@ impl Application for ApplicationState {
                         }
                     }
                 }
+
+                update_schedule = true;
             }
             Message::DisconnectChannel { channel } => {
                 self.graph.retain_edges(|frozen, edge| {
@@ -120,6 +126,8 @@ impl Application for ApplicationState {
 
                     true
                 });
+
+                update_schedule = true;
             }
             Message::InsertConnection { connection } => {
                 let from = connection.from();
@@ -130,17 +138,22 @@ impl Application for ApplicationState {
                     to.node_index,
                     EdgeData { channel_index_from: from.channel_index, channel_index_to: to.channel_index },
                 );
+
+                update_schedule = true;
             }
             Message::RecomputeLayout => (),
+        }
+
+        if update_schedule {
+            if let Err(_) = self.graph.update_schedule() {
+                eprintln!("Could not construct the graph schedule.");
+            }
         }
 
         Command::none()
     }
 
     fn view(&mut self) -> iced::Element<Message> {
-        // FIXME: Decouple from UI rendering loop
-        self.graph.update_schedule();
-
         let theme: Box<dyn Theme> = Box::new(style::Dark);
         let node_indices = self.graph.node_indices().collect::<Vec<_>>();
         let mut connections = Vec::with_capacity(self.graph.edge_count());
@@ -193,26 +206,35 @@ fn main() {
             Box::new(BinaryOpNodeBehaviour::default()),
         ));
 
-        // graph.add_node(NodeData::new(
-        //     "My Bin Op #2",
-        //     [610.0, 10.0],
-        //     Box::new(BinaryOpNodeBehaviour::default()),
-        // ));
+        graph.add_node(NodeData::new(
+            "My Window #1",
+            [610.0, 10.0],
+            Box::new(WindowNodeBehaviour::default()),
+        ));
 
         graph.add_node(NodeData::new("My Counter", [810.0, 10.0], Box::new(CounterNodeBehaviour::default())));
 
         graph.into()
     };
 
-    GraphExecutor::spawn(&graph);
+    let (_join_handle, main_thread_task_receiver) = GraphExecutor::spawn(&graph);
 
-    ApplicationState::run(Settings {
-        window: window::Settings {
-            icon: None, // TODO
-            ..window::Settings::default()
+    ApplicationState::run_with_event_handler(
+        Settings {
+            window: window::Settings {
+                icon: None, // TODO
+                ..window::Settings::default()
+            },
+            antialiasing: true,
+            ..Settings::with_flags(ApplicationFlags { graph })
         },
-        antialiasing: true,
-        ..Settings::with_flags(ApplicationFlags { graph })
-    })
+        Some(Box::new(move |event, window_target, control_flow| {
+            if event == winit::event::Event::MainEventsCleared {
+                for main_thread_task in main_thread_task_receiver.try_iter() {
+                    (main_thread_task)(window_target);
+                }
+            }
+        })),
+    )
     .unwrap();
 }
