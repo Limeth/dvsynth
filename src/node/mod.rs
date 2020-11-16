@@ -9,6 +9,7 @@ use iced_winit::winit::event_loop::{EventLoop, EventLoopWindowTarget};
 use iced_winit::winit::window::{Window, WindowAttributes};
 use std::any::Any;
 use std::borrow::Cow;
+use std::convert::{TryFrom, TryInto};
 use std::fmt::{Debug, Display};
 use std::io::{Cursor, Read, Write};
 use std::ops::{Add, Deref, DerefMut, Div, Index, IndexMut, Mul, Sub};
@@ -618,14 +619,16 @@ pub trait NodeBehaviourMessage: Downcast + Debug + Send {
 impl_downcast!(NodeBehaviourMessage);
 
 macro_rules! impl_node_behaviour_message {
-    ($target_type:ident) => {
-        impl NodeBehaviourMessage for $target_type {
+    ($($target_type:tt)*) => {
+        impl NodeBehaviourMessage for $($target_type)* {
             fn dyn_clone(&self) -> Box<dyn NodeBehaviourMessage> {
                 Box::new(self.clone())
             }
         }
     };
 }
+
+impl_node_behaviour_message!(());
 
 impl Clone for Box<dyn NodeBehaviourMessage> {
     fn clone(&self) -> Self {
@@ -634,9 +637,34 @@ impl Clone for Box<dyn NodeBehaviourMessage> {
 }
 
 #[derive(Debug, Clone)]
-pub enum NodeEvent {
+pub enum NodeEvent<M> {
     Update,
-    Message(Box<dyn NodeBehaviourMessage>),
+    Message(M),
+}
+
+pub type NodeEventContainer = NodeEvent<Box<dyn NodeBehaviourMessage>>;
+
+impl<M: NodeBehaviourMessage> NodeEvent<M> {
+    pub fn from_container(container: NodeEventContainer) -> Result<Self, ()> {
+        Ok(match container {
+            NodeEvent::Message(message) => match message.downcast::<M>() {
+                Ok(message) => NodeEvent::Message(*message),
+                Err(_) => return Err(()),
+            },
+            NodeEvent::Update => NodeEvent::Update,
+        })
+    }
+
+    pub fn into_container(self) -> NodeEventContainer {
+        self.map_message(|message| Box::new(message) as Box<dyn NodeBehaviourMessage>)
+    }
+
+    pub fn map_message<R>(self, map: impl FnOnce(M) -> R) -> NodeEvent<R> {
+        match self {
+            NodeEvent::Message(message) => NodeEvent::Message((map)(message)),
+            NodeEvent::Update => NodeEvent::Update,
+        }
+    }
 }
 
 pub trait NodeExecutorState: Downcast + Debug + Send + Sync {}
@@ -647,7 +675,7 @@ impl_downcast!(NodeExecutorState);
 // impl<T> NodeExecutorSettings for T where T: Downcast + Debug + DynClone + Send {}
 // impl_downcast!(NodeExecutorSettings);
 
-pub type NodeExecutor = dyn Send
+pub type NodeExecutorContainer = dyn Send
     + Sync
     + Fn(
         &ExecutionContext,                  // context
@@ -656,18 +684,111 @@ pub type NodeExecutor = dyn Send
         &mut ChannelValues,                 // outputs
     );
 
-pub type NodeStateInitializer = dyn Send + Sync + Fn(&ExecutionContext) -> Box<dyn NodeExecutorState>;
+pub trait NodeExecutor<S>: 'static + Send + Sync {
+    fn execute(
+        &self,
+        context: &ExecutionContext,
+        state: Option<&mut S>,
+        inputs: &ChannelValueRefs,
+        outputs: &mut ChannelValues,
+    );
+}
+
+pub type BoxNodeExecutor<S> =
+    Box<dyn Send + Sync + Fn(&ExecutionContext, Option<&mut S>, &ChannelValueRefs, &mut ChannelValues)>;
+
+impl<S: 'static> NodeExecutor<S> for BoxNodeExecutor<S> {
+    fn execute(
+        &self,
+        context: &ExecutionContext,
+        state: Option<&mut S>,
+        inputs: &ChannelValueRefs,
+        outputs: &mut ChannelValues,
+    )
+    {
+        (self)(context, state, inputs, outputs)
+    }
+}
+
+pub type NodeStateInitializerContainer =
+    dyn Send + Sync + Fn(&ExecutionContext) -> Box<dyn NodeExecutorState>;
+
+pub trait NodeStateInitializer<S>: 'static + Send + Sync {
+    fn initialize_state(&self, context: &ExecutionContext) -> S;
+}
+
+pub type BoxNodeStateInitializer<S> = Box<dyn Send + Sync + Fn(&ExecutionContext) -> S>;
+
+impl<S: 'static> NodeStateInitializer<S> for BoxNodeStateInitializer<S> {
+    fn initialize_state(&self, context: &ExecutionContext) -> S {
+        (self)(context)
+    }
+}
 
 pub type MainThreadTask = dyn Send + FnOnce(&EventLoopWindowTarget<crate::Message>);
 
-pub trait NodeBehaviour {
+pub trait NodeBehaviourContainer {
     fn name(&self) -> &str;
-    fn update(&mut self, event: NodeEvent) -> Vec<NodeCommand>;
+    fn update(&mut self, event: NodeEventContainer) -> Vec<NodeCommand>;
     fn view(&mut self, theme: &dyn Theme) -> Option<Element<Box<dyn NodeBehaviourMessage>>>;
-    fn create_executor(&self) -> Arc<NodeExecutor>;
+    fn create_executor(&self) -> Arc<NodeExecutorContainer>;
+    fn create_state_initializer(&self) -> Option<Arc<NodeStateInitializerContainer>>;
+}
 
-    fn create_state_initializer(&self) -> Option<Arc<NodeStateInitializer>> {
+pub trait NodeBehaviour {
+    type Message: NodeBehaviourMessage;
+    type State: NodeExecutorState;
+    type FnStateInitializer: NodeStateInitializer<Self::State> = BoxNodeStateInitializer<Self::State>;
+    type FnExecutor: NodeExecutor<Self::State> = BoxNodeExecutor<Self::State>;
+
+    fn name(&self) -> &str;
+    fn update(&mut self, event: NodeEvent<Self::Message>) -> Vec<NodeCommand>;
+    fn view(&mut self, theme: &dyn Theme) -> Option<Element<Self::Message>>;
+    fn create_executor(&self) -> Self::FnExecutor;
+
+    fn create_state_initializer(&self) -> Option<Self::FnStateInitializer> {
         None
+    }
+}
+
+impl<T: NodeBehaviour> NodeBehaviourContainer for T {
+    fn name(&self) -> &str {
+        NodeBehaviour::name(self)
+    }
+
+    fn update(&mut self, event: NodeEventContainer) -> Vec<NodeCommand> {
+        NodeBehaviour::update(self, NodeEvent::from_container(event).unwrap())
+    }
+
+    fn view(&mut self, theme: &dyn Theme) -> Option<Element<Box<dyn NodeBehaviourMessage>>> {
+        NodeBehaviour::view(self, theme)
+            .map(|element| element.map(|message| Box::new(message) as Box<dyn NodeBehaviourMessage>))
+    }
+
+    fn create_state_initializer(&self) -> Option<Arc<NodeStateInitializerContainer>> {
+        NodeBehaviour::create_state_initializer(self).map(|initializer| {
+            Arc::new(move |context: &ExecutionContext| {
+                let state = initializer.initialize_state(context);
+
+                Box::new(state) as Box<dyn NodeExecutorState>
+            }) as Arc<NodeStateInitializerContainer>
+        })
+    }
+
+    fn create_executor(&self) -> Arc<NodeExecutorContainer> {
+        let typed_executor = NodeBehaviour::create_executor(self);
+
+        Arc::new(
+            move |context: &ExecutionContext,
+                  state: Option<&mut dyn NodeExecutorState>,
+                  inputs: &ChannelValueRefs,
+                  outputs: &mut ChannelValues| {
+                let state =
+                    state.map(|state| state.downcast_mut::<<Self as NodeBehaviour>::State>().unwrap());
+
+                typed_executor.execute(context, state, inputs, outputs)
+            },
+        )
     }
 }
 

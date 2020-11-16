@@ -41,24 +41,25 @@ impl BinaryOpNodeBehaviour {
 }
 
 impl NodeBehaviour for BinaryOpNodeBehaviour {
+    type Message = BinaryOpMessage;
+    type State = ();
+
     fn name(&self) -> &str {
         "Binary Operation"
     }
 
-    fn update(&mut self, event: NodeEvent) -> Vec<NodeCommand> {
+    fn update(&mut self, event: NodeEvent<Self::Message>) -> Vec<NodeCommand> {
         match event {
             NodeEvent::Update => vec![self.get_configure_command()],
             NodeEvent::Message(message) => {
                 let mut commands = Vec::new();
-                if let Ok(message) = message.downcast::<BinaryOpMessage>() {
-                    match *message {
-                        BinaryOpMessage::UpdateType(ty) => {
-                            self.pick_list_ty_value = ty;
-                            commands.push(self.get_configure_command());
-                        }
-                        BinaryOpMessage::UpdateOp(value) => {
-                            self.op = value;
-                        }
+                match message {
+                    BinaryOpMessage::UpdateType(ty) => {
+                        self.pick_list_ty_value = ty;
+                        commands.push(self.get_configure_command());
+                    }
+                    BinaryOpMessage::UpdateOp(value) => {
+                        self.op = value;
                     }
                 }
                 commands
@@ -66,7 +67,7 @@ impl NodeBehaviour for BinaryOpNodeBehaviour {
         }
     }
 
-    fn view(&mut self, theme: &dyn Theme) -> Option<Element<Box<dyn NodeBehaviourMessage>>> {
+    fn view(&mut self, theme: &dyn Theme) -> Option<Element<Self::Message>> {
         Some(
             Row::new()
                 .theme(theme)
@@ -77,10 +78,7 @@ impl NodeBehaviour for BinaryOpNodeBehaviour {
                             &mut self.pick_list_ty_state,
                             &PrimitiveChannelType::VALUES[..],
                             Some(self.pick_list_ty_value),
-                            |new_value| {
-                                Box::new(BinaryOpMessage::UpdateType(new_value))
-                                    as Box<dyn NodeBehaviourMessage>
-                            },
+                            |new_value| BinaryOpMessage::UpdateType(new_value),
                         )
                         .theme(theme)
                         .width(Length::Fill),
@@ -94,9 +92,7 @@ impl NodeBehaviour for BinaryOpNodeBehaviour {
                             &mut self.pick_list_op_state,
                             &BinaryOp::VALUES[..],
                             Some(self.op),
-                            |value| {
-                                Box::new(BinaryOpMessage::UpdateOp(value)) as Box<dyn NodeBehaviourMessage>
-                            },
+                            |value| BinaryOpMessage::UpdateOp(value),
                         )
                         .theme(theme)
                         .width(Length::Fill),
@@ -109,16 +105,16 @@ impl NodeBehaviour for BinaryOpNodeBehaviour {
         )
     }
 
-    fn create_state_initializer(&self) -> Option<Arc<NodeStateInitializer>> {
+    fn create_state_initializer(&self) -> Option<Self::FnStateInitializer> {
         None
     }
 
-    fn create_executor(&self) -> Arc<NodeExecutor> {
+    fn create_executor(&self) -> Self::FnExecutor {
         let pick_list_ty_value = self.pick_list_ty_value;
         let op = self.op;
-        Arc::new(
+        Box::new(
             move |_context: &ExecutionContext,
-                  _state: Option<&mut dyn NodeExecutorState>,
+                  _state: Option<&mut Self::State>,
                   inputs: &ChannelValueRefs,
                   outputs: &mut ChannelValues| {
                 let lhs = pick_list_ty_value.read::<LittleEndian, _>(&inputs[0].as_ref()).unwrap();

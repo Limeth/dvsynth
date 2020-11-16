@@ -54,33 +54,34 @@ impl ConstantNodeBehaviour {
 }
 
 impl NodeBehaviour for ConstantNodeBehaviour {
+    type Message = ConstantNodeMessage;
+    type State = ();
+
     fn name(&self) -> &str {
         "Constant"
     }
 
-    fn update(&mut self, event: NodeEvent) -> Vec<NodeCommand> {
+    fn update(&mut self, event: NodeEvent<Self::Message>) -> Vec<NodeCommand> {
         match event {
             NodeEvent::Update => vec![self.get_configure_command()],
             NodeEvent::Message(message) => {
                 let mut commands = Vec::new();
 
-                if let Ok(message) = message.downcast::<ConstantNodeMessage>() {
-                    match *message {
-                        ConstantNodeMessage::UpdateType(ty) => {
-                            let new_value =
-                                ty.parse(&self.text_input_value).unwrap_or_else(|| ty.default_value());
+                match message {
+                    ConstantNodeMessage::UpdateType(ty) => {
+                        let new_value =
+                            ty.parse(&self.text_input_value).unwrap_or_else(|| ty.default_value());
 
-                            self.set_value(new_value);
-                            commands.push(self.get_configure_command());
-                        }
-                        ConstantNodeMessage::UpdateValue(new_raw_value) => {
-                            self.text_input_value = new_raw_value;
-                            let ty = self.value.ty();
-                            let new_value =
-                                ty.parse(&self.text_input_value).unwrap_or_else(|| ty.default_value());
+                        self.set_value(new_value);
+                        commands.push(self.get_configure_command());
+                    }
+                    ConstantNodeMessage::UpdateValue(new_raw_value) => {
+                        self.text_input_value = new_raw_value;
+                        let ty = self.value.ty();
+                        let new_value =
+                            ty.parse(&self.text_input_value).unwrap_or_else(|| ty.default_value());
 
-                            self.set_value(new_value);
-                        }
+                        self.set_value(new_value);
                     }
                 }
 
@@ -89,7 +90,7 @@ impl NodeBehaviour for ConstantNodeBehaviour {
         }
     }
 
-    fn view(&mut self, theme: &dyn Theme) -> Option<Element<Box<dyn NodeBehaviourMessage>>> {
+    fn view(&mut self, theme: &dyn Theme) -> Option<Element<Self::Message>> {
         Some(
             Row::new()
                 .theme(theme)
@@ -98,10 +99,7 @@ impl NodeBehaviour for ConstantNodeBehaviour {
                         &mut self.pick_list_state,
                         &PrimitiveChannelType::VALUES[..],
                         Some(self.value.ty()),
-                        |new_value| {
-                            Box::new(ConstantNodeMessage::UpdateType(new_value))
-                                as Box<dyn NodeBehaviourMessage>
-                        },
+                        |new_value| ConstantNodeMessage::UpdateType(new_value),
                     )
                     .theme(theme)
                     .width(Length::Units(64)),
@@ -111,10 +109,7 @@ impl NodeBehaviour for ConstantNodeBehaviour {
                         &mut self.text_input_state,
                         &self.text_input_placeholder,
                         &self.text_input_value,
-                        |new_raw_value| {
-                            Box::new(ConstantNodeMessage::UpdateValue(new_raw_value))
-                                as Box<dyn NodeBehaviourMessage>
-                        },
+                        |new_raw_value| ConstantNodeMessage::UpdateValue(new_raw_value),
                     )
                     .theme(theme)
                     .width(Length::Fill),
@@ -125,15 +120,15 @@ impl NodeBehaviour for ConstantNodeBehaviour {
         )
     }
 
-    fn create_state_initializer(&self) -> Option<Arc<NodeStateInitializer>> {
+    fn create_state_initializer(&self) -> Option<Self::FnStateInitializer> {
         None
     }
 
-    fn create_executor(&self) -> Arc<NodeExecutor> {
+    fn create_executor(&self) -> Self::FnExecutor {
         let value = self.value;
-        Arc::new(
+        Box::new(
             move |_context: &ExecutionContext,
-                  _state: Option<&mut dyn NodeExecutorState>,
+                  _state: Option<&mut Self::State>,
                   _inputs: &ChannelValueRefs,
                   outputs: &mut ChannelValues| {
                 let mut cursor = Cursor::new(outputs[0].as_mut());

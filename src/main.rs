@@ -2,8 +2,12 @@
 #![feature(bindings_after_at)]
 #![feature(iterator_fold_self)]
 #![feature(trivial_bounds)]
+#![feature(associated_type_defaults)]
 //!
 //! Task list:
+//! * Window node:
+//!     * Make window size accessible only when resizable is false
+//!     * Fullscreen modes
 //! * Mark invalid connections and cycles in the graph
 //! * Custom UI rendering:
 //!     * CPU Canvas (WASM) https://github.com/embedded-graphics/embedded-graphics

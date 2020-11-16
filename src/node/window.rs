@@ -168,17 +168,18 @@ impl WindowNodeBehaviour {
 }
 
 impl NodeBehaviour for WindowNodeBehaviour {
+    type Message = WindowMessage;
+    type State = State;
+
     fn name(&self) -> &str {
         "Window"
     }
 
-    fn update(&mut self, event: NodeEvent) -> Vec<NodeCommand> {
+    fn update(&mut self, event: NodeEvent<Self::Message>) -> Vec<NodeCommand> {
         match event {
             NodeEvent::Update => vec![self.get_configure_command()],
             NodeEvent::Message(message) => {
-                let message = message.downcast::<WindowMessage>().unwrap();
-
-                match *message {
+                match message {
                     WindowMessage::ModifyWindowSettings(modify) => (modify)(self),
                 }
 
@@ -187,8 +188,7 @@ impl NodeBehaviour for WindowNodeBehaviour {
         }
     }
 
-    fn view(&mut self, theme: &dyn Theme) -> Option<Element<Box<dyn NodeBehaviourMessage>>> {
-        // TODO: Fullscreen mode
+    fn view(&mut self, theme: &dyn Theme) -> Option<Element<Self::Message>> {
         Some(
             Column::new()
                 .theme(theme)
@@ -198,11 +198,11 @@ impl NodeBehaviour for WindowNodeBehaviour {
                         "Window Title",
                         self.settings.title.as_ref(),
                         |new_value| {
-                            Box::new(WindowMessage::ModifyWindowSettings(Arc::new(
+                            WindowMessage::ModifyWindowSettings(Arc::new(
                                 move |node: &mut WindowNodeBehaviour| {
                                     node.settings.title = Cow::Owned(new_value.clone());
                                 },
-                            ))) as Box<dyn NodeBehaviourMessage>
+                            ))
                         },
                     )
                     .theme(theme),
@@ -216,7 +216,7 @@ impl NodeBehaviour for WindowNodeBehaviour {
                                 "Width",
                                 self.ui_state.width_string.as_ref(),
                                 |new_value| {
-                                    Box::new(WindowMessage::ModifyWindowSettings(Arc::new(
+                                    WindowMessage::ModifyWindowSettings(Arc::new(
                                         move |node: &mut WindowNodeBehaviour| {
                                             if let Ok(new_value) = new_value.parse::<u32>() {
                                                 node.settings.inner_size[0] = new_value;
@@ -224,7 +224,7 @@ impl NodeBehaviour for WindowNodeBehaviour {
 
                                             node.ui_state.width_string = new_value.clone();
                                         },
-                                    ))) as Box<dyn NodeBehaviourMessage>
+                                    ))
                                 },
                             )
                             .theme(theme),
@@ -235,7 +235,7 @@ impl NodeBehaviour for WindowNodeBehaviour {
                                 "Height",
                                 self.ui_state.height_string.as_ref(),
                                 |new_value| {
-                                    Box::new(WindowMessage::ModifyWindowSettings(Arc::new(
+                                    WindowMessage::ModifyWindowSettings(Arc::new(
                                         move |node: &mut WindowNodeBehaviour| {
                                             if let Ok(new_value) = new_value.parse::<u32>() {
                                                 node.settings.inner_size[1] = new_value;
@@ -243,7 +243,7 @@ impl NodeBehaviour for WindowNodeBehaviour {
 
                                             node.ui_state.height_string = new_value.clone();
                                         },
-                                    ))) as Box<dyn NodeBehaviourMessage>
+                                    ))
                                 },
                             )
                             .theme(theme),
@@ -251,65 +251,65 @@ impl NodeBehaviour for WindowNodeBehaviour {
                 )
                 .push(
                     Checkbox::new(self.settings.always_on_top, "Always on top", |new_value| {
-                        Box::new(WindowMessage::ModifyWindowSettings(Arc::new(
+                        WindowMessage::ModifyWindowSettings(Arc::new(
                             move |node: &mut WindowNodeBehaviour| node.settings.always_on_top = new_value,
-                        ))) as Box<dyn NodeBehaviourMessage>
+                        ))
                     })
                     .theme(theme),
                 )
                 .push(
                     Checkbox::new(self.settings.cursor_grab, "Grab cursor", |new_value| {
-                        Box::new(WindowMessage::ModifyWindowSettings(Arc::new(
+                        WindowMessage::ModifyWindowSettings(Arc::new(
                             move |node: &mut WindowNodeBehaviour| node.settings.cursor_grab = new_value,
-                        ))) as Box<dyn NodeBehaviourMessage>
+                        ))
                     })
                     .theme(theme),
                 )
                 .push(
                     Checkbox::new(self.settings.cursor_visible, "Cursor visible", |new_value| {
-                        Box::new(WindowMessage::ModifyWindowSettings(Arc::new(
+                        WindowMessage::ModifyWindowSettings(Arc::new(
                             move |node: &mut WindowNodeBehaviour| node.settings.cursor_visible = new_value,
-                        ))) as Box<dyn NodeBehaviourMessage>
+                        ))
                     })
                     .theme(theme),
                 )
                 .push(
                     Checkbox::new(self.settings.decorations, "Decorations", |new_value| {
-                        Box::new(WindowMessage::ModifyWindowSettings(Arc::new(
+                        WindowMessage::ModifyWindowSettings(Arc::new(
                             move |node: &mut WindowNodeBehaviour| node.settings.decorations = new_value,
-                        ))) as Box<dyn NodeBehaviourMessage>
+                        ))
                     })
                     .theme(theme),
                 )
                 .push(
                     Checkbox::new(self.settings.maximized, "Maximized", |new_value| {
-                        Box::new(WindowMessage::ModifyWindowSettings(Arc::new(
+                        WindowMessage::ModifyWindowSettings(Arc::new(
                             move |node: &mut WindowNodeBehaviour| node.settings.maximized = new_value,
-                        ))) as Box<dyn NodeBehaviourMessage>
+                        ))
                     })
                     .theme(theme),
                 )
                 .push(
                     Checkbox::new(self.settings.minimized, "Minimized", |new_value| {
-                        Box::new(WindowMessage::ModifyWindowSettings(Arc::new(
+                        WindowMessage::ModifyWindowSettings(Arc::new(
                             move |node: &mut WindowNodeBehaviour| node.settings.minimized = new_value,
-                        ))) as Box<dyn NodeBehaviourMessage>
+                        ))
                     })
                     .theme(theme),
                 )
                 .push(
                     Checkbox::new(self.settings.resizable, "Resizable", |new_value| {
-                        Box::new(WindowMessage::ModifyWindowSettings(Arc::new(
+                        WindowMessage::ModifyWindowSettings(Arc::new(
                             move |node: &mut WindowNodeBehaviour| node.settings.resizable = new_value,
-                        ))) as Box<dyn NodeBehaviourMessage>
+                        ))
                     })
                     .theme(theme),
                 )
                 .push(
                     Checkbox::new(self.settings.visible, "Visible", |new_value| {
-                        Box::new(WindowMessage::ModifyWindowSettings(Arc::new(
+                        WindowMessage::ModifyWindowSettings(Arc::new(
                             move |node: &mut WindowNodeBehaviour| node.settings.visible = new_value,
-                        ))) as Box<dyn NodeBehaviourMessage>
+                        ))
                     })
                     .theme(theme),
                 )
@@ -317,18 +317,18 @@ impl NodeBehaviour for WindowNodeBehaviour {
         )
     }
 
-    fn create_state_initializer(&self) -> Option<Arc<NodeStateInitializer>> {
-        Some(Arc::new(|context: &ExecutionContext| Box::new(State::default()) as Box<dyn NodeExecutorState>))
+    fn create_state_initializer(&self) -> Option<Self::FnStateInitializer> {
+        Some(Box::new(|context: &ExecutionContext| State::default()))
     }
 
-    fn create_executor(&self) -> Arc<NodeExecutor> {
+    fn create_executor(&self) -> Self::FnExecutor {
         let settings = self.settings.clone();
-        Arc::new(
+        Box::new(
             move |context: &ExecutionContext,
-                  state: Option<&mut dyn NodeExecutorState>,
+                  state: Option<&mut Self::State>,
                   inputs: &ChannelValueRefs,
                   outputs: &mut ChannelValues| {
-                let state = state.unwrap().downcast_mut::<State>().unwrap();
+                let state = state.unwrap();
 
                 if state.window.is_none() {
                     if let Some(window_receiver) = state.window_receiver.as_mut() {
@@ -362,7 +362,7 @@ impl NodeBehaviour for WindowNodeBehaviour {
 }
 
 #[derive(Debug, Default)]
-struct State {
+pub struct State {
     window_receiver: Option<Receiver<Window>>,
     window: Option<Window>,
     current_settings: WindowSettings,

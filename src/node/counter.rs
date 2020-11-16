@@ -8,11 +8,14 @@ use iced::{Align, Length, Row};
 pub struct CounterNodeBehaviour;
 
 impl NodeBehaviour for CounterNodeBehaviour {
+    type Message = ();
+    type State = State;
+
     fn name(&self) -> &str {
         "Counter"
     }
 
-    fn update(&mut self, event: NodeEvent) -> Vec<NodeCommand> {
+    fn update(&mut self, event: NodeEvent<Self::Message>) -> Vec<NodeCommand> {
         match event {
             NodeEvent::Update => vec![NodeCommand::Configure(NodeConfiguration {
                 channels_input: vec![],
@@ -22,22 +25,21 @@ impl NodeBehaviour for CounterNodeBehaviour {
         }
     }
 
-    fn view(&mut self, theme: &dyn Theme) -> Option<Element<Box<dyn NodeBehaviourMessage>>> {
+    fn view(&mut self, theme: &dyn Theme) -> Option<Element<Self::Message>> {
         None
     }
 
-    fn create_state_initializer(&self) -> Option<Arc<NodeStateInitializer>> {
-        Some(Arc::new(|_context: &ExecutionContext| Box::new(State::default()) as Box<dyn NodeExecutorState>))
+    fn create_state_initializer(&self) -> Option<Self::FnStateInitializer> {
+        Some(Box::new(|_context: &ExecutionContext| State::default()))
     }
 
-    fn create_executor(&self) -> Arc<NodeExecutor> {
-        Arc::new(
+    fn create_executor(&self) -> Self::FnExecutor {
+        Box::new(
             |_context: &ExecutionContext,
-             state: Option<&mut dyn NodeExecutorState>,
+             state: Option<&mut Self::State>,
              _inputs: &ChannelValueRefs,
              outputs: &mut ChannelValues| {
                 let state = state.unwrap();
-                let state = state.downcast_mut::<State>().unwrap();
                 let mut cursor = Cursor::new(outputs[0].as_mut());
 
                 cursor.write_u32::<LittleEndian>(state.count).unwrap();
@@ -49,6 +51,6 @@ impl NodeBehaviour for CounterNodeBehaviour {
 }
 
 #[derive(Default, Debug, Clone)]
-struct State {
+pub struct State {
     count: u32,
 }

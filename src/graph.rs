@@ -124,9 +124,9 @@ pub struct TaskInput {
 pub struct Task {
     pub node_index: NodeIndex,
     pub configuration: NodeConfiguration,
-    pub state_initializer: Option<Arc<NodeStateInitializer>>,
+    pub state_initializer: Option<Arc<NodeStateInitializerContainer>>,
     pub inputs: Box<[TaskInput]>,
-    pub executor: Arc<NodeExecutor>,
+    pub executor: Arc<NodeExecutorContainer>,
 }
 
 // impl Clone for Task {
@@ -366,7 +366,7 @@ pub struct NodeData {
     pub element_state: NodeElementState,
     pub floating_pane_state: FloatingPaneState,
     pub floating_pane_behaviour_state: FloatingPaneBehaviourState,
-    pub behaviour: Box<dyn NodeBehaviour>,
+    pub behaviour: Box<dyn NodeBehaviourContainer>,
     pub configuration: NodeConfiguration,
     /// Output values computed during graph execution.
     pub execution_output_values: Option<RefCell<ChannelValues>>,
@@ -376,7 +376,7 @@ impl NodeData {
     pub fn new(
         title: impl ToString,
         position: impl Into<Vec2<f32>>,
-        behaviour: Box<dyn NodeBehaviour>,
+        behaviour: Box<dyn NodeBehaviourContainer>,
     ) -> Self
     {
         let mut result = Self {
@@ -389,12 +389,12 @@ impl NodeData {
             execution_output_values: None,
         };
 
-        result.update(NodeEvent::Update);
+        result.update(NodeEventContainer::Update);
 
         result
     }
 
-    pub fn update(&mut self, event: NodeEvent) {
+    pub fn update(&mut self, event: NodeEventContainer) {
         for command in self.behaviour.update(event) {
             match command {
                 NodeCommand::Configure(configuration) => self.configuration = configuration,
