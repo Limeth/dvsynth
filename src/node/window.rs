@@ -1,5 +1,5 @@
 use super::*;
-use crate::style;
+use crate::style::{self, Themeable};
 use flume::{self, Receiver, Sender};
 use iced::widget::checkbox::Checkbox;
 use iced::widget::text_input::{self, TextInput};
@@ -33,11 +33,11 @@ impl_node_behaviour_message!(WindowMessage);
 pub struct WindowSettings {
     title: Cow<'static, str>,
     inner_size: Vec2<u32>,
+    fullscreen: Option<Fullscreen>,
     always_on_top: bool,
     cursor_grab: bool,
     cursor_visible: bool,
     decorations: bool,
-    fullscreen: Option<Fullscreen>,
     maximized: bool,
     minimized: bool,
     resizable: bool,
@@ -49,11 +49,11 @@ impl Default for WindowSettings {
         Self {
             title: Cow::Borrowed("DVSynth Output Window"),
             inner_size: Vec2::new(800, 450),
+            fullscreen: None,
             always_on_top: false,
             cursor_grab: false,
             cursor_visible: true,
             decorations: true,
-            fullscreen: None,
             maximized: false,
             minimized: false,
             resizable: true,
@@ -70,9 +70,9 @@ impl WindowSettings {
                 let inner_size = self.inner_size.map(|x| std::cmp::max(1, x));
                 PhysicalSize::<u32>::from(inner_size.into_array())
             })
+            .with_fullscreen(self.fullscreen.clone())
             .with_always_on_top(self.always_on_top)
             .with_decorations(self.decorations)
-            .with_fullscreen(self.fullscreen.clone())
             .with_maximized(self.maximized)
             .with_resizable(self.resizable)
             .with_visible(self.visible)
@@ -86,6 +86,10 @@ impl WindowSettings {
         if self.inner_size != new.inner_size {
             let inner_size = new.inner_size.map(|x| std::cmp::max(1, x));
             window.set_inner_size(PhysicalSize::<u32>::from(inner_size.into_array()));
+        }
+
+        if self.fullscreen != new.fullscreen {
+            window.set_fullscreen(new.fullscreen.clone());
         }
 
         if self.always_on_top != new.always_on_top {
@@ -102,10 +106,6 @@ impl WindowSettings {
 
         if self.decorations != new.decorations {
             window.set_decorations(new.decorations);
-        }
-
-        if self.fullscreen != new.fullscreen {
-            window.set_fullscreen(new.fullscreen.clone());
         }
 
         if self.maximized != new.maximized {
@@ -188,9 +188,10 @@ impl NodeBehaviour for WindowNodeBehaviour {
     }
 
     fn view(&mut self, theme: &dyn Theme) -> Option<Element<Box<dyn NodeBehaviourMessage>>> {
+        // TODO: Fullscreen mode
         Some(
             Column::new()
-                .spacing(style::consts::SPACING_VERTICAL)
+                .theme(theme)
                 .push(
                     TextInput::new(
                         &mut self.ui_state.title_state,
@@ -204,13 +205,11 @@ impl NodeBehaviour for WindowNodeBehaviour {
                             ))) as Box<dyn NodeBehaviourMessage>
                         },
                     )
-                    .size(style::consts::TEXT_SIZE_REGULAR)
-                    .padding(style::consts::SPACING_VERTICAL)
-                    .style(theme.text_input()),
+                    .theme(theme),
                 )
                 .push(
                     Row::new()
-                        .spacing(style::consts::SPACING_HORIZONTAL)
+                        .theme(theme)
                         .push(
                             TextInput::new(
                                 &mut self.ui_state.width_state,
@@ -228,9 +227,7 @@ impl NodeBehaviour for WindowNodeBehaviour {
                                     ))) as Box<dyn NodeBehaviourMessage>
                                 },
                             )
-                            .size(style::consts::TEXT_SIZE_REGULAR)
-                            .padding(style::consts::SPACING_VERTICAL)
-                            .style(theme.text_input()),
+                            .theme(theme),
                         )
                         .push(
                             TextInput::new(
@@ -249,9 +246,7 @@ impl NodeBehaviour for WindowNodeBehaviour {
                                     ))) as Box<dyn NodeBehaviourMessage>
                                 },
                             )
-                            .size(style::consts::TEXT_SIZE_REGULAR)
-                            .padding(style::consts::SPACING_VERTICAL)
-                            .style(theme.text_input()),
+                            .theme(theme),
                         ),
                 )
                 .push(
@@ -260,10 +255,63 @@ impl NodeBehaviour for WindowNodeBehaviour {
                             move |node: &mut WindowNodeBehaviour| node.settings.always_on_top = new_value,
                         ))) as Box<dyn NodeBehaviourMessage>
                     })
-                    .size(style::consts::TEXT_SIZE_REGULAR)
-                    .text_size(style::consts::TEXT_SIZE_REGULAR)
-                    .spacing(style::consts::SPACING_HORIZONTAL)
-                    .style(theme.checkbox()),
+                    .theme(theme),
+                )
+                .push(
+                    Checkbox::new(self.settings.cursor_grab, "Grab cursor", |new_value| {
+                        Box::new(WindowMessage::ModifyWindowSettings(Arc::new(
+                            move |node: &mut WindowNodeBehaviour| node.settings.cursor_grab = new_value,
+                        ))) as Box<dyn NodeBehaviourMessage>
+                    })
+                    .theme(theme),
+                )
+                .push(
+                    Checkbox::new(self.settings.cursor_visible, "Cursor visible", |new_value| {
+                        Box::new(WindowMessage::ModifyWindowSettings(Arc::new(
+                            move |node: &mut WindowNodeBehaviour| node.settings.cursor_visible = new_value,
+                        ))) as Box<dyn NodeBehaviourMessage>
+                    })
+                    .theme(theme),
+                )
+                .push(
+                    Checkbox::new(self.settings.decorations, "Decorations", |new_value| {
+                        Box::new(WindowMessage::ModifyWindowSettings(Arc::new(
+                            move |node: &mut WindowNodeBehaviour| node.settings.decorations = new_value,
+                        ))) as Box<dyn NodeBehaviourMessage>
+                    })
+                    .theme(theme),
+                )
+                .push(
+                    Checkbox::new(self.settings.maximized, "Maximized", |new_value| {
+                        Box::new(WindowMessage::ModifyWindowSettings(Arc::new(
+                            move |node: &mut WindowNodeBehaviour| node.settings.maximized = new_value,
+                        ))) as Box<dyn NodeBehaviourMessage>
+                    })
+                    .theme(theme),
+                )
+                .push(
+                    Checkbox::new(self.settings.minimized, "Minimized", |new_value| {
+                        Box::new(WindowMessage::ModifyWindowSettings(Arc::new(
+                            move |node: &mut WindowNodeBehaviour| node.settings.minimized = new_value,
+                        ))) as Box<dyn NodeBehaviourMessage>
+                    })
+                    .theme(theme),
+                )
+                .push(
+                    Checkbox::new(self.settings.resizable, "Resizable", |new_value| {
+                        Box::new(WindowMessage::ModifyWindowSettings(Arc::new(
+                            move |node: &mut WindowNodeBehaviour| node.settings.resizable = new_value,
+                        ))) as Box<dyn NodeBehaviourMessage>
+                    })
+                    .theme(theme),
+                )
+                .push(
+                    Checkbox::new(self.settings.visible, "Visible", |new_value| {
+                        Box::new(WindowMessage::ModifyWindowSettings(Arc::new(
+                            move |node: &mut WindowNodeBehaviour| node.settings.visible = new_value,
+                        ))) as Box<dyn NodeBehaviourMessage>
+                    })
+                    .theme(theme),
                 )
                 .into(),
         )

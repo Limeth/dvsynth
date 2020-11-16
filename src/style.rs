@@ -1,7 +1,8 @@
 use crate::widgets::floating_panes;
 use crate::Spacing;
 use iced::{
-    button, checkbox, container, pick_list, progress_bar, radio, rule, scrollable, slider, text_input, Color,
+    button, checkbox, container, pick_list, progress_bar, radio, rule, scrollable, slider, text_input,
+    widget, Color,
 };
 
 pub mod consts {
@@ -14,18 +15,21 @@ pub mod consts {
     pub const SPACING: Spacing = Spacing::from_axes(SPACING_HORIZONTAL, SPACING_VERTICAL);
 }
 
-// pub trait Themeable: Sized {
-//     fn with_theme(self, theme: &dyn Theme) -> Self;
-// }
+pub trait Themeable: Sized {
+    fn theme(self, theme: &dyn Theme) -> Self;
+}
 
-pub trait Theme: std::fmt::Debug {
-    fn container_pane(&self) -> Box<dyn container::StyleSheet>;
+pub trait StyleSheetProvider: std::fmt::Debug {
+    fn container(&self) -> Box<dyn container::StyleSheet>;
     fn pick_list(&self) -> Box<dyn pick_list::StyleSheet>;
     fn text_input(&self) -> Box<dyn text_input::StyleSheet>;
+    fn checkbox(&self) -> Box<dyn checkbox::StyleSheet>;
     fn floating_panes(&self) -> Box<dyn floating_panes::FloatingPanesStyleSheet>;
     fn floating_pane(&self) -> Box<dyn floating_panes::FloatingPaneStyleSheet>;
-    fn checkbox(&self) -> Box<dyn checkbox::StyleSheet>;
 }
+
+pub trait Theme: StyleSheetProvider {}
+impl<T> Theme for T where T: StyleSheetProvider {}
 
 macro_rules! themes {
     {
@@ -69,7 +73,7 @@ macro_rules! themes {
                 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
                 pub struct $theme_name_struct;
 
-                impl Theme for $theme_name_struct {
+                impl StyleSheetProvider for $theme_name_struct {
                     fn checkbox(&self) -> Box<dyn checkbox::StyleSheet> {
                         pub struct Checkbox;
 
@@ -98,7 +102,7 @@ macro_rules! themes {
                         Box::new(Checkbox)
                     }
 
-                    fn container_pane(&self) -> Box<dyn container::StyleSheet> {
+                    fn container(&self) -> Box<dyn container::StyleSheet> {
                         pub struct Container;
 
                         impl container::StyleSheet for Container {
@@ -238,6 +242,75 @@ macro_rules! themes {
                 }
             }
         )*
+    }
+}
+
+impl<'a, M> Themeable for container::Container<'a, M> {
+    fn theme(self, theme: &dyn Theme) -> Self {
+        self.style(theme.container())
+    }
+}
+
+impl<'a, M> Themeable for widget::Row<'a, M> {
+    fn theme(self, theme: &dyn Theme) -> Self {
+        self.spacing(consts::SPACING_HORIZONTAL)
+    }
+}
+
+impl<'a, M> Themeable for widget::Column<'a, M> {
+    fn theme(self, theme: &dyn Theme) -> Self {
+        self.spacing(consts::SPACING_VERTICAL)
+    }
+}
+
+impl<'a, T, M> Themeable for pick_list::PickList<'a, T, M>
+where
+    T: ToString + Eq,
+    [T]: ToOwned<Owned = Vec<T>>,
+{
+    fn theme(self, theme: &dyn Theme) -> Self {
+        self.style(theme.pick_list()).text_size(consts::TEXT_SIZE_REGULAR).padding(consts::SPACING_VERTICAL)
+    }
+}
+
+impl<'a, M: Clone> Themeable for text_input::TextInput<'a, M> {
+    fn theme(self, theme: &dyn Theme) -> Self {
+        self.style(theme.text_input()).size(consts::TEXT_SIZE_REGULAR).padding(consts::SPACING_VERTICAL)
+    }
+}
+
+impl<M> Themeable for checkbox::Checkbox<M> {
+    fn theme(self, theme: &dyn Theme) -> Self {
+        self.style(theme.checkbox())
+            .size(consts::TEXT_SIZE_REGULAR)
+            .text_size(consts::TEXT_SIZE_REGULAR)
+            .spacing(consts::SPACING_HORIZONTAL)
+    }
+}
+
+impl<'a, M, R, C> Themeable for floating_panes::FloatingPanes<'a, M, R, C>
+where
+    M: 'a,
+    R: 'a + floating_panes::WidgetRenderer,
+    C: 'a + floating_panes::FloatingPanesBehaviour<'a, M, R>,
+    <R as floating_panes::WidgetRenderer>::StyleFloatingPanes:
+        From<Box<dyn floating_panes::FloatingPanesStyleSheet>>,
+{
+    fn theme(self, theme: &dyn Theme) -> Self {
+        self.style(theme.floating_panes())
+    }
+}
+
+impl<'a, M, R, C> Themeable for floating_panes::FloatingPaneBuilder<'a, M, R, C>
+where
+    M: 'a,
+    R: 'a + floating_panes::WidgetRenderer,
+    C: 'a + floating_panes::FloatingPanesBehaviour<'a, M, R>,
+    <R as floating_panes::WidgetRenderer>::StyleFloatingPane:
+        From<Box<dyn floating_panes::FloatingPaneStyleSheet>>,
+{
+    fn theme(self, theme: &dyn Theme) -> Self {
+        self.style(Some(theme.floating_pane()))
     }
 }
 

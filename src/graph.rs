@@ -1,4 +1,5 @@
 use crate::node::*;
+use crate::style::Themeable;
 use crate::*;
 use dyn_clone::DynClone;
 use iced::Element;
@@ -436,18 +437,20 @@ impl NodeData {
             }
         }*/);
 
-        FloatingPane::builder(
-            node_element,
-            &mut self.floating_pane_state,
-            &mut self.floating_pane_behaviour_state,
-            FloatingPaneBehaviourData { node_configuration: self.configuration.clone() },
+        Themeable::theme(
+            FloatingPane::builder(
+                node_element,
+                &mut self.floating_pane_state,
+                &mut self.floating_pane_behaviour_state,
+                FloatingPaneBehaviourData { node_configuration: self.configuration.clone() },
+            ),
+            theme,
         )
         .title(Some(&self.title))
         .title_size(Some(style::consts::TEXT_SIZE_TITLE))
         .title_margin(consts::SPACING)
         .width_resizeable(true)
         .min_width(128.0)
-        .style(Some(theme.floating_pane()))
         .build()
     }
 }

@@ -25,6 +25,7 @@ use std::borrow::Cow;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::thread::{self, Thread};
+use style::Themeable;
 use style::*;
 use widgets::*;
 
@@ -174,7 +175,7 @@ impl Application for ApplicationState {
             },
             Box::new(|| Message::RecomputeLayout),
         )
-        .style(theme.floating_panes());
+        .theme(&*theme);
 
         for (node_index, node_data) in node_indices.iter().zip(self.graph.node_weights_mut()) {
             panes = panes.insert(*node_index, node_data.view(*node_index, theme.as_ref()));

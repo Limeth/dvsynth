@@ -1,5 +1,5 @@
 use super::*;
-use crate::style;
+use crate::style::{self, Themeable};
 use iced::{Align, Container, Length, Row};
 
 #[derive(Debug, Clone)]
@@ -69,6 +69,7 @@ impl NodeBehaviour for BinaryOpNodeBehaviour {
     fn view(&mut self, theme: &dyn Theme) -> Option<Element<Box<dyn NodeBehaviourMessage>>> {
         Some(
             Row::new()
+                .theme(theme)
                 .push(
                     // Wrap PickList in a container because PickList's width resolution is buggy
                     Container::new(
@@ -81,9 +82,8 @@ impl NodeBehaviour for BinaryOpNodeBehaviour {
                                     as Box<dyn NodeBehaviourMessage>
                             },
                         )
-                        .width(Length::Fill)
-                        .text_size(style::consts::TEXT_SIZE_REGULAR)
-                        .style(theme.pick_list()),
+                        .theme(theme)
+                        .width(Length::Fill),
                     )
                     .width(Length::Fill),
                 )
@@ -98,15 +98,13 @@ impl NodeBehaviour for BinaryOpNodeBehaviour {
                                 Box::new(BinaryOpMessage::UpdateOp(value)) as Box<dyn NodeBehaviourMessage>
                             },
                         )
-                        .width(Length::Fill)
-                        .text_size(style::consts::TEXT_SIZE_REGULAR)
-                        .style(theme.pick_list()),
+                        .theme(theme)
+                        .width(Length::Fill),
                     )
                     .width(Length::Units(48)),
                 )
                 .align_items(Align::Center)
                 .width(Length::Fill)
-                .spacing(style::consts::SPACING_HORIZONTAL)
                 .into(),
         )
     }

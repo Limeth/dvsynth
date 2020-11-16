@@ -1,5 +1,5 @@
 use super::*;
-use crate::style;
+use crate::style::{self, Themeable};
 use iced::pick_list::{PickList, State as PickListState};
 use iced::text_input::{State as TextInputState, TextInput};
 use iced::{Align, Length, Row};
@@ -92,6 +92,7 @@ impl NodeBehaviour for ConstantNodeBehaviour {
     fn view(&mut self, theme: &dyn Theme) -> Option<Element<Box<dyn NodeBehaviourMessage>>> {
         Some(
             Row::new()
+                .theme(theme)
                 .push(
                     PickList::new(
                         &mut self.pick_list_state,
@@ -102,10 +103,8 @@ impl NodeBehaviour for ConstantNodeBehaviour {
                                 as Box<dyn NodeBehaviourMessage>
                         },
                     )
-                    .width(Length::Units(64))
-                    .text_size(style::consts::TEXT_SIZE_REGULAR)
-                    .padding(style::consts::SPACING_VERTICAL)
-                    .style(theme.pick_list()),
+                    .theme(theme)
+                    .width(Length::Units(64)),
                 )
                 .push(
                     TextInput::new(
@@ -117,14 +116,11 @@ impl NodeBehaviour for ConstantNodeBehaviour {
                                 as Box<dyn NodeBehaviourMessage>
                         },
                     )
-                    .width(Length::Fill)
-                    .size(style::consts::TEXT_SIZE_REGULAR)
-                    .padding(style::consts::SPACING_VERTICAL)
-                    .style(theme.text_input()),
+                    .theme(theme)
+                    .width(Length::Fill),
                 )
                 .align_items(Align::Center)
                 .width(Length::Fill)
-                .spacing(style::consts::SPACING_HORIZONTAL)
                 .into(),
         )
     }
