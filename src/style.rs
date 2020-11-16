@@ -14,12 +14,17 @@ pub mod consts {
     pub const SPACING: Spacing = Spacing::from_axes(SPACING_HORIZONTAL, SPACING_VERTICAL);
 }
 
+// pub trait Themeable: Sized {
+//     fn with_theme(self, theme: &dyn Theme) -> Self;
+// }
+
 pub trait Theme: std::fmt::Debug {
     fn container_pane(&self) -> Box<dyn container::StyleSheet>;
     fn pick_list(&self) -> Box<dyn pick_list::StyleSheet>;
     fn text_input(&self) -> Box<dyn text_input::StyleSheet>;
     fn floating_panes(&self) -> Box<dyn floating_panes::FloatingPanesStyleSheet>;
     fn floating_pane(&self) -> Box<dyn floating_panes::FloatingPaneStyleSheet>;
+    fn checkbox(&self) -> Box<dyn checkbox::StyleSheet>;
 }
 
 macro_rules! themes {
@@ -65,6 +70,34 @@ macro_rules! themes {
                 pub struct $theme_name_struct;
 
                 impl Theme for $theme_name_struct {
+                    fn checkbox(&self) -> Box<dyn checkbox::StyleSheet> {
+                        pub struct Checkbox;
+
+                        impl checkbox::StyleSheet for Checkbox {
+                            fn active(&self, is_checked: bool) -> checkbox::Style {
+                                checkbox::Style {
+                                    background: BACKGROUND_COLOR_IDLE.into(),
+                                    checkmark_color: TEXT_COLOR,
+                                    border_radius: BORDER_RADIUS,
+                                    border_width: BORDER_WIDTH,
+                                    border_color: BORDER_COLOR_IDLE,
+                                }
+                            }
+
+                            fn hovered(&self, is_checked: bool) -> checkbox::Style {
+                                checkbox::Style {
+                                    background: BACKGROUND_COLOR_HOVERED.into(),
+                                    checkmark_color: TEXT_COLOR,
+                                    border_radius: BORDER_RADIUS,
+                                    border_width: BORDER_WIDTH,
+                                    border_color: BORDER_COLOR_HOVERED,
+                                }
+                            }
+                        }
+
+                        Box::new(Checkbox)
+                    }
+
                     fn container_pane(&self) -> Box<dyn container::StyleSheet> {
                         pub struct Container;
 
