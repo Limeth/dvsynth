@@ -17,6 +17,7 @@ iced_graphics = { git = "https://github.com/Limeth/iced.git", branch = "feature-
 iced_native = { git = "https://github.com/Limeth/iced.git", branch = "feature-event-handler" }
 iced_wgpu = { git = "https://github.com/Limeth/iced.git", branch = "feature-event-handler", features = ["canvas"] }
 iced_winit = { git = "https://github.com/Limeth/iced.git", branch = "feature-event-handler" }
+iced_futures = { git = "https://github.com/Limeth/iced.git", branch = "feature-event-handler" }
 arc-swap = "0.4.7"
 byteorder = "1"
 downcast-rs = "1.2.0"

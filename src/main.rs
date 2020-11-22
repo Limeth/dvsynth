@@ -16,9 +16,11 @@
 //!
 
 use arc_swap::ArcSwapOption;
-use graph::*;
+use graph::{
+    ChannelIdentifier, Connection, EdgeData, ExecutionContext, ExecutionGraph, Graph, GraphExecutor, NodeData,
+};
 use iced::{window, Application, Command, Settings};
-use iced_wgpu::Renderer;
+use iced_futures::futures;
 use iced_winit::winit;
 use iced_winit::winit::window::{Window, WindowAttributes, WindowBuilder};
 use node::*;
@@ -217,22 +219,46 @@ fn main() {
             Box::new(WindowNodeBehaviour::default()),
         ));
 
+        graph.add_node(NodeData::new(
+            "My Array Constructor",
+            [10.0, 510.0],
+            Box::new(ArrayConstructorNodeBehaviour::default()),
+        ));
+
+        graph.add_node(NodeData::new("My Debug", [210.0, 510.0], Box::new(DebugNodeBehaviour::default())));
+
         graph.add_node(NodeData::new("My Counter", [810.0, 10.0], Box::new(CounterNodeBehaviour::default())));
 
         graph.into()
     };
 
-    let (_join_handle, main_thread_task_receiver) = GraphExecutor::spawn(&graph);
-
-    ApplicationState::run_with_event_handler(
-        Settings {
-            window: window::Settings {
-                icon: None, // TODO
-                ..window::Settings::default()
-            },
-            antialiasing: true,
-            ..Settings::with_flags(ApplicationFlags { graph })
+    let active_schedule = graph.active_schedule.clone();
+    let settings = Settings {
+        window: window::Settings {
+            icon: None, // TODO
+            ..window::Settings::default()
         },
+        antialiasing: true,
+        ..Settings::with_flags(ApplicationFlags { graph })
+    };
+    let (execution_context, main_thread_task_receiver) = ExecutionContext::from_settings(&settings);
+    let renderer_settings = iced_wgpu::Settings {
+        default_font: settings.default_font,
+        default_text_size: settings.default_text_size,
+        // because anti-aliasing is enabled in the settings
+        antialiasing: Some(iced_wgpu::Antialiasing::MSAAx4),
+        instance: Some(execution_context.renderer.instance.clone()),
+        device_queue: Some((
+            execution_context.renderer.device.clone(),
+            execution_context.renderer.queue.clone(),
+        )),
+        ..iced_wgpu::Settings::default()
+    };
+    let _join_handle = GraphExecutor::spawn(execution_context, active_schedule);
+
+    ApplicationState::run_with_event_handler_and_renderer_settings(
+        settings,
+        renderer_settings,
         Some(Box::new(move |event, window_target, control_flow| {
             if event == winit::event::Event::MainEventsCleared {
                 for main_thread_task in main_thread_task_receiver.try_iter() {

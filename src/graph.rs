@@ -1,18 +1,32 @@
 use crate::node::*;
-use crate::style::Themeable;
-use crate::*;
+use crate::style::{self, consts, Theme, Themeable};
+use crate::widgets::{
+    node::FloatingPanesBehaviour, FloatingPane, FloatingPaneBehaviourData, FloatingPaneBehaviourState,
+    FloatingPaneState, NodeElement, NodeElementState,
+};
+use crate::ApplicationFlags;
+use crate::Message;
+use crate::NodeMessage;
+use arc_swap::ArcSwapOption;
 use dyn_clone::DynClone;
-use iced::Element;
+use iced::{Element, Settings};
+use iced_futures::futures;
+use iced_wgpu::wgpu;
 use iced_winit::winit::event_loop::EventLoopWindowTarget;
 use iced_winit::winit::platform::desktop::EventLoopExtDesktop;
 use iced_winit::winit::window::{Window, WindowAttributes};
+use petgraph::{stable_graph::StableGraph, visit::EdgeRef, Directed, Direction};
 use std::any::Any;
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::ops::{Deref, DerefMut};
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
 use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::Arc;
 use std::sync::RwLock;
+use std::thread;
 use vek::Vec2;
 
 pub type NodeIndex = petgraph::graph::NodeIndex<u32>;
@@ -162,7 +176,7 @@ pub struct Schedule {
 
 pub struct ExecutionGraph {
     pub graph: Graph,
-    active_schedule: Arc<ArcSwapOption<Schedule>>,
+    pub active_schedule: Arc<ArcSwapOption<Schedule>>,
 }
 
 impl ExecutionGraph {
@@ -304,15 +318,253 @@ impl DerefMut for ExecutionGraph {
     }
 }
 
+pub struct Renderer {
+    pub instance: Arc<wgpu::Instance>,
+    pub device: Arc<wgpu::Device>,
+    pub queue: Arc<wgpu::Queue>,
+}
+
+impl Renderer {
+    pub fn new(settings: &Settings<ApplicationFlags>) -> Self {
+        let instance = Arc::new(wgpu::Instance::new(wgpu::BackendBit::PRIMARY));
+        let (device, queue) = {
+            let adapter =
+                futures::executor::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+                    power_preference: if !settings.antialiasing {
+                        wgpu::PowerPreference::Default
+                    } else {
+                        wgpu::PowerPreference::HighPerformance
+                    },
+                    compatible_surface: None,
+                }))
+                .expect("No wgpu compatible adapter available.");
+
+            let (device, queue) = futures::executor::block_on(adapter.request_device(
+                &wgpu::DeviceDescriptor {
+                    features: wgpu::Features::empty(),
+                    limits: wgpu::Limits { max_bind_groups: 2, ..wgpu::Limits::default() },
+                    shader_validation: false,
+                },
+                None,
+            ))
+            .expect("No wgpu compatible device available.");
+
+            (Arc::new(device), Arc::new(queue))
+        };
+
+        Self { instance, device, queue }
+    }
+}
+
+pub enum TextureAllocation {
+    TextureView(wgpu::TextureView),
+    SwapchainFrame(wgpu::SwapChainFrame),
+}
+
+impl Deref for TextureAllocation {
+    type Target = wgpu::TextureView;
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            TextureAllocation::TextureView(texture_view) => texture_view,
+            TextureAllocation::SwapchainFrame(swapchain_frame) => &swapchain_frame.output.view,
+        }
+    }
+}
+
+pub struct ListAllocation {
+    item_type: ChannelType,
+    data: Vec<u8>,
+    item_size: usize,
+}
+
+impl ListAllocation {
+    pub fn new(item_type: impl Into<ChannelType>) -> Self {
+        let item_type = item_type.into();
+        Self { item_size: item_type.value_size(), item_type, data: Vec::new() }
+    }
+
+    pub fn len(&self) -> usize {
+        self.data.len() / self.item_size
+    }
+
+    pub fn push(&mut self, item: &[u8]) {
+        assert_eq!(item.len(), self.item_size);
+        self.data.extend_from_slice(item);
+    }
+
+    pub fn pop(&mut self) -> Result<(), ()> {
+        if self.data.len() > 0 {
+            self.data.truncate(self.data.len() - self.item_size);
+            Ok(())
+        } else {
+            Err(())
+        }
+    }
+
+    pub fn get(&self, index: usize) -> Option<&[u8]> {
+        let start_index = index * self.item_size;
+        let end_index = (index + 1) * self.item_size;
+
+        if end_index >= self.data.len() {
+            Some(&self.data[start_index..end_index])
+        } else {
+            None
+        }
+    }
+
+    pub fn get_mut(&mut self, index: usize) -> Option<&mut [u8]> {
+        let start_index = index * self.item_size;
+        let end_index = (index + 1) * self.item_size;
+
+        if end_index >= self.data.len() {
+            Some(&mut self.data[start_index..end_index])
+        } else {
+            None
+        }
+    }
+}
+
+impl Deref for ListAllocation {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        &self.data
+    }
+}
+
+impl DerefMut for ListAllocation {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.data
+    }
+}
+
+#[derive(Eq, PartialEq, Debug)]
+#[repr(C)]
+pub struct AllocationPointer {
+    index: u32,
+}
+
+impl AllocationPointer {
+    fn as_u32(&self) -> u32 {
+        self.index
+    }
+
+    fn as_usize(&self) -> usize {
+        self.index as usize
+    }
+}
+
+impl From<usize> for AllocationPointer {
+    fn from(index: usize) -> Self {
+        Self { index: index as u32 }
+    }
+}
+
+struct Allocation {
+    ptr: Box<dyn Any>,
+    refcount: AtomicUsize,
+}
+
+impl Allocation {
+    pub fn new<T: Any>(value: T) -> Self {
+        Self { ptr: Box::new(value), refcount: AtomicUsize::new(1) }
+    }
+}
+
+pub struct Allocator {
+    allocations: Vec<Option<Allocation>>,
+    freed_allocation_indices: Vec<usize>,
+}
+
+impl Allocator {
+    pub fn allocate<T: Any>(&mut self, allocation: T) -> AllocationPointer {
+        let allocation = Some(Allocation::new(allocation));
+
+        if let Some(freed_allocation_index) = self.freed_allocation_indices.pop() {
+            self.allocations[freed_allocation_index] = allocation;
+            freed_allocation_index
+        } else {
+            self.allocations.push(allocation);
+            self.allocations.len() - 1
+        }
+        .into()
+    }
+
+    pub fn deallocate(&mut self, allocation_ptr: AllocationPointer) {
+        self.allocations[allocation_ptr.as_usize()] = None;
+        self.freed_allocation_indices.push(allocation_ptr.as_usize());
+    }
+
+    /// Add `delta` to refcount and deallocate, if zero.
+    /// Returns `Ok(true)` when the allocation has been freed,
+    /// `Ok(false)` resulting refcount is larger than 0,
+    /// or `Err` if no such allocation exists.
+    pub fn refcount_update(&mut self, allocation_ptr: AllocationPointer, delta: isize) -> Result<bool, ()> {
+        if let Some(allocation) = self.allocations[allocation_ptr.as_usize()].as_ref() {
+            let refcount = &allocation.refcount;
+            if delta > 0 {
+                refcount.fetch_add(delta as usize, Ordering::SeqCst);
+                Ok(false)
+            } else if delta < 0 {
+                let mut refcount_before_swap = refcount.load(Ordering::SeqCst);
+                let refcount_new;
+
+                loop {
+                    refcount_new = refcount_before_swap.saturating_sub((-delta) as usize);
+                    let refcount_during_swap =
+                        refcount.compare_and_swap(refcount_before_swap, refcount_new, Ordering::SeqCst);
+
+                    if refcount_during_swap == refcount_before_swap {
+                        break;
+                    } else {
+                        refcount_before_swap = refcount_during_swap;
+                    }
+                }
+
+                if refcount_before_swap > 0 && refcount_new == 0 {
+                    self.deallocate(allocation_ptr);
+                    Ok(true)
+                } else {
+                    // Deallocation was already performed (before_swap == 0) or was not necessary (new > 0).
+                    Ok(false)
+                }
+            } else {
+                Ok(false)
+            }
+        } else {
+            Err(())
+        }
+    }
+
+    pub fn deref(&self, allocation_ptr: AllocationPointer) -> Option<&Box<dyn Any>> {
+        self.allocations
+            .get(allocation_ptr.as_usize())
+            .and_then(|allocation| allocation.as_ref().map(|allocation| &allocation.ptr))
+    }
+
+    pub fn deref_mut(&mut self, allocation_ptr: AllocationPointer) -> Option<&mut Box<dyn Any>> {
+        self.allocations
+            .get_mut(allocation_ptr.as_usize())
+            .and_then(|allocation| allocation.as_mut().map(|allocation| &mut allocation.ptr))
+    }
+}
+
 pub struct ExecutionContext {
     pub main_thread_task_sender: Sender<Box<MainThreadTask>>,
+    pub renderer: Renderer,
+    pub allocator: Allocator,
 }
 
 impl ExecutionContext {
-    pub fn new() -> (Self, Receiver<Box<MainThreadTask>>) {
+    pub fn new(renderer: Renderer) -> (Self, Receiver<Box<MainThreadTask>>) {
         let (main_thread_task_sender, main_thread_task_receiver) = mpsc::channel();
-        let context = Self { main_thread_task_sender };
+        let context = Self { main_thread_task_sender, renderer, allocators: Defualt::default() };
         (context, main_thread_task_receiver)
+    }
+
+    pub fn from_settings(settings: &Settings<ApplicationFlags>) -> (Self, Receiver<Box<MainThreadTask>>) {
+        Self::new(Renderer::new(settings))
     }
 }
 
@@ -326,11 +578,12 @@ impl GraphExecutor {
         Self { active_schedule, execution_context }
     }
 
-    pub fn spawn(graph: &ExecutionGraph) -> (std::thread::JoinHandle<()>, Receiver<Box<MainThreadTask>>) {
-        let (execution_context, main_thread_task_receiver) = ExecutionContext::new();
-        let active_schedule = graph.active_schedule.clone();
-        let join_handle = thread::spawn(move || Self::new(execution_context, active_schedule).run());
-        (join_handle, main_thread_task_receiver)
+    pub fn spawn(
+        execution_context: ExecutionContext,
+        active_schedule: Arc<ArcSwapOption<Schedule>>,
+    ) -> std::thread::JoinHandle<()>
+    {
+        thread::spawn(move || Self::new(execution_context, active_schedule).run())
     }
 
     pub fn run(mut self) {
@@ -411,7 +664,7 @@ impl NodeData {
         &mut self,
         index: NodeIndex,
         theme: &dyn Theme,
-    ) -> FloatingPane<'_, Message, Renderer, crate::widgets::node::FloatingPanesBehaviour<Message>>
+    ) -> FloatingPane<'_, Message, iced_wgpu::Renderer, FloatingPanesBehaviour<Message>>
     {
         let mut builder = NodeElement::builder(index, &mut self.element_state).node_behaviour_element(
             self.behaviour.view(theme).map(Element::from).map(move |element| {

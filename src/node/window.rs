@@ -4,6 +4,7 @@ use flume::{self, Receiver, Sender};
 use iced::widget::checkbox::Checkbox;
 use iced::widget::text_input::{self, TextInput};
 use iced::{Align, Column, Container, Length, Row};
+use iced_wgpu::wgpu;
 use iced_winit::winit;
 use std::borrow::Cow;
 use std::fmt::Debug;
@@ -334,7 +335,7 @@ impl NodeBehaviour for WindowNodeBehaviour {
                     if let Some(window_receiver) = state.window_receiver.as_mut() {
                         // The window creation task has been sent, poll the response.
                         if let Ok(window) = window_receiver.try_recv() {
-                            state.window = Some(window);
+                            state.window = Some(WindowSurface::from(window, context));
                         }
                     } else {
                         // If the window creation task was not sent yet, send it.
@@ -348,22 +349,61 @@ impl NodeBehaviour for WindowNodeBehaviour {
                         });
                         let _result = context.main_thread_task_sender.send(task);
                         state.window_receiver = Some(window_receiver);
-
-                        println!("Create requested.");
                     }
                 }
 
                 if let Some(window) = state.window.as_mut() {
-                    state.current_settings.apply_difference(&settings, &window);
+                    let recreate_swapchain = state.current_settings.inner_size != settings.inner_size;
+
+                    state.current_settings.apply_difference(&settings, &window.window);
+
+                    if window.swapchain.is_none() || recreate_swapchain {
+                        window.swapchain = Some(context.renderer.device.create_swap_chain(
+                            &window.surface,
+                            &wgpu::SwapChainDescriptor {
+                                usage: wgpu::TextureUsage::OUTPUT_ATTACHMENT,
+                                format: wgpu::TextureFormat::Bgra8UnormSrgb,
+                                width: state.current_settings.inner_size[0],
+                                height: state.current_settings.inner_size[1],
+                                present_mode: wgpu::PresentMode::Mailbox,
+                            },
+                        ));
+                    }
+
+                    // Drop the previous swapchain frame, presenting it.
+                    window.swapchain_frame = None;
+                    let swapchain = window.swapchain.as_mut().unwrap();
+                    // Unwrap safe, because we made sure to drop the previous frame.
+                    let frame = swapchain.get_current_frame().unwrap();
+                    window.swapchain_frame = Some(frame);
                 }
             },
         )
     }
 }
 
+#[derive(Debug)]
+pub struct WindowSurface {
+    window: Window,
+    surface: wgpu::Surface,
+    swapchain: Option<wgpu::SwapChain>,
+    swapchain_frame: Option<wgpu::SwapChainFrame>,
+}
+
+impl WindowSurface {
+    pub fn from(window: Window, context: &ExecutionContext) -> Self {
+        Self {
+            surface: unsafe { context.renderer.instance.create_surface(&window) },
+            window,
+            swapchain: None,
+            swapchain_frame: None,
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct State {
-    window_receiver: Option<Receiver<Window>>,
-    window: Option<Window>,
     current_settings: WindowSettings,
+    window_receiver: Option<Receiver<Window>>,
+    window: Option<WindowSurface>,
 }

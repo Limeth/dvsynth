@@ -1,4 +1,4 @@
-use crate::graph::ExecutionContext;
+use crate::graph::{AllocationPointer, ExecutionContext, ListAllocation};
 use crate::style::Theme;
 use byteorder::{ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
 use downcast_rs::{impl_downcast, Downcast};
@@ -16,9 +16,12 @@ use std::ops::{Add, Deref, DerefMut, Div, Index, IndexMut, Mul, Sub};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
 
+pub use array_constructor::*;
 pub use binary_op::*;
 pub use constant::*;
 pub use counter::*;
+pub use debug::*;
+pub use list_constructor::*;
 pub use window::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,7 +50,7 @@ pub enum ChannelType {
     Opaque(OpaqueChannelType),
     // Tuple(Vec<Self>),
     Array(ArrayChannelType),
-    // Vector { item_type: Box<Self> },
+    List(ListChannelType),
 }
 
 impl Display for ChannelType {
@@ -57,6 +60,7 @@ impl Display for ChannelType {
             Primitive(primitive) => f.write_fmt(format_args!("{}", primitive)),
             Opaque(opaque) => f.write_fmt(format_args!("{}", opaque)),
             Array(array) => f.write_fmt(format_args!("{}", array)),
+            List(list) => f.write_fmt(format_args!("{}", list)),
         }
     }
 }
@@ -68,6 +72,7 @@ impl ChannelTypeTrait for ChannelType {
             Primitive(primitive) => primitive.value_size(),
             Opaque(opaque) => opaque.value_size(),
             Array(array) => array.value_size(),
+            List(list) => list.value_size(),
         }
     }
 
@@ -443,6 +448,39 @@ impl From<ArrayChannelType> for ChannelType {
 }
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone)]
+pub struct ListChannelType {
+    pub item_type: Box<ChannelType>,
+}
+
+impl ListChannelType {
+    pub fn new(item_type: impl Into<ChannelType>) -> Self {
+        Self { item_type: Box::new(item_type.into()) }
+    }
+}
+
+impl Display for ListChannelType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("List<{}>", self.item_type))
+    }
+}
+
+impl ChannelTypeTrait for ListChannelType {
+    fn value_size(&self) -> usize {
+        std::mem::size_of::<AllocationPointer<ListAllocation>>()
+    }
+
+    fn is_abi_compatible(&self, other: &Self) -> bool {
+        self.item_type.is_abi_compatible(&other.item_type)
+    }
+}
+
+impl From<ListChannelType> for ChannelType {
+    fn from(other: ListChannelType) -> Self {
+        ChannelType::List(other)
+    }
+}
+
+#[derive(Debug, Hash, PartialEq, Eq, Clone)]
 pub struct Channel {
     pub title: String,
     pub description: Option<String>,
@@ -792,7 +830,10 @@ impl<T: NodeBehaviour> NodeBehaviourContainer for T {
     }
 }
 
+pub mod array_constructor;
 pub mod binary_op;
 pub mod constant;
 pub mod counter;
+pub mod debug;
+pub mod list_constructor;
 pub mod window;
