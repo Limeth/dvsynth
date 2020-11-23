@@ -1,9 +1,15 @@
-use super::*;
-use crate::style::{self, Themeable};
-use flume::{self, Receiver, Sender};
+use crate::graph::ApplicationContext;
+use crate::{
+    node::{
+        behaviour::{ExecutionContext, NodeBehaviour, NodeCommand, NodeEvent},
+        NodeConfiguration,
+    },
+    style::{Theme, Themeable},
+};
+use flume::{self, Receiver};
 use iced::widget::checkbox::Checkbox;
 use iced::widget::text_input::{self, TextInput};
-use iced::{Align, Column, Container, Length, Row};
+use iced::{Column, Element, Row};
 use iced_wgpu::wgpu;
 use iced_winit::winit;
 use std::borrow::Cow;
@@ -11,7 +17,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 use vek::Vec2;
 use winit::dpi::PhysicalSize;
-use winit::event_loop::EventLoop;
+use winit::event_loop::EventLoopWindowTarget;
 use winit::window::{Fullscreen, Window, WindowBuilder};
 
 #[derive(Clone)]
@@ -319,66 +325,61 @@ impl NodeBehaviour for WindowNodeBehaviour {
     }
 
     fn create_state_initializer(&self) -> Option<Self::FnStateInitializer> {
-        Some(Box::new(|context: &ExecutionContext| State::default()))
+        Some(Box::new(|_context: &ApplicationContext| State::default()))
     }
 
     fn create_executor(&self) -> Self::FnExecutor {
         let settings = self.settings.clone();
-        Box::new(
-            move |context: &ExecutionContext,
-                  state: Option<&mut Self::State>,
-                  inputs: &ChannelValueRefs,
-                  outputs: &mut ChannelValues| {
-                let state = state.unwrap();
+        Box::new(move |mut context: ExecutionContext<'_, State>| {
+            let state = context.state.take().unwrap();
 
-                if state.window.is_none() {
-                    if let Some(window_receiver) = state.window_receiver.as_mut() {
-                        // The window creation task has been sent, poll the response.
-                        if let Ok(window) = window_receiver.try_recv() {
-                            state.window = Some(WindowSurface::from(window, context));
-                        }
-                    } else {
-                        // If the window creation task was not sent yet, send it.
-                        let window_attributes = settings.get_builder().window;
-                        let (window_sender, window_receiver) = flume::unbounded();
-                        let task = Box::new(move |window_target: &EventLoopWindowTarget<crate::Message>| {
-                            let mut builder = WindowBuilder::new();
-                            builder.window = window_attributes;
-                            let window = builder.build(window_target).unwrap();
-                            let _result = window_sender.send(window);
-                        });
-                        let _result = context.main_thread_task_sender.send(task);
-                        state.window_receiver = Some(window_receiver);
+            if state.window.is_none() {
+                if let Some(window_receiver) = state.window_receiver.as_mut() {
+                    // The window creation task has been sent, poll the response.
+                    if let Ok(window) = window_receiver.try_recv() {
+                        state.window = Some(WindowSurface::from(window, &context));
                     }
+                } else {
+                    // If the window creation task was not sent yet, send it.
+                    let window_attributes = settings.get_builder().window;
+                    let (window_sender, window_receiver) = flume::unbounded();
+                    let task = Box::new(move |window_target: &EventLoopWindowTarget<crate::Message>| {
+                        let mut builder = WindowBuilder::new();
+                        builder.window = window_attributes;
+                        let window = builder.build(window_target).unwrap();
+                        let _result = window_sender.send(window);
+                    });
+                    let _result = context.application_context.main_thread_task_sender.send(task);
+                    state.window_receiver = Some(window_receiver);
+                }
+            }
+
+            if let Some(window) = state.window.as_mut() {
+                let recreate_swapchain = state.current_settings.inner_size != settings.inner_size;
+
+                state.current_settings.apply_difference(&settings, &window.window);
+
+                if window.swapchain.is_none() || recreate_swapchain {
+                    window.swapchain = Some(context.application_context.renderer.device.create_swap_chain(
+                        &window.surface,
+                        &wgpu::SwapChainDescriptor {
+                            usage: wgpu::TextureUsage::OUTPUT_ATTACHMENT,
+                            format: wgpu::TextureFormat::Bgra8UnormSrgb,
+                            width: state.current_settings.inner_size[0],
+                            height: state.current_settings.inner_size[1],
+                            present_mode: wgpu::PresentMode::Mailbox,
+                        },
+                    ));
                 }
 
-                if let Some(window) = state.window.as_mut() {
-                    let recreate_swapchain = state.current_settings.inner_size != settings.inner_size;
-
-                    state.current_settings.apply_difference(&settings, &window.window);
-
-                    if window.swapchain.is_none() || recreate_swapchain {
-                        window.swapchain = Some(context.renderer.device.create_swap_chain(
-                            &window.surface,
-                            &wgpu::SwapChainDescriptor {
-                                usage: wgpu::TextureUsage::OUTPUT_ATTACHMENT,
-                                format: wgpu::TextureFormat::Bgra8UnormSrgb,
-                                width: state.current_settings.inner_size[0],
-                                height: state.current_settings.inner_size[1],
-                                present_mode: wgpu::PresentMode::Mailbox,
-                            },
-                        ));
-                    }
-
-                    // Drop the previous swapchain frame, presenting it.
-                    window.swapchain_frame = None;
-                    let swapchain = window.swapchain.as_mut().unwrap();
-                    // Unwrap safe, because we made sure to drop the previous frame.
-                    let frame = swapchain.get_current_frame().unwrap();
-                    window.swapchain_frame = Some(frame);
-                }
-            },
-        )
+                // Drop the previous swapchain frame, presenting it.
+                window.swapchain_frame = None;
+                let swapchain = window.swapchain.as_mut().unwrap();
+                // Unwrap safe, because we made sure to drop the previous frame.
+                let frame = swapchain.get_current_frame().unwrap();
+                window.swapchain_frame = Some(frame);
+            }
+        })
     }
 }
 
@@ -391,9 +392,9 @@ pub struct WindowSurface {
 }
 
 impl WindowSurface {
-    pub fn from(window: Window, context: &ExecutionContext) -> Self {
+    pub fn from(window: Window, context: &ExecutionContext<'_, State>) -> Self {
         Self {
-            surface: unsafe { context.renderer.instance.create_surface(&window) },
+            surface: unsafe { context.application_context.renderer.instance.create_surface(&window) },
             window,
             swapchain: None,
             swapchain_frame: None,

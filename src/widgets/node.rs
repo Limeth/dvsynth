@@ -1,23 +1,19 @@
 use super::*;
-use crate::node::{ChannelRef, ChannelType, ChannelTypeTrait, NodeBehaviourMessage, NodeConfiguration};
-use crate::util::{PathBuilderExt, RectangleExt, Segments};
-use crate::{style, util, ChannelDirection, ChannelIdentifier, Connection, Message, NodeMessage};
+use crate::node::{ChannelRef, ChannelType, ChannelTypeTrait, NodeConfiguration};
+use crate::util::{RectangleExt, Segments};
+use crate::{style, util, ChannelDirection, ChannelIdentifier, Connection};
 use iced::widget::Space;
-use iced_graphics::canvas::{Fill, FillRule, Frame, LineCap, LineJoin, Path, Stroke};
-use iced_graphics::{self, Backend, Defaults, Primitive};
+use iced_graphics::canvas::{Frame, LineCap, LineJoin, Path, Stroke};
+use iced_graphics::{self, Backend, Primitive};
 use iced_native::event::Status;
 use iced_native::layout::{Layout, Limits, Node};
 use iced_native::mouse::{self, Button as MouseButton, Event as MouseEvent};
-use iced_native::widget::{Container, Widget};
-use iced_native::{
-    self, Align, Background, Clipboard, Column, Event, Hasher, Length, Point, Rectangle, Row, Size, Text,
-};
+use iced_native::widget::Widget;
+use iced_native::Color;
+use iced_native::{self, Align, Clipboard, Column, Event, Hasher, Length, Point, Rectangle, Row, Text};
 use iced_native::{overlay, Element};
-use iced_native::{Color, Vector};
 use lyon_geom::QuadraticBezierSegment;
-use ordered_float::OrderedFloat;
 use petgraph::graph::NodeIndex;
-use std::collections::HashMap;
 use std::hash::Hash;
 use vek::Vec2;
 
@@ -29,8 +25,7 @@ impl<'a> ChannelRef<'a> {
 
 #[derive(Default)]
 pub struct NodeElementState {
-    // pub text_input_state: iced::widget::text_input::State,
-// pub text_input_value: String,
+    __marker: (), // prevent direct construction for future proofing
 }
 
 pub struct NodeElementBuilder<'a, M: 'a + Clone, R: 'a + WidgetRenderer> {
@@ -39,7 +34,6 @@ pub struct NodeElementBuilder<'a, M: 'a + Clone, R: 'a + WidgetRenderer> {
     node_behaviour_element: Option<Element<'a, M, R>>,
     width: Length,
     height: Length,
-    extents: Vec2<u32>,
     input_channels: Vec<ChannelRef<'a>>,
     output_channels: Vec<ChannelRef<'a>>,
     __marker: std::marker::PhantomData<&'a (M, R)>,
@@ -47,14 +41,12 @@ pub struct NodeElementBuilder<'a, M: 'a + Clone, R: 'a + WidgetRenderer> {
 
 /// A widget specifically made to be used as the child of the [`FloatingPanes`] widget alongside the
 /// custom behaviour [`FloatingPanesBehaviour`] to function as a node graph editor.
+#[allow(dead_code)]
 pub struct NodeElement<'a, M: 'a + Clone, R: 'a + WidgetRenderer> {
     index: NodeIndex,
-    input_channels: Vec<ChannelRef<'a>>,
-    output_channels: Vec<ChannelRef<'a>>,
-    // state: &'a mut NodeElementState,
+    state: &'a mut NodeElementState,
     width: Length,
     height: Length,
-    extents: Vec2<u32>,
     element_tree: Element<'a, M, R>,
 }
 
@@ -66,7 +58,6 @@ impl<'a, M: 'a + Clone, R: 'a + WidgetRenderer> NodeElementBuilder<'a, M, R> {
             node_behaviour_element: None,
             width: Length::Shrink,
             height: Length::Shrink,
-            extents: [u32::MAX, u32::MAX].into(),
             input_channels: Default::default(),
             output_channels: Default::default(),
             __marker: Default::default(),
@@ -92,21 +83,6 @@ impl<'a, M: 'a + Clone, R: 'a + WidgetRenderer> NodeElementBuilder<'a, M, R> {
         self
     }
 
-    pub fn max_width(mut self, max_width: u32) -> Self {
-        self.extents[0] = max_width;
-        self
-    }
-
-    pub fn max_height(mut self, max_height: u32) -> Self {
-        self.extents[1] = max_height;
-        self
-    }
-
-    pub fn extents(mut self, extents: Vec2<u32>) -> Self {
-        self.extents = extents;
-        self
-    }
-
     pub fn push_input_channel(mut self, channel: impl Into<ChannelRef<'a>>) -> Self {
         self.input_channels.push(channel.into());
         self
@@ -117,15 +93,12 @@ impl<'a, M: 'a + Clone, R: 'a + WidgetRenderer> NodeElementBuilder<'a, M, R> {
         self
     }
 
-    pub fn build(
-        self, /*, text_input_callback: impl (Fn(NodeIndex, String) -> M) + 'static*/
-    ) -> NodeElement<'a, M, R> {
+    pub fn build(self) -> NodeElement<'a, M, R> {
         NodeElement {
             index: self.index,
-            // state: self.state,
+            state: self.state,
             width: self.width,
             height: self.height,
-            extents: self.extents,
             element_tree: {
                 // Element { Margin { Row [ Column [ .. ], Column [ .. ] ] } }
                 Margin::new(
@@ -166,20 +139,6 @@ impl<'a, M: 'a + Clone, R: 'a + WidgetRenderer> NodeElementBuilder<'a, M, R> {
                                         column = column.push(output_channel.render());
                                     }
 
-                                    // let text_input = iced_native::widget::TextInput::<M, R>::new(
-                                    //     &mut self.state.text_input_state,
-                                    //     "",
-                                    //     &self.state.text_input_value,
-                                    //     {
-                                    //         let index = self.index;
-                                    //         move |new_value| {
-                                    //             (text_input_callback)(index, new_value)
-                                    //         }
-                                    //     },
-                                    // );
-
-                                    // column = column.push(text_input);
-
                                     column
                                 }),
                         );
@@ -190,8 +149,6 @@ impl<'a, M: 'a + Clone, R: 'a + WidgetRenderer> NodeElementBuilder<'a, M, R> {
                 )
                 .into()
             },
-            input_channels: self.input_channels,
-            output_channels: self.output_channels,
         }
     }
 }
@@ -378,7 +335,10 @@ impl<'a, M: Clone + 'a, R: 'a + WidgetRenderer> floating_panes::FloatingPanesBeh
         <R as WidgetRenderer>::draw_panes(renderer, panes, defaults, layout, cursor_position, viewport)
     }
 
-    fn hash_panes(panes: &FloatingPanes<'a, M, R, Self>, state: &mut Hasher) {}
+    fn hash_panes(_panes: &FloatingPanes<'a, M, R, Self>, _state: &mut Hasher) {
+        // This implementation of [`floating_panes::FloatingPanesBehaviour`] does not influence the
+        // layout of the floating panes.
+    }
 
     fn on_event(
         panes: &mut FloatingPanes<'a, M, R, Self>,
@@ -641,16 +601,18 @@ where B: Backend + iced_graphics::backend::Text
         let mut mouse_interaction = mouse::Interaction::default();
         let mut primitives = Vec::new();
 
-        primitives.extend(panes.children.iter().zip(layout.panes()).map(|((child_index, child), layout)| {
-            let (primitive, new_mouse_interaction) =
-                child.element_tree.draw(self, defaults, layout.into(), cursor_position, viewport);
+        primitives.extend(panes.children.iter().zip(layout.panes()).map(
+            |((_child_index, child), layout)| {
+                let (primitive, new_mouse_interaction) =
+                    child.element_tree.draw(self, defaults, layout.into(), cursor_position, viewport);
 
-            if new_mouse_interaction > mouse_interaction {
-                mouse_interaction = new_mouse_interaction;
-            }
+                if new_mouse_interaction > mouse_interaction {
+                    mouse_interaction = new_mouse_interaction;
+                }
 
-            primitive
-        }));
+                primitive
+            },
+        ));
 
         // Draw connections
         let mut frame = Frame::new(layout.bounds().size());

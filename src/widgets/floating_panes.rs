@@ -1,7 +1,6 @@
 use super::*;
 use crate::util::RectangleExt;
-use crate::Message;
-use iced_graphics::{self, Backend, Background, Color, Defaults, Primitive, Rectangle};
+use iced_graphics::{self, Backend, Background, Color, Primitive, Rectangle};
 use iced_native::event::Status;
 use iced_native::layout::{Layout, Limits, Node};
 use iced_native::mouse::{self, Button as MouseButton, Event as MouseEvent};
@@ -10,7 +9,6 @@ use iced_native::{self, Clipboard, Column, Event, Hasher, Length, Point, Size, T
 use iced_native::{overlay, Element};
 use indexmap::IndexMap;
 use ordered_float::OrderedFloat;
-use std::collections::HashMap;
 use std::hash::Hash;
 use std::ops::{Deref, DerefMut};
 use vek::Vec2;
@@ -115,16 +113,16 @@ impl<'a, M: 'a, B: 'a + Backend + iced_graphics::backend::Text>
         }
     }
 
-    fn hash_panes(panes: &FloatingPanes<'a, M, iced_graphics::Renderer<B>, Self>, state: &mut Hasher) {}
+    fn hash_panes(_panes: &FloatingPanes<'a, M, iced_graphics::Renderer<B>, Self>, _state: &mut Hasher) {}
 
     fn on_event(
-        panes: &mut FloatingPanes<'a, M, iced_graphics::Renderer<B>, Self>,
-        event: Event,
-        layout: FloatingPanesLayout<'_>,
-        cursor_position: Point,
-        messages: &mut Vec<M>,
-        renderer: &iced_graphics::Renderer<B>,
-        clipboard: Option<&dyn Clipboard>,
+        _panes: &mut FloatingPanes<'a, M, iced_graphics::Renderer<B>, Self>,
+        _event: Event,
+        _layout: FloatingPanesLayout<'_>,
+        _cursor_position: Point,
+        _messages: &mut Vec<M>,
+        _renderer: &iced_graphics::Renderer<B>,
+        _clipboard: Option<&dyn Clipboard>,
     ) -> Status
     {
         Status::Ignored
@@ -897,7 +895,7 @@ impl<'a, M: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a, M, R>
         self.children
             .iter_mut()
             .zip(layout.children())
-            .filter_map(|((child_index, child), layout)| child.element_tree.overlay(layout))
+            .filter_map(|((_, child), layout)| child.element_tree.overlay(layout))
             .next()
     }
 }

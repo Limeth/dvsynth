@@ -1,8 +1,19 @@
-use super::*;
-use crate::style::{self, Themeable};
-use iced::pick_list::{PickList, State as PickListState};
-use iced::text_input::{State as TextInputState, TextInput};
+use crate::node::PrimitiveChannelValue;
+use crate::{
+    node::{
+        behaviour::{ExecutionContext, NodeBehaviour, NodeCommand, NodeEvent},
+        Channel, NodeConfiguration, PrimitiveChannelType,
+    },
+    style::{Theme, Themeable},
+};
+use byteorder::LittleEndian;
+use iced::{
+    pick_list::{self, PickList},
+    text_input::{self, TextInput},
+    Element,
+};
 use iced::{Align, Length, Row};
+use std::io::Cursor;
 
 #[derive(Debug, Clone)]
 pub enum ConstantNodeMessage {
@@ -14,8 +25,8 @@ impl_node_behaviour_message!(ConstantNodeMessage);
 
 pub struct ConstantNodeBehaviour {
     value: PrimitiveChannelValue,
-    pick_list_state: PickListState<PrimitiveChannelType>,
-    text_input_state: TextInputState,
+    pick_list_state: pick_list::State<PrimitiveChannelType>,
+    text_input_state: text_input::State,
     text_input_value: String,
     text_input_placeholder: String,
 }
@@ -126,15 +137,10 @@ impl NodeBehaviour for ConstantNodeBehaviour {
 
     fn create_executor(&self) -> Self::FnExecutor {
         let value = self.value;
-        Box::new(
-            move |_context: &ExecutionContext,
-                  _state: Option<&mut Self::State>,
-                  _inputs: &ChannelValueRefs,
-                  outputs: &mut ChannelValues| {
-                let mut cursor = Cursor::new(outputs[0].as_mut());
+        Box::new(move |context: ExecutionContext<'_, Self::State>| {
+            let mut cursor = Cursor::new(context.outputs[0].as_mut());
 
-                value.write::<LittleEndian>(&mut cursor).unwrap();
-            },
-        )
+            value.write::<LittleEndian>(&mut cursor).unwrap();
+        })
     }
 }

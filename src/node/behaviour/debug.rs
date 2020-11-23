@@ -1,7 +1,15 @@
-use super::*;
-use crate::style::{self, Themeable};
-use iced::pick_list::{PickList, State as PickListState};
-use iced::text_input::{State as TextInputState, TextInput};
+use crate::{
+    node::{
+        behaviour::{ExecutionContext, NodeBehaviour, NodeCommand, NodeEvent},
+        Channel, NodeConfiguration, PrimitiveChannelType,
+    },
+    style::{Theme, Themeable},
+};
+use byteorder::LittleEndian;
+use iced::{
+    pick_list::{self, PickList},
+    Element,
+};
 use iced::{Align, Length, Row};
 
 #[derive(Debug, Clone)]
@@ -13,7 +21,7 @@ impl_node_behaviour_message!(DebugNodeMessage);
 
 pub struct DebugNodeBehaviour {
     ty: PrimitiveChannelType,
-    pick_list_state: PickListState<PrimitiveChannelType>,
+    pick_list_state: pick_list::State<PrimitiveChannelType>,
 }
 
 impl Default for DebugNodeBehaviour {
@@ -83,14 +91,9 @@ impl NodeBehaviour for DebugNodeBehaviour {
 
     fn create_executor(&self) -> Self::FnExecutor {
         let ty = self.ty;
-        Box::new(
-            move |_context: &ExecutionContext,
-                  _state: Option<&mut Self::State>,
-                  inputs: &ChannelValueRefs,
-                  _outputs: &mut ChannelValues| {
-                let value = ty.read::<LittleEndian, _>(&inputs[0].as_ref()).unwrap();
-                println!("{:?}", value);
-            },
-        )
+        Box::new(move |context: ExecutionContext<'_, ()>| {
+            let value = ty.read::<LittleEndian, _>(&context.inputs[0].as_ref()).unwrap();
+            println!("{:?}", value);
+        })
     }
 }

@@ -543,6 +543,7 @@ dependencies = [
  "iced_wgpu",
  "iced_winit",
  "indexmap",
+ "lazy_static",
  "lyon_geom",
  "ordered-float 2.0.0",
  "paste",

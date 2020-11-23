@@ -1,10 +1,19 @@
-use super::*;
-use crate::style::{self, Themeable};
-use iced::button::{Button, State as ButtonState};
-use iced::pick_list::{PickList, State as PickListState};
-use iced::text_input::{State as TextInputState, TextInput};
-use iced::{Align, Column, Length, Row, Text};
+use crate::{
+    node::{
+        behaviour::{ExecutionContext, NodeBehaviour, NodeCommand, NodeEvent},
+        ArrayChannelType, Channel, NodeConfiguration, PrimitiveChannelType,
+    },
+    style::{self, Themeable},
+};
+use iced::pick_list::{self, PickList};
+use iced::{
+    button::{Button, State as ButtonState},
+    Element,
+};
+use iced::{Align, Length, Row, Text};
+use std::io::{Cursor, Write};
 use std::num::NonZeroUsize;
+use style::Theme;
 
 #[derive(Debug, Clone)]
 pub enum ArrayConstructorNodeMessage {
@@ -18,7 +27,7 @@ impl_node_behaviour_message!(ArrayConstructorNodeMessage);
 pub struct ArrayConstructorNodeBehaviour {
     ty: PrimitiveChannelType,
     channel_count: NonZeroUsize,
-    pick_list_state: PickListState<PrimitiveChannelType>,
+    pick_list_state: pick_list::State<PrimitiveChannelType>,
     button_add_state: ButtonState,
     button_remove_state: ButtonState,
 }
@@ -121,17 +130,12 @@ impl NodeBehaviour for ArrayConstructorNodeBehaviour {
     }
 
     fn create_executor(&self) -> Self::FnExecutor {
-        Box::new(
-            move |_context: &ExecutionContext,
-                  _state: Option<&mut Self::State>,
-                  inputs: &ChannelValueRefs,
-                  outputs: &mut ChannelValues| {
-                let mut cursor = Cursor::new(outputs[0].as_mut());
+        Box::new(move |context: ExecutionContext<'_, Self::State>| {
+            let mut cursor = Cursor::new(context.outputs[0].as_mut());
 
-                for input in inputs.values.iter() {
-                    cursor.write(input);
-                }
-            },
-        )
+            for input in context.inputs.values.iter() {
+                cursor.write(input).unwrap();
+            }
+        })
     }
 }

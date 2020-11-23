@@ -1,10 +1,10 @@
 use iced::Rectangle;
-use iced_graphics::{Backend, Defaults, Primitive, Renderer};
+use iced_graphics::Backend;
 use iced_native::event::Status;
 use iced_native::layout::{Layout, Limits, Node};
 use iced_native::widget::Widget;
 use iced_native::widget::{Column, Row, Space};
-use iced_native::{mouse, overlay, Element};
+use iced_native::{overlay, Element};
 use iced_native::{Clipboard, Event, Hasher, Length, Point};
 
 #[derive(Default, PartialEq, Eq, Clone)]

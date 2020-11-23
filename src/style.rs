@@ -1,9 +1,7 @@
+use crate::util::rgb;
 use crate::widgets::floating_panes;
 use crate::Spacing;
-use iced::{
-    button, checkbox, container, pick_list, progress_bar, radio, rule, scrollable, slider, text_input,
-    widget, Color,
-};
+use iced::{checkbox, container, pick_list, text_input, widget, Color};
 
 pub mod consts {
     use super::*;
@@ -56,7 +54,6 @@ macro_rules! themes {
                 pub const TEXT_INPUT_COLOR: Color = TEXT_COLOR;
                 pub const TEXT_INPUT_COLOR_PLACEHOLDER: Color = COLORS[4];
                 pub const TEXT_INPUT_COLOR_SELECTION: Color = COLORS[5];
-                pub const TEXT_INPUT_COLOR_BACKGROUND: Color = COLORS[2];
                 pub const FLOATING_PANE_TITLE_COLOR_BACKGROUND: Color = COLORS[4];
                 pub const FLOATING_PANE_BODY_COLOR_BACKGROUND: Color = COLORS[3];
                 pub const FLOATING_PANES_COLOR_BACKGROUND: Color = COLORS[1];
@@ -78,7 +75,7 @@ macro_rules! themes {
                         pub struct Checkbox;
 
                         impl checkbox::StyleSheet for Checkbox {
-                            fn active(&self, is_checked: bool) -> checkbox::Style {
+                            fn active(&self, _is_checked: bool) -> checkbox::Style {
                                 checkbox::Style {
                                     background: BACKGROUND_COLOR_IDLE.into(),
                                     checkmark_color: TEXT_COLOR,
@@ -88,7 +85,7 @@ macro_rules! themes {
                                 }
                             }
 
-                            fn hovered(&self, is_checked: bool) -> checkbox::Style {
+                            fn hovered(&self, _is_checked: bool) -> checkbox::Style {
                                 checkbox::Style {
                                     background: BACKGROUND_COLOR_HOVERED.into(),
                                     checkmark_color: TEXT_COLOR,
@@ -252,13 +249,13 @@ impl<'a, M> Themeable for container::Container<'a, M> {
 }
 
 impl<'a, M> Themeable for widget::Row<'a, M> {
-    fn theme(self, theme: &dyn Theme) -> Self {
+    fn theme(self, _theme: &dyn Theme) -> Self {
         self.spacing(consts::SPACING_HORIZONTAL)
     }
 }
 
 impl<'a, M> Themeable for widget::Column<'a, M> {
-    fn theme(self, theme: &dyn Theme) -> Self {
+    fn theme(self, _theme: &dyn Theme) -> Self {
         self.spacing(consts::SPACING_VERTICAL)
     }
 }
@@ -346,23 +343,4 @@ themes! {
             rgb(0x100c06),
         ];
     }
-}
-
-/// Convert an RGBA integer (0xRRGGBBAA) into Color
-const fn rgba(rgba: u32) -> Color {
-    Color::from_rgba(
-        ((rgba >> 24) & 0xFF) as f32 / 0xFF as f32,
-        ((rgba >> 16) & 0xFF) as f32 / 0xFF as f32,
-        ((rgba >> 8) & 0xFF) as f32 / 0xFF as f32,
-        ((rgba >> 0) & 0xFF) as f32 / 0xFF as f32,
-    )
-}
-
-/// Convert an RGB integer (0xRRGGBB) into Color
-const fn rgb(rgb: u32) -> Color {
-    Color::from_rgb(
-        ((rgb >> 16) & 0xFF) as f32 / 0xFF as f32,
-        ((rgb >> 8) & 0xFF) as f32 / 0xFF as f32,
-        ((rgb >> 0) & 0xFF) as f32 / 0xFF as f32,
-    )
 }

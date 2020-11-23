@@ -1,6 +1,19 @@
-use super::*;
-use crate::style::{self, Themeable};
+use crate::node::PrimitiveChannelValue;
+use crate::{
+    node::{
+        behaviour::{ExecutionContext, NodeBehaviour, NodeCommand, NodeEvent},
+        Channel, NodeConfiguration, PrimitiveChannelType,
+    },
+    style::{Theme, Themeable},
+};
+use byteorder::LittleEndian;
+use iced::{
+    pick_list::{self, PickList},
+    Element,
+};
 use iced::{Align, Container, Length, Row};
+use std::io::Cursor;
+use std::ops::{Add, Div, Mul, Sub};
 
 #[derive(Debug, Clone)]
 pub enum BinaryOpMessage {
@@ -11,9 +24,9 @@ pub enum BinaryOpMessage {
 impl_node_behaviour_message!(BinaryOpMessage);
 
 pub struct BinaryOpNodeBehaviour {
-    pub pick_list_ty_state: PickListState<PrimitiveChannelType>,
+    pub pick_list_ty_state: pick_list::State<PrimitiveChannelType>,
     pub pick_list_ty_value: PrimitiveChannelType,
-    pub pick_list_op_state: PickListState<BinaryOp>,
+    pub pick_list_op_state: pick_list::State<BinaryOp>,
     pub op: BinaryOp,
 }
 
@@ -112,21 +125,16 @@ impl NodeBehaviour for BinaryOpNodeBehaviour {
     fn create_executor(&self) -> Self::FnExecutor {
         let pick_list_ty_value = self.pick_list_ty_value;
         let op = self.op;
-        Box::new(
-            move |_context: &ExecutionContext,
-                  _state: Option<&mut Self::State>,
-                  inputs: &ChannelValueRefs,
-                  outputs: &mut ChannelValues| {
-                let lhs = pick_list_ty_value.read::<LittleEndian, _>(&inputs[0].as_ref()).unwrap();
-                let rhs = pick_list_ty_value.read::<LittleEndian, _>(&inputs[1].as_ref()).unwrap();
-                let result = op.apply_dyn(lhs, rhs);
-                let mut output_cursor = Cursor::new(outputs[0].as_mut());
+        Box::new(move |context: ExecutionContext<'_, Self::State>| {
+            let lhs = pick_list_ty_value.read::<LittleEndian, _>(&context.inputs[0].as_ref()).unwrap();
+            let rhs = pick_list_ty_value.read::<LittleEndian, _>(&context.inputs[1].as_ref()).unwrap();
+            let result = op.apply_dyn(lhs, rhs);
+            let mut output_cursor = Cursor::new(context.outputs[0].as_mut());
 
-                // dbg!(result);
+            // dbg!(result);
 
-                result.write::<LittleEndian>(&mut output_cursor).unwrap();
-            },
-        )
+            result.write::<LittleEndian>(&mut output_cursor).unwrap();
+        })
     }
 }
 

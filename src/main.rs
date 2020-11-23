@@ -17,26 +17,18 @@
 //! * Display type tooltips when hovering over channels
 //!
 
-use arc_swap::ArcSwapOption;
 use graph::{
-    ChannelIdentifier, Connection, EdgeData, ExecutionContext, ExecutionGraph, Graph, GraphExecutor, NodeData,
+    ApplicationContext, ChannelIdentifier, Connection, EdgeData, ExecutionGraph, Graph, GraphExecutor,
+    NodeData,
 };
 use iced::{window, Application, Command, Settings};
-use iced_futures::futures;
 use iced_winit::winit;
-use iced_winit::winit::window::{Window, WindowAttributes, WindowBuilder};
+use node::behaviour::*;
 use node::*;
 use petgraph::graph::NodeIndex;
-use petgraph::visit::EdgeRef;
-use petgraph::{stable_graph::StableGraph, Directed, Direction};
-use std::borrow::Cow;
-use std::collections::HashSet;
-use std::sync::Arc;
-use std::thread::{self, Thread};
 use style::Themeable;
 use style::*;
 use widgets::*;
-
 pub mod graph;
 pub mod node;
 pub mod style;
@@ -46,7 +38,6 @@ pub mod widgets;
 #[derive(Debug, Clone)]
 pub enum NodeMessage {
     NodeBehaviourMessage(Box<dyn NodeBehaviourMessage>),
-    UpdateTextInput(String),
 }
 
 #[derive(Debug, Clone)]
@@ -104,11 +95,6 @@ impl Application for ApplicationState {
                     NodeMessage::NodeBehaviourMessage(message) => {
                         if let Some(node_data) = self.graph.node_weight_mut(node) {
                             node_data.update(NodeEvent::Message(message));
-                        }
-                    }
-                    NodeMessage::UpdateTextInput(new_value) => {
-                        if let Some(node_data) = self.graph.node_weight_mut(node) {
-                            // node_data.element_state.text_input_value = new_value;
                         }
                     }
                 }
@@ -249,7 +235,7 @@ fn main() {
         antialiasing: true,
         ..Settings::with_flags(ApplicationFlags { graph })
     };
-    let (execution_context, main_thread_task_receiver) = ExecutionContext::from_settings(&settings);
+    let (execution_context, main_thread_task_receiver) = ApplicationContext::from_settings(&settings);
     let renderer_settings = iced_wgpu::Settings {
         default_font: settings.default_font,
         default_text_size: settings.default_text_size,
@@ -267,7 +253,7 @@ fn main() {
     ApplicationState::run_with_event_handler_and_renderer_settings(
         settings,
         renderer_settings,
-        Some(Box::new(move |event, window_target, control_flow| {
+        Some(Box::new(move |event, window_target, _control_flow| {
             if event == winit::event::Event::MainEventsCleared {
                 for main_thread_task in main_thread_task_receiver.try_iter() {
                     (main_thread_task)(window_target);

@@ -1,11 +1,11 @@
-use iced_graphics::canvas::{Fill, FillRule, Frame, LineCap, LineJoin, Path, Stroke};
+#![allow(dead_code)]
+
+use iced_graphics::canvas::{Fill, FillRule, Frame, Path};
 use iced_graphics::widget::canvas::path::Builder;
-use iced_graphics::{self, Backend, Defaults, Primitive};
-use iced_native::layout::{Layout, Limits, Node};
-use iced_native::{
-    self, Align, Background, Clipboard, Column, Event, Hasher, Length, Point, Rectangle, Row, Size, Text,
-};
-use iced_native::{Color, Vector};
+use iced_graphics::{self, Primitive};
+use iced_native::layout::Layout;
+use iced_native::Color;
+use iced_native::{self, Background, Rectangle};
 use lyon_geom::{QuadraticBezierSegment, Scalar, Segment};
 use smallvec::{smallvec, SmallVec};
 use std::ops::Deref;
@@ -391,4 +391,23 @@ impl PathBuilderExt for iced_graphics::widget::canvas::path::Builder {
             self.line_to(vertex.into_array().into());
         }
     }
+}
+
+/// Convert an RGBA integer (0xRRGGBBAA) into Color
+pub const fn rgba(rgba: u32) -> Color {
+    Color::from_rgba(
+        ((rgba >> 24) & 0xFF) as f32 / 0xFF as f32,
+        ((rgba >> 16) & 0xFF) as f32 / 0xFF as f32,
+        ((rgba >> 8) & 0xFF) as f32 / 0xFF as f32,
+        ((rgba >> 0) & 0xFF) as f32 / 0xFF as f32,
+    )
+}
+
+/// Convert an RGB integer (0xRRGGBB) into Color
+pub const fn rgb(rgb: u32) -> Color {
+    Color::from_rgb(
+        ((rgb >> 16) & 0xFF) as f32 / 0xFF as f32,
+        ((rgb >> 8) & 0xFF) as f32 / 0xFF as f32,
+        ((rgb >> 0) & 0xFF) as f32 / 0xFF as f32,
+    )
 }

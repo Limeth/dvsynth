@@ -1,8 +1,14 @@
-use super::*;
-use crate::style;
-use iced::pick_list::{PickList, State as PickListState};
-use iced::text_input::{State as TextInputState, TextInput};
-use iced::{Align, Length, Row};
+use crate::graph::ApplicationContext;
+use crate::{
+    node::{
+        behaviour::{ExecutionContext, NodeBehaviour, NodeCommand, NodeEvent},
+        Channel, NodeConfiguration, PrimitiveChannelType,
+    },
+    style::Theme,
+};
+use byteorder::{LittleEndian, WriteBytesExt};
+use iced::Element;
+use std::io::Cursor;
 
 #[derive(Default)]
 pub struct CounterNodeBehaviour;
@@ -25,28 +31,23 @@ impl NodeBehaviour for CounterNodeBehaviour {
         }
     }
 
-    fn view(&mut self, theme: &dyn Theme) -> Option<Element<Self::Message>> {
+    fn view(&mut self, _theme: &dyn Theme) -> Option<Element<Self::Message>> {
         None
     }
 
     fn create_state_initializer(&self) -> Option<Self::FnStateInitializer> {
-        Some(Box::new(|_context: &ExecutionContext| State::default()))
+        Some(Box::new(|_context: &ApplicationContext| State::default()))
     }
 
     fn create_executor(&self) -> Self::FnExecutor {
-        Box::new(
-            |_context: &ExecutionContext,
-             state: Option<&mut Self::State>,
-             _inputs: &ChannelValueRefs,
-             outputs: &mut ChannelValues| {
-                let state = state.unwrap();
-                let mut cursor = Cursor::new(outputs[0].as_mut());
+        Box::new(|mut context: ExecutionContext<'_, State>| {
+            let state = context.state.take().unwrap();
+            let mut cursor = Cursor::new(context.outputs[0].as_mut());
 
-                cursor.write_u32::<LittleEndian>(state.count).unwrap();
+            cursor.write_u32::<LittleEndian>(state.count).unwrap();
 
-                state.count += 1;
-            },
-        )
+            state.count += 1;
+        })
     }
 }
 

@@ -1,10 +1,19 @@
-use super::*;
-use crate::graph::{ListDescriptor, OwnedRefMut};
-use crate::style::{self, Themeable};
-use iced::button::{Button, State as ButtonState};
-use iced::pick_list::{PickList, State as PickListState};
-use iced::text_input::{State as TextInputState, TextInput};
-use iced::{Align, Column, Length, Row, Text};
+use crate::graph::{ListAllocation, ListDescriptor, OwnedRefMut};
+use crate::node::ListChannelType;
+use crate::{
+    node::{
+        behaviour::{ExecutionContext, NodeBehaviour, NodeCommand, NodeEvent},
+        Channel, NodeConfiguration, PrimitiveChannelType,
+    },
+    style::{Theme, Themeable},
+};
+use iced::{
+    button::{self, Button},
+    pick_list::{self, PickList},
+    Element, Text,
+};
+use iced::{Align, Length, Row};
+use std::io::{Cursor, Write};
 use std::num::NonZeroUsize;
 
 #[derive(Debug, Clone)]
@@ -19,9 +28,9 @@ impl_node_behaviour_message!(ListConstructorNodeMessage);
 pub struct ListConstructorNodeBehaviour {
     ty: PrimitiveChannelType,
     channel_count: NonZeroUsize,
-    pick_list_state: PickListState<PrimitiveChannelType>,
-    button_add_state: ButtonState,
-    button_remove_state: ButtonState,
+    pick_list_state: pick_list::State<PrimitiveChannelType>,
+    button_add_state: button::State,
+    button_remove_state: button::State,
 }
 
 impl Default for ListConstructorNodeBehaviour {
@@ -120,19 +129,13 @@ impl NodeBehaviour for ListConstructorNodeBehaviour {
 
     fn create_executor(&self) -> Self::FnExecutor {
         let ty = self.ty;
-        Box::new(
-            move |context: &ExecutionContext,
-                  _state: Option<&mut Self::State>,
-                  inputs: &ChannelValueRefs,
-                  outputs: &mut ChannelValues| {
-                let mut cursor = Cursor::new(outputs[0].as_mut());
-                let list: OwnedRefMut<ListAllocation> =
-                    context.allocate(ListDescriptor { item_type: ty.into() });
+        Box::new(move |context: ExecutionContext<'_, ()>| {
+            let list: OwnedRefMut<ListAllocation> = context.allocate(ListDescriptor { item_type: ty.into() });
+            let mut cursor = Cursor::new(context.outputs[0].as_mut());
 
-                for input in inputs.values.iter() {
-                    cursor.write(input).unwrap();
-                }
-            },
-        )
+            for input in context.inputs.values.iter() {
+                cursor.write(input).unwrap();
+            }
+        })
     }
 }

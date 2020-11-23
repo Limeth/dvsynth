@@ -1,4 +1,11 @@
-use crate::node::*;
+use crate::node::behaviour::{
+    AllocatorHandle, ExecutionContext, MainThreadTask, NodeBehaviourContainer, NodeCommand,
+    NodeEventContainer, NodeExecutorContainer, NodeExecutorState, NodeStateInitializerContainer,
+};
+use crate::node::ty::ChannelTypeTrait;
+use crate::node::{
+    AllocationPointer, ChannelDirection, ChannelType, ChannelValueRefs, ChannelValues, NodeConfiguration,
+};
 use crate::style::{self, consts, Theme, Themeable};
 use crate::widgets::{
     node::FloatingPanesBehaviour, FloatingPane, FloatingPaneBehaviourData, FloatingPaneBehaviourState,
@@ -8,18 +15,14 @@ use crate::ApplicationFlags;
 use crate::Message;
 use crate::NodeMessage;
 use arc_swap::ArcSwapOption;
-use dyn_clone::DynClone;
 use iced::{Element, Settings};
 use iced_futures::futures;
 use iced_wgpu::wgpu;
-use iced_winit::winit::event_loop::EventLoopWindowTarget;
-use iced_winit::winit::platform::desktop::EventLoopExtDesktop;
-use iced_winit::winit::window::{Window, WindowAttributes};
+use lazy_static::lazy_static;
 use petgraph::{stable_graph::StableGraph, visit::EdgeRef, Directed, Direction};
 use sharded_slab::{Clear, Pool};
 use std::any::Any;
 use std::cell::RefCell;
-use std::cell::UnsafeCell;
 use std::collections::{HashMap, HashSet};
 use std::convert::TryInto;
 use std::fmt::Debug;
@@ -57,7 +60,7 @@ pub struct PreparedExecution {
 static_assertions::assert_impl_all!(Arc<PreparedExecution>: Send, Sync);
 
 impl PreparedExecution {
-    fn from(schedule: &Schedule, context: &mut ExecutionContext, mut previous: Option<Self>) -> Self {
+    fn from(schedule: &Schedule, context: &mut ApplicationContext, mut previous: Option<Self>) -> Self {
         let previous_node_index_map: Option<HashMap<NodeIndex, usize>> =
             previous.as_ref().map(|prepared_execution| {
                 prepared_execution
@@ -102,7 +105,7 @@ impl PreparedExecution {
 }
 
 impl PreparedExecution {
-    pub fn execute(&mut self, schedule: &Schedule, context: &mut ExecutionContext) {
+    pub fn execute(&mut self, schedule: &Schedule, context: &mut ApplicationContext) {
         for (task_index, task) in schedule.tasks.iter().enumerate() {
             let (tasks_preceding, tasks_following) = self.tasks.split_at_mut(task_index);
             let input_value_guards = task
@@ -124,10 +127,16 @@ impl PreparedExecution {
             };
 
             let current_task: &mut PreparedTask = &mut tasks_following[0].write().unwrap();
-            let output_values = &mut current_task.output_values;
             let task_state = current_task.state.as_mut().map(|state| state.as_mut());
+            let execution_context = ExecutionContext {
+                application_context: &context,
+                allocator_handle: Default::default(),
+                state: task_state,
+                inputs: &input_values,
+                outputs: &mut current_task.output_values,
+            };
 
-            (task.executor)(&context, task_state, &input_values, output_values);
+            (task.executor)(execution_context);
         }
     }
 }
@@ -219,7 +228,7 @@ impl ExecutionGraph {
 
         let ordered_node_indices = match petgraph::algo::toposort(&self.graph, None) {
             Ok(ordered_node_indices) => ordered_node_indices,
-            Err(cycle) => {
+            Err(_cycle) => {
                 return Err(());
             }
         };
@@ -377,7 +386,7 @@ impl Deref for TextureAllocation {
 }
 
 pub struct ListDescriptor {
-    item_type: ChannelType,
+    pub item_type: ChannelType,
 }
 
 pub struct ListAllocation {
@@ -448,13 +457,11 @@ impl DerefMut for ListAllocation {
     }
 }
 
-#[derive(Eq, PartialEq, Debug, Clone, Copy)]
-#[repr(transparent)]
-pub struct AllocationPointer {
-    index: u64,
-}
-
 impl AllocationPointer {
+    fn new(index: u64) -> Self {
+        Self { index }
+    }
+
     fn as_u64(&self) -> u64 {
         self.index
     }
@@ -464,9 +471,40 @@ impl AllocationPointer {
     }
 }
 
+/// Safety: Access safety must be ensured externally by the execution graph.
+struct AllocationCell<T: ?Sized>(Box<T>);
+
+impl<T: ?Sized> AllocationCell<T> {
+    pub fn new(value: T) -> Self
+    where T: Sized {
+        Self(Box::new(value))
+    }
+
+    /// Safety: Access safety must be ensured externally by the execution graph.
+    pub unsafe fn as_mut_ptr(&self) -> *mut T {
+        self.0.as_ref() as *const T as *mut T
+    }
+
+    /// Safety: Access safety must be ensured externally by the execution graph.
+    pub unsafe fn as_ptr(&self) -> *const T {
+        self.0.as_ref() as *const T
+    }
+}
+
+impl<T: ?Sized> From<Box<T>> for AllocationCell<T> {
+    fn from(other: Box<T>) -> Self {
+        Self(other)
+    }
+}
+
+unsafe impl<T: ?Sized> Send for AllocationCell<T> {}
+unsafe impl<T: ?Sized> Sync for AllocationCell<T> {}
+
+pub trait AllocatedType = Any + Send + Sync;
+
 #[derive(Default)]
 struct Allocation {
-    ptr: Option<Box<UnsafeCell<dyn Any + Send + Sync>>>,
+    ptr: Option<AllocationCell<dyn AllocatedType>>,
     refcount: AtomicUsize,
 }
 
@@ -484,14 +522,16 @@ pub struct Allocator {
 
 impl Allocator {
     pub fn get() -> &'static Allocator {
-        static INSTANCE: Allocator = Allocator::default();
-        &INSTANCE
+        lazy_static! {
+            static ref INSTANCE: Allocator = Allocator::default();
+        }
+        &*INSTANCE
     }
 
     /// Allocates the value with refcount set to 1.
     fn allocate<T: Any + Send + Sync>(&self, value: T) -> AllocationPointer {
         let mut allocation = self.allocations.create().unwrap();
-        allocation.ptr = Some(Box::new(UnsafeCell::new(value)));
+        allocation.ptr = Some(AllocationCell::from(Box::new(value) as Box<dyn AllocatedType>));
 
         AllocationPointer { index: allocation.key() as u64 }
     }
@@ -550,27 +590,25 @@ impl Allocator {
     }
 
     /// Safety: Access safety must be ensured externally by the execution graph.
-    unsafe fn deref(&self, allocation_ptr: AllocationPointer) -> Option<&(dyn Any + Send + Sync)> {
+    unsafe fn deref(&self, allocation_ptr: AllocationPointer) -> Option<&dyn AllocatedType> {
         self.allocations.get(allocation_ptr.as_usize()).map(|ref_guard| {
             let allocation = ref_guard.deref();
             let ptr = allocation.ptr.as_ref().expect("Unwrapping a cleared allocation.");
 
-            &*ptr.as_ref().get()
+            &*ptr.as_ptr()
         })
     }
 
     /// Safety: Access safety must be ensured externally by the execution graph.
-    unsafe fn deref_mut(&self, allocation_ptr: AllocationPointer) -> Option<&mut (dyn Any + Send + Sync)> {
+    unsafe fn deref_mut(&self, allocation_ptr: AllocationPointer) -> Option<&mut dyn AllocatedType> {
         self.allocations.get(allocation_ptr.as_usize()).map(|ref_guard| {
             let allocation = ref_guard.deref();
             let ptr = allocation.ptr.as_ref().expect("Unwrapping a cleared allocation.");
 
-            &mut *ptr.as_ref().get()
+            &mut *ptr.as_mut_ptr()
         })
     }
 }
-
-trait AllocatedType = Any + Send + Sync;
 
 /// A refcounted mutable reference to `T`.
 #[repr(transparent)]
@@ -580,29 +618,29 @@ pub struct OwnedRefMut<T: AllocatedType> {
 }
 
 impl<T: AllocatedType + Default> OwnedRefMut<T> {
-    pub fn allocate_default(_context: &ExecutionContext) -> Self {
+    pub fn allocate_default(_handle: AllocatorHandle<'_>) -> Self {
         Self { ptr: Allocator::get().allocate(T::default()), __marker: Default::default() }
     }
 }
 
 impl<T: AllocatedType> OwnedRefMut<T> {
-    pub fn allocate<D>(descriptor: D, _context: &ExecutionContext) -> Self
+    pub fn allocate<D>(descriptor: D, _handle: AllocatorHandle<'_>) -> Self
     where T: From<D> {
         Self { ptr: Allocator::get().allocate(T::from(descriptor)), __marker: Default::default() }
     }
 
-    pub fn to_owned_ref(self, _context: &ExecutionContext) -> OwnedRef<T> {
+    pub fn to_owned_ref(self, _handle: AllocatorHandle<'_>) -> OwnedRef<T> {
         OwnedRef { ptr: self.ptr, __marker: Default::default() }
     }
 
-    pub fn to_mut(self, _context: &ExecutionContext) -> RefMut<'_, T> {
+    pub fn to_mut<'a>(self, _handle: AllocatorHandle<'a>) -> RefMut<'a, T> {
         Allocator::get()
             .refcount_add(self.ptr, -1)
             .expect("Could not decrement the refcount of an OwnedRefMut while converting to RefMut.");
         RefMut { ptr: self.ptr, __marker: Default::default() }
     }
 
-    pub fn to_ref(self, _context: &ExecutionContext) -> Ref<'_, T> {
+    pub fn to_ref<'a>(self, _handle: AllocatorHandle<'a>) -> Ref<'a, T> {
         Allocator::get()
             .refcount_add(self.ptr, -1)
             .expect("Could not decrement the refcount of an OwnedRefMut while converting to Ref.");
@@ -627,7 +665,7 @@ pub struct OwnedRef<T: AllocatedType> {
 }
 
 impl<T: AllocatedType> OwnedRef<T> {
-    pub fn to_ref(self, _context: &ExecutionContext) -> Ref<'_, T> {
+    pub fn to_ref<'a>(self, _handle: AllocatorHandle<'a>) -> Ref<'a, T> {
         Allocator::get()
             .refcount_add(self.ptr, -1)
             .expect("Could not decrement the refcount of an OwnedRefMut while converting to Ref.");
@@ -651,21 +689,21 @@ pub struct RefMut<'a, T: AllocatedType + 'a> {
 }
 
 impl<'a, T: AllocatedType> RefMut<'a, T> {
-    pub fn to_owned_mut(self, _context: &ExecutionContext) -> OwnedRefMut<T> {
+    pub fn to_owned_mut(self, _handle: AllocatorHandle<'a>) -> OwnedRefMut<T> {
         Allocator::get()
             .refcount_increase(self.ptr, 1)
             .expect("Could not increment the refcount of a RefMut while converting to OwnedRefMut.");
         OwnedRefMut { ptr: self.ptr, __marker: Default::default() }
     }
 
-    pub fn to_owned_ref(self, _context: &ExecutionContext) -> OwnedRef<T> {
+    pub fn to_owned_ref(self, _handle: AllocatorHandle<'a>) -> OwnedRef<T> {
         Allocator::get()
             .refcount_increase(self.ptr, 1)
             .expect("Could not increment the refcount of a RefMut while converting to OwnedRef.");
         OwnedRef { ptr: self.ptr, __marker: Default::default() }
     }
 
-    pub fn to_ref(self, _context: &ExecutionContext) -> Ref<'a, T> {
+    pub fn to_ref(self, _handle: AllocatorHandle<'a>) -> Ref<'a, T> {
         Ref { ptr: self.ptr, __marker: Default::default() }
     }
 }
@@ -679,7 +717,7 @@ pub struct Ref<'a, T: AllocatedType + 'a> {
 }
 
 impl<'a, T: AllocatedType> Ref<'a, T> {
-    pub fn to_owned_ref(self, _context: &ExecutionContext) -> OwnedRef<T> {
+    pub fn to_owned_ref(self, _handle: AllocatorHandle<'a>) -> OwnedRef<T> {
         Allocator::get()
             .refcount_increase(self.ptr, 1)
             .expect("Could not increment the refcount of a Ref while converting to OwnedRef.");
@@ -687,12 +725,12 @@ impl<'a, T: AllocatedType> Ref<'a, T> {
     }
 }
 
-pub struct ExecutionContext {
+pub struct ApplicationContext {
     pub main_thread_task_sender: Sender<Box<MainThreadTask>>,
     pub renderer: Renderer,
 }
 
-impl ExecutionContext {
+impl ApplicationContext {
     pub fn new(renderer: Renderer) -> (Self, Receiver<Box<MainThreadTask>>) {
         let (main_thread_task_sender, main_thread_task_receiver) = mpsc::channel();
         let context = Self { main_thread_task_sender, renderer };
@@ -702,32 +740,38 @@ impl ExecutionContext {
     pub fn from_settings(settings: &Settings<ApplicationFlags>) -> (Self, Receiver<Box<MainThreadTask>>) {
         Self::new(Renderer::new(settings))
     }
+}
 
+impl<'a, S: ?Sized> ExecutionContext<'a, S> {
     pub fn allocate_default<T: AllocatedType + Default>(&self) -> OwnedRefMut<T> {
-        OwnedRefMut::<T>::allocate_default(self)
+        OwnedRefMut::<T>::allocate_default(self.allocator_handle)
     }
 
     pub fn allocate<D, T: AllocatedType + From<D>>(&self, descriptor: D) -> OwnedRefMut<T> {
-        OwnedRefMut::<T>::allocate(descriptor, self)
+        OwnedRefMut::<T>::allocate(descriptor, self.allocator_handle)
     }
 }
 
 pub struct GraphExecutor {
-    execution_context: ExecutionContext,
+    application_context: ApplicationContext,
     active_schedule: Arc<ArcSwapOption<Schedule>>,
 }
 
 impl GraphExecutor {
-    pub fn new(execution_context: ExecutionContext, active_schedule: Arc<ArcSwapOption<Schedule>>) -> Self {
-        Self { active_schedule, execution_context }
+    pub fn new(
+        application_context: ApplicationContext,
+        active_schedule: Arc<ArcSwapOption<Schedule>>,
+    ) -> Self
+    {
+        Self { active_schedule, application_context }
     }
 
     pub fn spawn(
-        execution_context: ExecutionContext,
+        application_context: ApplicationContext,
         active_schedule: Arc<ArcSwapOption<Schedule>>,
     ) -> std::thread::JoinHandle<()>
     {
-        thread::spawn(move || Self::new(execution_context, active_schedule).run())
+        thread::spawn(move || Self::new(application_context, active_schedule).run())
     }
 
     pub fn run(mut self) {
@@ -741,14 +785,14 @@ impl GraphExecutor {
                 {
                     prepared_execution = Some(PreparedExecution::from(
                         &active_schedule,
-                        &mut self.execution_context,
+                        &mut self.application_context,
                         prepared_execution.or(last_prepared_execution.take()),
                     ));
                 }
 
                 let prepared_execution = prepared_execution.as_mut().unwrap();
 
-                prepared_execution.execute(active_schedule, &mut self.execution_context);
+                prepared_execution.execute(active_schedule, &mut self.application_context);
             } else {
                 if let Some(prepared_execution) = prepared_execution.take() {
                     last_prepared_execution = Some(prepared_execution);
