@@ -16,10 +16,14 @@ use iced_winit::winit::event_loop::EventLoopWindowTarget;
 use iced_winit::winit::platform::desktop::EventLoopExtDesktop;
 use iced_winit::winit::window::{Window, WindowAttributes};
 use petgraph::{stable_graph::StableGraph, visit::EdgeRef, Directed, Direction};
+use sharded_slab::{Clear, Pool};
 use std::any::Any;
 use std::cell::RefCell;
+use std::cell::UnsafeCell;
 use std::collections::{HashMap, HashSet};
+use std::convert::TryInto;
 use std::fmt::Debug;
+use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
@@ -372,18 +376,23 @@ impl Deref for TextureAllocation {
     }
 }
 
-pub struct ListAllocation {
+pub struct ListDescriptor {
     item_type: ChannelType,
+}
+
+pub struct ListAllocation {
+    descriptor: ListDescriptor,
     data: Vec<u8>,
     item_size: usize,
 }
 
-impl ListAllocation {
-    pub fn new(item_type: impl Into<ChannelType>) -> Self {
-        let item_type = item_type.into();
-        Self { item_size: item_type.value_size(), item_type, data: Vec::new() }
+impl From<ListDescriptor> for ListAllocation {
+    fn from(descriptor: ListDescriptor) -> Self {
+        Self { item_size: descriptor.item_type.value_size(), descriptor, data: Vec::new() }
     }
+}
 
+impl ListAllocation {
     pub fn len(&self) -> usize {
         self.data.len() / self.item_size
     }
@@ -439,14 +448,14 @@ impl DerefMut for ListAllocation {
     }
 }
 
-#[derive(Eq, PartialEq, Debug)]
-#[repr(C)]
+#[derive(Eq, PartialEq, Debug, Clone, Copy)]
+#[repr(transparent)]
 pub struct AllocationPointer {
-    index: u32,
+    index: u64,
 }
 
 impl AllocationPointer {
-    fn as_u32(&self) -> u32 {
+    fn as_u64(&self) -> u64 {
         self.index
     }
 
@@ -455,60 +464,63 @@ impl AllocationPointer {
     }
 }
 
-impl From<usize> for AllocationPointer {
-    fn from(index: usize) -> Self {
-        Self { index: index as u32 }
-    }
-}
-
+#[derive(Default)]
 struct Allocation {
-    ptr: Box<dyn Any>,
+    ptr: Option<Box<UnsafeCell<dyn Any + Send + Sync>>>,
     refcount: AtomicUsize,
 }
 
-impl Allocation {
-    pub fn new<T: Any>(value: T) -> Self {
-        Self { ptr: Box::new(value), refcount: AtomicUsize::new(1) }
+impl Clear for Allocation {
+    fn clear(&mut self) {
+        self.ptr = None;
+        self.refcount.store(1, Ordering::SeqCst);
     }
 }
 
+#[derive(Default)]
 pub struct Allocator {
-    allocations: Vec<Option<Allocation>>,
-    freed_allocation_indices: Vec<usize>,
+    allocations: Pool<Allocation>,
 }
 
 impl Allocator {
-    pub fn allocate<T: Any>(&mut self, allocation: T) -> AllocationPointer {
-        let allocation = Some(Allocation::new(allocation));
-
-        if let Some(freed_allocation_index) = self.freed_allocation_indices.pop() {
-            self.allocations[freed_allocation_index] = allocation;
-            freed_allocation_index
-        } else {
-            self.allocations.push(allocation);
-            self.allocations.len() - 1
-        }
-        .into()
+    pub fn get() -> &'static Allocator {
+        static INSTANCE: Allocator = Allocator::default();
+        &INSTANCE
     }
 
-    pub fn deallocate(&mut self, allocation_ptr: AllocationPointer) {
-        self.allocations[allocation_ptr.as_usize()] = None;
-        self.freed_allocation_indices.push(allocation_ptr.as_usize());
+    /// Allocates the value with refcount set to 1.
+    fn allocate<T: Any + Send + Sync>(&self, value: T) -> AllocationPointer {
+        let mut allocation = self.allocations.create().unwrap();
+        allocation.ptr = Some(Box::new(UnsafeCell::new(value)));
+
+        AllocationPointer { index: allocation.key() as u64 }
+    }
+
+    fn deallocate(&self, allocation_ptr: AllocationPointer) {
+        self.allocations.clear(allocation_ptr.as_usize());
+    }
+
+    fn refcount_increase(&self, allocation_ptr: AllocationPointer, delta: usize) -> Result<(), ()> {
+        if let Ok(delta) = delta.try_into() {
+            self.refcount_add(allocation_ptr, delta).map(|_| ())
+        } else {
+            Err(())
+        }
     }
 
     /// Add `delta` to refcount and deallocate, if zero.
     /// Returns `Ok(true)` when the allocation has been freed,
     /// `Ok(false)` resulting refcount is larger than 0,
     /// or `Err` if no such allocation exists.
-    pub fn refcount_update(&mut self, allocation_ptr: AllocationPointer, delta: isize) -> Result<bool, ()> {
-        if let Some(allocation) = self.allocations[allocation_ptr.as_usize()].as_ref() {
+    fn refcount_add(&self, allocation_ptr: AllocationPointer, delta: isize) -> Result<bool, ()> {
+        if let Some(allocation) = self.allocations.get(allocation_ptr.as_usize()) {
             let refcount = &allocation.refcount;
             if delta > 0 {
                 refcount.fetch_add(delta as usize, Ordering::SeqCst);
                 Ok(false)
             } else if delta < 0 {
                 let mut refcount_before_swap = refcount.load(Ordering::SeqCst);
-                let refcount_new;
+                let mut refcount_new;
 
                 loop {
                     refcount_new = refcount_before_swap.saturating_sub((-delta) as usize);
@@ -537,34 +549,166 @@ impl Allocator {
         }
     }
 
-    pub fn deref(&self, allocation_ptr: AllocationPointer) -> Option<&Box<dyn Any>> {
-        self.allocations
-            .get(allocation_ptr.as_usize())
-            .and_then(|allocation| allocation.as_ref().map(|allocation| &allocation.ptr))
+    /// Safety: Access safety must be ensured externally by the execution graph.
+    unsafe fn deref(&self, allocation_ptr: AllocationPointer) -> Option<&(dyn Any + Send + Sync)> {
+        self.allocations.get(allocation_ptr.as_usize()).map(|ref_guard| {
+            let allocation = ref_guard.deref();
+            let ptr = allocation.ptr.as_ref().expect("Unwrapping a cleared allocation.");
+
+            &*ptr.as_ref().get()
+        })
     }
 
-    pub fn deref_mut(&mut self, allocation_ptr: AllocationPointer) -> Option<&mut Box<dyn Any>> {
-        self.allocations
-            .get_mut(allocation_ptr.as_usize())
-            .and_then(|allocation| allocation.as_mut().map(|allocation| &mut allocation.ptr))
+    /// Safety: Access safety must be ensured externally by the execution graph.
+    unsafe fn deref_mut(&self, allocation_ptr: AllocationPointer) -> Option<&mut (dyn Any + Send + Sync)> {
+        self.allocations.get(allocation_ptr.as_usize()).map(|ref_guard| {
+            let allocation = ref_guard.deref();
+            let ptr = allocation.ptr.as_ref().expect("Unwrapping a cleared allocation.");
+
+            &mut *ptr.as_ref().get()
+        })
+    }
+}
+
+trait AllocatedType = Any + Send + Sync;
+
+/// A refcounted mutable reference to `T`.
+#[repr(transparent)]
+pub struct OwnedRefMut<T: AllocatedType> {
+    ptr: AllocationPointer,
+    __marker: PhantomData<T>,
+}
+
+impl<T: AllocatedType + Default> OwnedRefMut<T> {
+    pub fn allocate_default(_context: &ExecutionContext) -> Self {
+        Self { ptr: Allocator::get().allocate(T::default()), __marker: Default::default() }
+    }
+}
+
+impl<T: AllocatedType> OwnedRefMut<T> {
+    pub fn allocate<D>(descriptor: D, _context: &ExecutionContext) -> Self
+    where T: From<D> {
+        Self { ptr: Allocator::get().allocate(T::from(descriptor)), __marker: Default::default() }
+    }
+
+    pub fn to_owned_ref(self, _context: &ExecutionContext) -> OwnedRef<T> {
+        OwnedRef { ptr: self.ptr, __marker: Default::default() }
+    }
+
+    pub fn to_mut(self, _context: &ExecutionContext) -> RefMut<'_, T> {
+        Allocator::get()
+            .refcount_add(self.ptr, -1)
+            .expect("Could not decrement the refcount of an OwnedRefMut while converting to RefMut.");
+        RefMut { ptr: self.ptr, __marker: Default::default() }
+    }
+
+    pub fn to_ref(self, _context: &ExecutionContext) -> Ref<'_, T> {
+        Allocator::get()
+            .refcount_add(self.ptr, -1)
+            .expect("Could not decrement the refcount of an OwnedRefMut while converting to Ref.");
+        Ref { ptr: self.ptr, __marker: Default::default() }
+    }
+}
+
+impl<T: AllocatedType> Drop for OwnedRefMut<T> {
+    fn drop(&mut self) {
+        Allocator::get()
+            .refcount_add(self.ptr, -1)
+            .expect("Could not decrement the refcount of an OwnedRefMut while dropping.");
+    }
+}
+
+/// A refcounted shared reference to `T`.
+#[derive(Clone)]
+#[repr(transparent)]
+pub struct OwnedRef<T: AllocatedType> {
+    ptr: AllocationPointer,
+    __marker: PhantomData<T>,
+}
+
+impl<T: AllocatedType> OwnedRef<T> {
+    pub fn to_ref(self, _context: &ExecutionContext) -> Ref<'_, T> {
+        Allocator::get()
+            .refcount_add(self.ptr, -1)
+            .expect("Could not decrement the refcount of an OwnedRefMut while converting to Ref.");
+        Ref { ptr: self.ptr, __marker: Default::default() }
+    }
+}
+
+impl<T: AllocatedType> Drop for OwnedRef<T> {
+    fn drop(&mut self) {
+        Allocator::get()
+            .refcount_add(self.ptr, -1)
+            .expect("Could not decrement the refcount of an OwnedRef while dropping.");
+    }
+}
+
+/// A non-refcounted mutable reference to `T`.
+#[repr(transparent)]
+pub struct RefMut<'a, T: AllocatedType + 'a> {
+    ptr: AllocationPointer,
+    __marker: PhantomData<(&'a mut T, *mut T)>,
+}
+
+impl<'a, T: AllocatedType> RefMut<'a, T> {
+    pub fn to_owned_mut(self, _context: &ExecutionContext) -> OwnedRefMut<T> {
+        Allocator::get()
+            .refcount_increase(self.ptr, 1)
+            .expect("Could not increment the refcount of a RefMut while converting to OwnedRefMut.");
+        OwnedRefMut { ptr: self.ptr, __marker: Default::default() }
+    }
+
+    pub fn to_owned_ref(self, _context: &ExecutionContext) -> OwnedRef<T> {
+        Allocator::get()
+            .refcount_increase(self.ptr, 1)
+            .expect("Could not increment the refcount of a RefMut while converting to OwnedRef.");
+        OwnedRef { ptr: self.ptr, __marker: Default::default() }
+    }
+
+    pub fn to_ref(self, _context: &ExecutionContext) -> Ref<'a, T> {
+        Ref { ptr: self.ptr, __marker: Default::default() }
+    }
+}
+
+/// A non-refcounted shared reference to `T`.
+#[derive(Clone, Copy)]
+#[repr(transparent)]
+pub struct Ref<'a, T: AllocatedType + 'a> {
+    ptr: AllocationPointer,
+    __marker: PhantomData<(&'a T, *const T)>,
+}
+
+impl<'a, T: AllocatedType> Ref<'a, T> {
+    pub fn to_owned_ref(self, _context: &ExecutionContext) -> OwnedRef<T> {
+        Allocator::get()
+            .refcount_increase(self.ptr, 1)
+            .expect("Could not increment the refcount of a Ref while converting to OwnedRef.");
+        OwnedRef { ptr: self.ptr, __marker: Default::default() }
     }
 }
 
 pub struct ExecutionContext {
     pub main_thread_task_sender: Sender<Box<MainThreadTask>>,
     pub renderer: Renderer,
-    pub allocator: Allocator,
 }
 
 impl ExecutionContext {
     pub fn new(renderer: Renderer) -> (Self, Receiver<Box<MainThreadTask>>) {
         let (main_thread_task_sender, main_thread_task_receiver) = mpsc::channel();
-        let context = Self { main_thread_task_sender, renderer, allocators: Defualt::default() };
+        let context = Self { main_thread_task_sender, renderer };
         (context, main_thread_task_receiver)
     }
 
     pub fn from_settings(settings: &Settings<ApplicationFlags>) -> (Self, Receiver<Box<MainThreadTask>>) {
         Self::new(Renderer::new(settings))
+    }
+
+    pub fn allocate_default<T: AllocatedType + Default>(&self) -> OwnedRefMut<T> {
+        OwnedRefMut::<T>::allocate_default(self)
+    }
+
+    pub fn allocate<D, T: AllocatedType + From<D>>(&self, descriptor: D) -> OwnedRefMut<T> {
+        OwnedRefMut::<T>::allocate(descriptor, self)
     }
 }
 

@@ -548,6 +548,7 @@ dependencies = [
  "paste",
  "petgraph",
  "roots",
+ "sharded-slab",
  "smallvec",
  "static_assertions",
  "vek",
@@ -802,6 +803,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c31b6d751ae2c7f11320402d34e41349dd1016f8d5d45e48c4312bc8625af50c"
 dependencies = [
  "byteorder",
+]
+
+[[package]]
+name = "generator"
+version = "0.6.23"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8cdc09201b2e8ca1b19290cf7e65de2246b8e91fb6874279722189c4de7b94dc"
+dependencies = [
+ "cc",
+ "libc",
+ "log",
+ "rustc_version",
+ "winapi 0.3.9",
 ]
 
 [[package]]
@@ -1203,6 +1217,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "itoa"
+version = "0.4.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dc6f3ad7b9d11a0c00842ff8de1b60ee58661048eb8049ed33c73594f359d7e6"
+
+[[package]]
 name = "jni-sys"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1302,6 +1322,19 @@ name = "longest-increasing-subsequence"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b3bd0dd2cd90571056fdb71f6275fada10131182f84899f4b2a916e565d81d86"
+
+[[package]]
+name = "loom"
+version = "0.3.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a0e8460f2f2121162705187214720353c517b97bdfb3494c0b1e33d83ebe4bed"
+dependencies = [
+ "cfg-if",
+ "generator",
+ "scoped-tls",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "lyon"
@@ -1995,6 +2028,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "ryu"
+version = "1.0.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "71d301d4193d031abdd79ff7e3dd721168a9572ef3fe51a1517aba235bd8f86e"
+
+[[package]]
 name = "same-file"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2051,6 +2090,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_json"
+version = "1.0.59"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dcac07dbffa1c65e7f816ab9eba78eb142c6d44410f4eeba1e26e4f5dfa56b95"
+dependencies = [
+ "itoa",
+ "ryu",
+ "serde",
+]
+
+[[package]]
 name = "servo-fontconfig"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2079,6 +2129,16 @@ checksum = "2c4ccb6d0d32d277d3ef7dea86203d8210945eb7a45fba89dd445b3595dd0dfc"
 dependencies = [
  "cmake",
  "pkg-config",
+]
+
+[[package]]
+name = "sharded-slab"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7b4921be914e16899a80adefb821f8ddb7974e3f1250223575a44ed994882127"
+dependencies = [
+ "lazy_static",
+ "loom",
 ]
 
 [[package]]

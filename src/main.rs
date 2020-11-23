@@ -3,11 +3,13 @@
 #![feature(iterator_fold_self)]
 #![feature(trivial_bounds)]
 #![feature(associated_type_defaults)]
+#![feature(trait_alias)]
 //!
 //! Task list:
 //! * Window node:
 //!     * Make window size accessible only when resizable is false
 //!     * Fullscreen modes
+//! * Use `libloading` to load node implementations as cdylibs.
 //! * Mark invalid connections and cycles in the graph
 //! * Custom UI rendering:
 //!     * CPU Canvas (WASM) https://github.com/embedded-graphics/embedded-graphics
@@ -207,22 +209,28 @@ fn main() {
             Box::new(ConstantNodeBehaviour::new(84.0_f32)),
         ));
 
-        graph.add_node(NodeData::new(
-            "My Bin Op #1",
-            [410.0, 10.0],
-            Box::new(BinaryOpNodeBehaviour::default()),
-        ));
+        // graph.add_node(NodeData::new(
+        //     "My Bin Op #1",
+        //     [410.0, 10.0],
+        //     Box::new(BinaryOpNodeBehaviour::default()),
+        // ));
+
+        // graph.add_node(NodeData::new(
+        //     "My Window #1",
+        //     [610.0, 10.0],
+        //     Box::new(WindowNodeBehaviour::default()),
+        // ));
+
+        // graph.add_node(NodeData::new(
+        //     "My Array Constructor",
+        //     [10.0, 510.0],
+        //     Box::new(ArrayConstructorNodeBehaviour::default()),
+        // ));
 
         graph.add_node(NodeData::new(
-            "My Window #1",
-            [610.0, 10.0],
-            Box::new(WindowNodeBehaviour::default()),
-        ));
-
-        graph.add_node(NodeData::new(
-            "My Array Constructor",
-            [10.0, 510.0],
-            Box::new(ArrayConstructorNodeBehaviour::default()),
+            "My List Constructor",
+            [10.0, 710.0],
+            Box::new(ListConstructorNodeBehaviour::default()),
         ));
 
         graph.add_node(NodeData::new("My Debug", [210.0, 510.0], Box::new(DebugNodeBehaviour::default())));

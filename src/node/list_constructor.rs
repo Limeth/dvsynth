@@ -1,4 +1,5 @@
 use super::*;
+use crate::graph::{ListDescriptor, OwnedRefMut};
 use crate::style::{self, Themeable};
 use iced::button::{Button, State as ButtonState};
 use iced::pick_list::{PickList, State as PickListState};
@@ -42,10 +43,7 @@ impl ListConstructorNodeBehaviour {
                 .into_iter()
                 .map(|channel_index| Channel::new(format!("item #{}", channel_index), self.ty))
                 .collect(),
-            channels_output: vec![Channel::new(
-                "array",
-                ListChannelType::new(self.ty, self.channel_count.get()),
-            )],
+            channels_output: vec![Channel::new("list", ListChannelType::new(self.ty))],
         })
     }
 }
@@ -128,11 +126,11 @@ impl NodeBehaviour for ListConstructorNodeBehaviour {
                   inputs: &ChannelValueRefs,
                   outputs: &mut ChannelValues| {
                 let mut cursor = Cursor::new(outputs[0].as_mut());
-
-                context.allocators.list.allocate(ListAllocation::new(ty));
+                let list: OwnedRefMut<ListAllocation> =
+                    context.allocate(ListDescriptor { item_type: ty.into() });
 
                 for input in inputs.values.iter() {
-                    cursor.write(input);
+                    cursor.write(input).unwrap();
                 }
             },
         )

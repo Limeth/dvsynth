@@ -466,7 +466,7 @@ impl Display for ListChannelType {
 
 impl ChannelTypeTrait for ListChannelType {
     fn value_size(&self) -> usize {
-        std::mem::size_of::<AllocationPointer<ListAllocation>>()
+        std::mem::size_of::<AllocationPointer>()
     }
 
     fn is_abi_compatible(&self, other: &Self) -> bool {
