@@ -2,7 +2,7 @@ use crate::node::PrimitiveChannelValue;
 use crate::{
     node::{
         behaviour::{ExecutionContext, NodeBehaviour, NodeCommand, NodeEvent},
-        Channel, NodeConfiguration, PrimitiveChannelType,
+        Channel, NodeConfiguration, PrimitiveType,
     },
     style::{Theme, Themeable},
 };
@@ -17,15 +17,15 @@ use std::ops::{Add, Div, Mul, Sub};
 
 #[derive(Debug, Clone)]
 pub enum BinaryOpMessage {
-    UpdateType(PrimitiveChannelType),
+    UpdateType(PrimitiveType),
     UpdateOp(BinaryOp),
 }
 
 impl_node_behaviour_message!(BinaryOpMessage);
 
 pub struct BinaryOpNodeBehaviour {
-    pub pick_list_ty_state: pick_list::State<PrimitiveChannelType>,
-    pub pick_list_ty_value: PrimitiveChannelType,
+    pub pick_list_ty_state: pick_list::State<PrimitiveType>,
+    pub pick_list_ty_value: PrimitiveType,
     pub pick_list_op_state: pick_list::State<BinaryOp>,
     pub op: BinaryOp,
 }
@@ -35,7 +35,7 @@ impl Default for BinaryOpNodeBehaviour {
         Self {
             op: BinaryOp::Add,
             pick_list_ty_state: Default::default(),
-            pick_list_ty_value: PrimitiveChannelType::F32,
+            pick_list_ty_value: PrimitiveType::F32,
             pick_list_op_state: Default::default(),
         }
     }
@@ -89,7 +89,7 @@ impl NodeBehaviour for BinaryOpNodeBehaviour {
                     Container::new(
                         PickList::new(
                             &mut self.pick_list_ty_state,
-                            &PrimitiveChannelType::VALUES[..],
+                            &PrimitiveType::VALUES[..],
                             Some(self.pick_list_ty_value),
                             |new_value| BinaryOpMessage::UpdateType(new_value),
                         )

@@ -26,11 +26,11 @@ impl ChannelDirection {
 pub struct Channel {
     pub title: String,
     pub description: Option<String>,
-    pub ty: ChannelType,
+    pub ty: TypeEnum,
 }
 
 impl Channel {
-    pub fn new(title: impl ToString, ty: impl Into<ChannelType>) -> Self {
+    pub fn new(title: impl ToString, ty: impl Into<TypeEnum>) -> Self {
         Self { title: title.to_string(), description: None, ty: ty.into() }
     }
 
@@ -43,7 +43,7 @@ impl Channel {
 pub struct ChannelRef<'a> {
     pub title: &'a str,
     pub description: Option<&'a str>,
-    pub ty: &'a ChannelType,
+    pub ty: &'a TypeEnum,
 }
 
 impl<'a> From<&'a Channel> for ChannelRef<'a> {
@@ -107,7 +107,7 @@ impl ChannelValue {
 }
 
 impl ChannelValue {
-    pub fn zeroed(ty: &ChannelType) -> Self {
+    pub fn zeroed(ty: &TypeEnum) -> Self {
         Self { data: vec![0_u8; ty.value_size()].into_boxed_slice() }
     }
 }

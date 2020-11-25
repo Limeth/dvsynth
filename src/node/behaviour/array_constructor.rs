@@ -1,7 +1,7 @@
 use crate::{
     node::{
         behaviour::{ExecutionContext, NodeBehaviour, NodeCommand, NodeEvent},
-        ArrayChannelType, Channel, NodeConfiguration, PrimitiveChannelType,
+        ArrayType, Channel, NodeConfiguration, PrimitiveType,
     },
     style::{self, Themeable},
 };
@@ -17,7 +17,7 @@ use style::Theme;
 
 #[derive(Debug, Clone)]
 pub enum ArrayConstructorNodeMessage {
-    UpdateType(PrimitiveChannelType),
+    UpdateType(PrimitiveType),
     AddChannel,
     RemoveChannel,
 }
@@ -25,9 +25,9 @@ pub enum ArrayConstructorNodeMessage {
 impl_node_behaviour_message!(ArrayConstructorNodeMessage);
 
 pub struct ArrayConstructorNodeBehaviour {
-    ty: PrimitiveChannelType,
+    ty: PrimitiveType,
     channel_count: NonZeroUsize,
-    pick_list_state: pick_list::State<PrimitiveChannelType>,
+    pick_list_state: pick_list::State<PrimitiveType>,
     button_add_state: ButtonState,
     button_remove_state: ButtonState,
 }
@@ -35,7 +35,7 @@ pub struct ArrayConstructorNodeBehaviour {
 impl Default for ArrayConstructorNodeBehaviour {
     fn default() -> Self {
         Self {
-            ty: PrimitiveChannelType::F32,
+            ty: PrimitiveType::F32,
             channel_count: unsafe { NonZeroUsize::new_unchecked(1) },
             pick_list_state: Default::default(),
             button_add_state: Default::default(),
@@ -51,10 +51,7 @@ impl ArrayConstructorNodeBehaviour {
                 .into_iter()
                 .map(|channel_index| Channel::new(format!("item #{}", channel_index), self.ty))
                 .collect(),
-            channels_output: vec![Channel::new(
-                "array",
-                ArrayChannelType::new(self.ty, self.channel_count.get()),
-            )],
+            channels_output: vec![Channel::new("array", ArrayType::new(self.ty, self.channel_count.get()))],
         })
     }
 }
@@ -102,7 +99,7 @@ impl NodeBehaviour for ArrayConstructorNodeBehaviour {
                 .push(
                     PickList::new(
                         &mut self.pick_list_state,
-                        &PrimitiveChannelType::VALUES[..],
+                        &PrimitiveType::VALUES[..],
                         Some(self.ty),
                         |new_value| ArrayConstructorNodeMessage::UpdateType(new_value),
                     )

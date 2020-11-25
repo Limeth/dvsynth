@@ -2,7 +2,7 @@ use crate::graph::ApplicationContext;
 use crate::{
     node::{
         behaviour::{ExecutionContext, NodeBehaviour, NodeCommand, NodeEvent},
-        Channel, NodeConfiguration, PrimitiveChannelType,
+        Channel, NodeConfiguration, PrimitiveType,
     },
     style::Theme,
 };
@@ -25,7 +25,7 @@ impl NodeBehaviour for CounterNodeBehaviour {
         match event {
             NodeEvent::Update => vec![NodeCommand::Configure(NodeConfiguration {
                 channels_input: vec![],
-                channels_output: vec![Channel::new("count", PrimitiveChannelType::U32)],
+                channels_output: vec![Channel::new("count", PrimitiveType::U32)],
             })],
             NodeEvent::Message(_) => vec![],
         }

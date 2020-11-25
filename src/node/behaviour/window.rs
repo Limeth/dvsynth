@@ -168,8 +168,8 @@ impl Default for WindowNodeBehaviour {
 impl WindowNodeBehaviour {
     pub fn get_configure_command(&self) -> NodeCommand {
         NodeCommand::Configure(NodeConfiguration {
-            channels_input: vec![/*Channel::new("framebuffer", TextureChannelType {})*/],
-            channels_output: vec![/*Channel::new("framebuffer", TextureChannelType {})*/],
+            channels_input: vec![/*Channel::new("framebuffer", TextureTypeEnum {})*/],
+            channels_output: vec![/*Channel::new("framebuffer", TextureTypeEnum {})*/],
         })
     }
 }

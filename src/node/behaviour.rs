@@ -1,12 +1,17 @@
-use crate::graph::ApplicationContext;
+use crate::graph::alloc::{Allocation, AllocationRefGuard, Allocator, TaskRefCounter};
+use crate::graph::{ApplicationContext, DynTypeAllocator, NodeIndex};
 use crate::node::NodeConfiguration;
 use crate::node::{ChannelValueRefs, ChannelValues};
 use crate::style::Theme;
 use downcast_rs::{impl_downcast, Downcast};
 use iced::Element;
 use iced_winit::winit::event_loop::EventLoopWindowTarget;
+use std::cell::RefCell;
+use std::collections::hash_map::Entry;
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::marker::PhantomData;
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 pub use array_constructor::*;
@@ -16,6 +21,17 @@ pub use counter::*;
 pub use debug::*;
 pub use list_constructor::*;
 pub use window::*;
+
+use super::{AllocationPointer, DowncastFromTypeEnum, OwnedRefMut, RefExt, RefMutExt, TypeEnum, TypeTrait};
+
+pub struct Input {
+    pub data: Box<[u8]>,
+    pub ty: TypeEnum,
+}
+
+pub struct Inputs {}
+
+pub struct Outputs {}
 
 pub enum NodeCommand {
     Configure(NodeConfiguration),
@@ -80,15 +96,88 @@ pub trait NodeExecutorState: Downcast + Debug + Send + Sync {}
 impl<T> NodeExecutorState for T where T: Downcast + Debug + Send + Sync {}
 impl_downcast!(NodeExecutorState);
 
-#[derive(Default, Copy, Clone)]
+/// Makes it possible for tasks (nodes) to dynamically allocate data
+/// that can be shared with other tasks via channels.
+///
+///// It is `!Send` and `!Sync` so that we can guarantee the borrowing model, that:
+///// * a mutable reference can be held by up to one task;
+///// * a shared reference can be held by multiple tasks.
+/////
+///// If one could allocate values on or send them to another thread,
+///// we would not be able to guarantee safe access to the underlying data.
+#[derive(Default)]
 pub struct AllocatorHandle<'a> {
-    __marker: PhantomData<&'a ()>,
+    pub(crate) ref_resolver: TaskRefResolver<'a>,
+    pub(crate) node: NodeIndex,
+    // __marker: PhantomData<&'a ()>,
 }
 
-static_assertions::const_assert_eq!(std::mem::size_of::<AllocatorHandle<'_>>(), 0);
+#[derive(Default)]
+pub(crate) struct TaskRefResolver<'a> {
+    pub(crate) ref_guards: HashMap<AllocationPointer, AllocationRefGuard<'a>>,
+}
+
+// static_assertions::const_assert_eq!(std::mem::size_of::<AllocatorHandle<'_>>(), 0);
+
+impl<'a> !Send for AllocatorHandle<'a> {}
+impl<'a> !Sync for AllocatorHandle<'a> {}
+
+impl<'a> AllocatorHandle<'a> {
+    // pub fn allocate_default<T: TypeTrait + Default>(self) -> OwnedRefMut<T> {
+    //     OwnedRefMut::<T>::allocate_default(self)
+    // }
+
+    pub fn allocate<T: DynTypeAllocator>(&self, descriptor: T::Descriptor) -> OwnedRefMut<T> {
+        OwnedRefMut::<T>::allocate(descriptor, &self)
+    }
+
+    pub(crate) fn deref<T: DynTypeAllocator + DowncastFromTypeEnum>(
+        &'a mut self,
+        reference: &dyn RefExt<T>,
+    ) -> (&'a T::DynAlloc, &'a T)
+    {
+        match self.ref_resolver.ref_guards.entry(reference.get_ptr()) {
+            Entry::Occupied(_) => (),
+            Entry::Vacant(entry) => {
+                let value: AllocationRefGuard<'a> =
+                    unsafe { Allocator::get().deref_ptr(reference.get_ptr()) }
+                        .expect("Attempt to dereference a freed value.");
+                entry.insert(value);
+            }
+        };
+
+        let ref_guard = self.ref_resolver.ref_guards.get(&reference.get_ptr()).unwrap();
+
+        (unsafe { ref_guard.deref() }.downcast_ref().unwrap(), ref_guard.ty().downcast_ref::<T>().unwrap())
+    }
+
+    pub(crate) fn deref_mut<T: DynTypeAllocator + DowncastFromTypeEnum>(
+        &'a mut self,
+        reference: &dyn RefMutExt<T>,
+    ) -> (&'a mut T::DynAlloc, &'a T)
+    {
+        match self.ref_resolver.ref_guards.entry(reference.get_ptr()) {
+            Entry::Occupied(_) => (),
+            Entry::Vacant(entry) => {
+                let value: AllocationRefGuard<'a> =
+                    unsafe { Allocator::get().deref_ptr(reference.get_ptr()) }
+                        .expect("Attempt to dereference a freed value.");
+                entry.insert(value);
+            }
+        };
+
+        let ref_guard = self.ref_resolver.ref_guards.get_mut(&reference.get_ptr()).unwrap();
+
+        (
+            unsafe { ref_guard.deref_mut() }.downcast_mut().unwrap(),
+            ref_guard.ty().downcast_ref::<T>().unwrap(),
+        )
+    }
+}
 
 pub struct ExecutionContext<'a, S: ?Sized> {
     pub application_context: &'a ApplicationContext,
+    // pub allocator_handle: &'a mut AllocatorHandle<'a>,
     pub allocator_handle: AllocatorHandle<'a>,
     pub state: Option<&'a mut S>,
     pub inputs: &'a ChannelValueRefs<'a>,

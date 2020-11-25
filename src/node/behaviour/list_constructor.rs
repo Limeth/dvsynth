@@ -1,9 +1,10 @@
-use crate::graph::{ListAllocation, ListDescriptor, OwnedRefMut};
-use crate::node::ListChannelType;
+use crate::graph::ListAllocation;
+use crate::node::ty::TypeTrait;
+use crate::node::{ListDescriptor, ListRefExt, ListRefMutExt, ListType, OwnedRefMut};
 use crate::{
     node::{
         behaviour::{ExecutionContext, NodeBehaviour, NodeCommand, NodeEvent},
-        Channel, NodeConfiguration, PrimitiveChannelType,
+        Channel, NodeConfiguration, PrimitiveType,
     },
     style::{Theme, Themeable},
 };
@@ -18,7 +19,7 @@ use std::num::NonZeroUsize;
 
 #[derive(Debug, Clone)]
 pub enum ListConstructorNodeMessage {
-    UpdateType(PrimitiveChannelType),
+    UpdateType(PrimitiveType),
     AddChannel,
     RemoveChannel,
 }
@@ -26,9 +27,9 @@ pub enum ListConstructorNodeMessage {
 impl_node_behaviour_message!(ListConstructorNodeMessage);
 
 pub struct ListConstructorNodeBehaviour {
-    ty: PrimitiveChannelType,
+    ty: PrimitiveType,
     channel_count: NonZeroUsize,
-    pick_list_state: pick_list::State<PrimitiveChannelType>,
+    pick_list_state: pick_list::State<PrimitiveType>,
     button_add_state: button::State,
     button_remove_state: button::State,
 }
@@ -36,7 +37,7 @@ pub struct ListConstructorNodeBehaviour {
 impl Default for ListConstructorNodeBehaviour {
     fn default() -> Self {
         Self {
-            ty: PrimitiveChannelType::F32,
+            ty: PrimitiveType::F32,
             channel_count: unsafe { NonZeroUsize::new_unchecked(1) },
             pick_list_state: Default::default(),
             button_add_state: Default::default(),
@@ -52,7 +53,7 @@ impl ListConstructorNodeBehaviour {
                 .into_iter()
                 .map(|channel_index| Channel::new(format!("item #{}", channel_index), self.ty))
                 .collect(),
-            channels_output: vec![Channel::new("list", ListChannelType::new(self.ty))],
+            channels_output: vec![Channel::new("list", ListType::new(self.ty))],
         })
     }
 }
@@ -100,7 +101,7 @@ impl NodeBehaviour for ListConstructorNodeBehaviour {
                 .push(
                     PickList::new(
                         &mut self.pick_list_state,
-                        &PrimitiveChannelType::VALUES[..],
+                        &PrimitiveType::VALUES[..],
                         Some(self.ty),
                         |new_value| ListConstructorNodeMessage::UpdateType(new_value),
                     )
@@ -130,7 +131,11 @@ impl NodeBehaviour for ListConstructorNodeBehaviour {
     fn create_executor(&self) -> Self::FnExecutor {
         let ty = self.ty;
         Box::new(move |context: ExecutionContext<'_, ()>| {
-            let list: OwnedRefMut<ListAllocation> = context.allocate(ListDescriptor { item_type: ty.into() });
+            let list: OwnedRefMut<ListType> =
+                context.allocator_handle.allocate(ListDescriptor { item_type: ty.into() });
+            let values: Vec<u8> = (0..ty.value_size() as u8).collect();
+            // list.push_item(&mut context.allocator_handle, &values[..]).unwrap();
+            // dbg!(list.len(context.allocator_handle));
             let mut cursor = Cursor::new(context.outputs[0].as_mut());
 
             for input in context.inputs.values.iter() {

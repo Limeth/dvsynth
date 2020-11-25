@@ -1,5 +1,5 @@
 use super::*;
-use crate::node::{ChannelRef, ChannelType, ChannelTypeTrait, NodeConfiguration};
+use crate::node::{ChannelRef, NodeConfiguration, TypeEnum, TypeTrait};
 use crate::util::{RectangleExt, Segments};
 use crate::{style, util, ChannelDirection, ChannelIdentifier, Connection};
 use iced::widget::Space;
@@ -304,7 +304,7 @@ impl<M: Clone> FloatingPanesBehaviour<M> {
             let channel_to =
                 pane_to.behaviour_data.node_configuration.channel(to.channel_direction, to.channel_index);
 
-            ChannelType::is_abi_compatible(&channel_from.ty, &channel_to.ty)
+            TypeEnum::is_abi_compatible(&channel_from.ty, &channel_to.ty)
         }
         // Allow, but disconnect previous connection
         // && self.connections.iter().any(|connection| connection.to() == to)
