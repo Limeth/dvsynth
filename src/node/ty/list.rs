@@ -1,10 +1,10 @@
 use std::fmt::Display;
 
-use crate::graph::alloc::{AllocatedType, AllocationRefGuard, Allocator};
+use crate::graph::alloc::{AllocatedType, Allocator};
 use crate::graph::ListAllocation;
 use crate::node::behaviour::AllocatorHandle;
 
-use super::{DowncastFromTypeEnum, DynTypeTrait, RefExt, RefMutExt, TypeEnum, TypeTrait};
+use super::{DowncastFromTypeEnum, DynTypeDescriptor, DynTypeTrait, RefExt, RefMutExt, TypeEnum, TypeTrait};
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone)]
 pub struct ListType {
@@ -27,30 +27,36 @@ pub struct ListDescriptor {
     pub item_type: TypeEnum,
 }
 
+impl DynTypeDescriptor<ListType> for ListDescriptor {
+    fn get_type(&self) -> ListType {
+        ListType { item_type: Box::new(self.item_type.clone()) }
+    }
+}
+
 impl DynTypeTrait for ListType {
     // type DynAllocDispatcher = ListDispatcher;
     type Descriptor = ListDescriptor;
 }
 
-pub trait ListRefExt {
-    fn len<'a>(&self, handle: &'a mut AllocatorHandle<'a>) -> usize;
-    fn read_item<'a>(&self, handle: &'a mut AllocatorHandle<'a>, index: usize) -> Result<&'a [u8], ()>;
+pub trait ListRefExt<'a> {
+    fn len(&self) -> usize;
+    fn read_item(&self, index: usize) -> Result<&'a [u8], ()>;
 }
 
-pub trait ListRefMutExt {
-    fn push_item<'a>(&self, handle: &'a mut AllocatorHandle<'a>, data: &[u8]) -> Result<(), ()>;
+pub trait ListRefMutExt<'a> {
+    fn push_item(&mut self, data: &[u8]) -> Result<(), ()>;
 }
 
-impl<T> ListRefExt for T
-where T: RefExt<ListType>
+impl<'a, T> ListRefExt<'a> for T
+where T: RefExt<'a, ListType>
 {
-    fn len<'a>(&self, handle: &'a mut AllocatorHandle<'a>) -> usize {
-        let (data, ty) = handle.deref(self);
+    fn len(&self) -> usize {
+        let (data, ty) = Allocator::get().deref(self).unwrap();
         data.data.len()
     }
 
-    fn read_item<'a>(&self, handle: &'a mut AllocatorHandle<'a>, index: usize) -> Result<&'a [u8], ()> {
-        let (data, ty) = handle.deref(self);
+    fn read_item(&self, index: usize) -> Result<&'a [u8], ()> {
+        let (data, ty) = Allocator::get().deref(self).unwrap();
 
         if ty.has_safe_binary_representation() {
             let item_size = ty.item_type.value_size();
@@ -66,13 +72,13 @@ where T: RefExt<ListType>
     }
 }
 
-impl<T> ListRefMutExt for T
-where T: RefMutExt<ListType>
+impl<'a, T> ListRefMutExt<'a> for T
+where T: RefMutExt<'a, ListType>
 {
-    fn push_item<'a>(&self, handle: &'a mut AllocatorHandle<'a>, item: &[u8]) -> Result<(), ()> {
-        let (data, ty) = handle.deref_mut(self);
+    fn push_item(&mut self, item: &[u8]) -> Result<(), ()> {
+        let (data, ty) = Allocator::get().deref_mut(self).unwrap();
 
-        if ty.has_safe_binary_representation() {
+        if ty.item_type.has_safe_binary_representation() {
             let item_size = ty.item_type.value_size();
 
             if item_size == item.len() {

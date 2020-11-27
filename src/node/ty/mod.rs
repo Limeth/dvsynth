@@ -49,6 +49,10 @@ impl InitializeWith<()> for () {
     fn initialize_with(&mut self, descriptor: ()) {}
 }
 
+pub trait DynTypeDescriptor<T: DynTypeTrait<Descriptor = Self>>: Send + Sync + 'static {
+    fn get_type(&self) -> T;
+}
+
 /// A type that can only be created on the heap.
 pub trait DynTypeTrait: Into<TypeEnum> + Send + Sync + 'static {
     // /// The interface to access the dynamically allocated data.
@@ -56,7 +60,7 @@ pub trait DynTypeTrait: Into<TypeEnum> + Send + Sync + 'static {
     // type DynAllocDispatcher: Send + Sync + 'static;
 
     /// The type to initialize the allocation with.
-    type Descriptor: Send + Sync + 'static;
+    type Descriptor: DynTypeDescriptor<Self>;
 }
 
 impl<T> TypeTrait for T

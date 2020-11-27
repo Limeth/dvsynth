@@ -2,24 +2,33 @@ use std::any::Any;
 use std::collections::HashSet;
 use std::collections::{hash_map::Entry, HashMap};
 use std::convert::TryInto;
+use std::pin::Pin;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, RwLock};
 
+use crossbeam::deque::Injector;
+use crossbeam::deque::Steal;
+use crossbeam::epoch::Collector;
+use downcast_rs::Downcast;
 use lazy_static::lazy_static;
 use sharded_slab::{pool::Pool, Clear};
 
-use crate::node::{AllocationPointer, RefExt, RefMutExt, TypeEnum, TypeTrait};
+use crate::node::behaviour::AllocatorHandle;
+use crate::node::{
+    AllocationPointer, DynTypeDescriptor, OwnedRef, OwnedRefMut, Ref, RefExt, RefMut, RefMutExt, TypeEnum,
+    TypeTrait,
+};
 
-use super::{DynTypeAllocator, NodeIndex};
+use super::{DynTypeAllocator, NodeIndex, Schedule};
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct TaskRefCounters {
     pub counters: RwLock<HashMap<NodeIndex, Mutex<TaskRefCounter>>>,
 }
 
 /// Counts the changes to refcounts that happen during a single invocation of a task.
 /// These changes are then applied to the total refcount after the task has finished executing.
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct TaskRefCounter {
     pub refcount_deltas: HashMap<AllocationPointer, isize>,
 }
@@ -39,74 +48,99 @@ impl AllocationPointer {
 }
 
 /// Safety: Access safety must be ensured externally by the execution graph.
-pub(crate) struct AllocationCell<T: ?Sized>(Box<T>);
+#[derive(Default)]
+pub(crate) struct AllocationCell<T>(T);
 
-impl<T: ?Sized> AllocationCell<T> {
-    pub fn new(value: T) -> Self
-    where T: Sized {
-        Self(Box::new(value))
+impl<T> AllocationCell<T> {
+    pub fn new(value: T) -> Self {
+        Self(value)
+    }
+
+    pub fn as_mut_ptr(&self) -> *mut T {
+        &self.0 as *const T as *mut T
+    }
+
+    pub fn as_ptr(&self) -> *const T {
+        &self.0 as *const T
     }
 
     /// Safety: Access safety must be ensured externally by the execution graph.
-    pub unsafe fn as_mut_ptr(&self) -> *mut T {
-        self.0.as_ref() as *const T as *mut T
+    pub unsafe fn as_mut<'a>(&self) -> &'a mut T {
+        &mut *self.as_mut_ptr()
     }
 
     /// Safety: Access safety must be ensured externally by the execution graph.
-    pub unsafe fn as_ptr(&self) -> *const T {
-        self.0.as_ref() as *const T
+    pub unsafe fn as_ref<'a>(&self) -> &'a T {
+        &*self.as_ptr()
     }
 }
 
-impl<T: ?Sized> From<Box<T>> for AllocationCell<T> {
-    fn from(other: Box<T>) -> Self {
+impl<T> From<T> for AllocationCell<T> {
+    fn from(other: T) -> Self {
         Self(other)
     }
 }
 
-unsafe impl<T: ?Sized> Send for AllocationCell<T> {}
-unsafe impl<T: ?Sized> Sync for AllocationCell<T> {}
+unsafe impl<T> Send for AllocationCell<T> {}
+unsafe impl<T> Sync for AllocationCell<T> {}
 
-pub trait AllocatedType = Any + Send + Sync;
+pub trait AllocatedType = Any + Send + Sync + 'static;
+
+pub(crate) struct AllocationInner {
+    ty: TypeEnum,
+    data: Box<dyn AllocatedType>,
+}
 
 #[derive(Default)]
 pub(crate) struct Allocation {
-    pub(crate) ptr: Option<AllocationCell<dyn AllocatedType>>,
+    pub(crate) ptr: AllocationCell<Option<AllocationCell<AllocationInner>>>,
     pub(crate) refcount: AtomicUsize,
-    pub(crate) ty: Option<TypeEnum>,
 }
 
-impl Clear for Allocation {
-    fn clear(&mut self) {
-        self.ptr = None;
+impl Allocation {
+    unsafe fn claim<T: DynTypeAllocator>(&self, data: T::DynAlloc, ty: T) {
+        let ptr = self.ptr.as_mut();
+
+        assert!(ptr.is_none(), "Allocation already claimed.");
+
+        let ty_enum: TypeEnum = ty.into();
+        let data = Box::new(data) as Box<dyn AllocatedType>;
+        *ptr = Some(AllocationCell::new(AllocationInner { ty: ty_enum, data }));
         self.refcount.store(1, Ordering::SeqCst);
-        self.ty = None;
+    }
+
+    unsafe fn free(&self) {
+        let ptr = self.ptr.as_mut();
+
+        *ptr = None;
+        self.refcount.store(0, Ordering::SeqCst);
     }
 }
 
-pub struct AllocationRefGuard<'a> {
-    ref_guard: sharded_slab::pool::Ref<'a, Allocation>,
-}
+// pub struct AllocationRefGuard<'a> {
+//     ref_guard: sharded_slab::pool::Ref<'a, Allocation>,
+// }
 
-impl<'a> AllocationRefGuard<'a> {
-    fn new(ref_guard: sharded_slab::pool::Ref<'a, Allocation>) -> Self {
-        Self { ref_guard }
-    }
-}
+// impl<'a> AllocationRefGuard<'a> {
+//     fn new(ref_guard: sharded_slab::pool::Ref<'a, Allocation>) -> Self {
+//         Self { ref_guard }
+//     }
+// }
 
-impl<'a> AllocationRefGuard<'a> {
-    pub fn ty(&self) -> &TypeEnum {
-        self.ref_guard.ty.as_ref().unwrap()
-    }
+// impl<'a> AllocationRefGuard<'a> {
+//     pub fn ty(&self) -> &TypeEnum {
+//         // self.ref_guard.ty.as_ref().unwrap()
+//         unsafe { &(*self.ref_guard.ptr.as_ref().unwrap().as_ptr()).ty }
+//     }
 
-    pub unsafe fn deref(&self) -> &dyn AllocatedType {
-        &*self.ref_guard.ptr.as_ref().unwrap().as_ptr()
-    }
+//     pub unsafe fn deref(&self) -> &dyn AllocatedType {
+//         &(*self.ref_guard.ptr.as_ref().unwrap().as_ptr()).data
+//     }
 
-    pub unsafe fn deref_mut(&self) -> &mut dyn AllocatedType {
-        &mut *self.ref_guard.ptr.as_ref().unwrap().as_mut_ptr()
-    }
-}
+//     pub unsafe fn deref_mut(&self) -> &mut dyn AllocatedType {
+//         &mut (*self.ref_guard.ptr.as_ref().unwrap().as_mut_ptr()).data
+//     }
+// }
 
 // pub struct AllocationRefMutGuard<'a> {
 //     ref_guard: sharded_slab::pool::Ref<'a, Allocation>,
@@ -137,6 +171,12 @@ impl<'a> AllocationRefGuard<'a> {
 //     freed_indices: Vec<usize>,
 // }
 
+#[derive(Default)]
+struct Allocations {
+    vec: Vec<Pin<Box<Allocation>>>,
+    used: usize,
+}
+
 /// The refcount of allocations is tracked in two ways:
 /// - globally:
 ///     Within each allocation, there is a global refcount that is used to determine
@@ -147,7 +187,10 @@ impl<'a> AllocationRefGuard<'a> {
 ///     written to output channels, which is done separately.
 #[derive(Default)]
 pub struct Allocator {
-    allocations: Pool<Allocation>,
+    allocations: RwLock<Allocations>,
+    free_indices: Injector<u64>,
+    // collector: Collector,
+    // allocations: Pool<Allocation>,
     /// For task-wise refcounting
     task_ref_counters: TaskRefCounters,
     // inner: RwLock<AllocatorImpl>,
@@ -161,20 +204,95 @@ impl Allocator {
         &*INSTANCE
     }
 
-    /// Allocates the value with refcount set to 1.
-    fn allocate_any<T: Any + Send + Sync>(&self, value: T) -> AllocationPointer {
-        let mut allocation = self.allocations.create().unwrap();
-        allocation.ptr = Some(AllocationCell::from(Box::new(value) as Box<dyn AllocatedType>));
+    // TODO:
+    // * Proper task destructuring
+    // * When a node is removed and a new one is created, the index may be the same, but we still
+    //   need to be able to signal the removed node to be destructured. Keep generation ID based
+    //   on the number of times the node was removed?
+    pub(crate) fn prepare_for_schedule(&self, schedule: &Schedule) {
+        let mut task_ref_counters = self.task_ref_counters.counters.write().unwrap();
+        task_ref_counters.clear();
 
-        AllocationPointer { index: allocation.key() as u64 }
+        for task in &*schedule.tasks {
+            task_ref_counters.insert(task.node_index, Default::default());
+        }
     }
 
-    pub fn allocate<T: DynTypeAllocator>(&self, descriptor: T::Descriptor) -> AllocationPointer {
-        self.allocate_any(T::create_value_from_descriptor(descriptor))
+    /// Allocates the value with refcount set to 1.
+    fn allocate_value<'a, T: DynTypeAllocator>(
+        &self,
+        value: T::DynAlloc,
+        ty: T,
+        handle: AllocatorHandle<'a>,
+    ) -> AllocationPointer
+    {
+        const EXPAND_BY: usize = 64;
+
+        println!("Allocating...");
+
+        let free_index = loop {
+            match self.free_indices.steal() {
+                Steal::Success(free_index) => break free_index,
+                Steal::Retry => continue,
+                Steal::Empty => {
+                    let mut allocations = self.allocations.write().unwrap();
+
+                    if allocations.used > allocations.vec.len() {
+                        // Already expanded
+                        continue;
+                    }
+
+                    allocations.vec.reserve(EXPAND_BY);
+
+                    for rel_index in 0..EXPAND_BY {
+                        let abs_index =
+                            allocations.used.checked_add(rel_index).expect("Allocator slots depleted.");
+
+                        allocations.vec.push(Box::pin(Default::default()));
+                        self.free_indices.push(abs_index as u64);
+                    }
+
+                    continue;
+                }
+            }
+        };
+
+        let allocations = self.allocations.read().unwrap();
+        let allocation = &allocations.vec[free_index as usize];
+
+        unsafe {
+            allocation.claim(value, ty);
+        }
+
+        let ptr = AllocationPointer { index: free_index };
+
+        unsafe {
+            self.refcount_owned_increment(ptr, handle.node).unwrap();
+        }
+
+        ptr
+    }
+
+    pub fn allocate<'a, T: DynTypeAllocator>(
+        &self,
+        descriptor: T::Descriptor,
+        handle: AllocatorHandle<'a>,
+    ) -> AllocationPointer
+    {
+        let ty = descriptor.get_type();
+        self.allocate_value(T::create_value_from_descriptor(descriptor), ty, handle)
     }
 
     pub fn deallocate(&self, allocation_ptr: AllocationPointer) {
-        self.allocations.clear(allocation_ptr.as_usize());
+        let allocations = self.allocations.read().unwrap();
+        let allocation =
+            allocations.vec.get(allocation_ptr.as_usize()).expect("Attempt to free a freed value.");
+
+        unsafe {
+            allocation.free();
+        }
+
+        self.free_indices.push(allocation_ptr.as_u64());
     }
 
     pub unsafe fn apply_owned_and_output_refcounts(
@@ -183,18 +301,26 @@ impl Allocator {
         output_delta: (),
     ) -> Result<(), ()>
     {
-        let task_ref_counters = self.task_ref_counters.counters.read().map_err(|_| ())?;
-        let task_ref_counter = task_ref_counters[&node].lock().map_err(|_| ())?;
-        // TODO: combine output delta with these
-        let altered_ptrs: HashSet<AllocationPointer> =
-            task_ref_counter.refcount_deltas.keys().copied().collect();
+        let mut task_ref_counters = self.task_ref_counters.counters.write().map_err(|_| ())?;
 
-        for altered_ptr in altered_ptrs {
-            let delta = task_ref_counter.refcount_deltas[&altered_ptr];
+        dbg!(node);
+        dbg!(&*task_ref_counters);
 
-            if delta != 0 {
-                self.refcount_global_add(altered_ptr, delta)?;
+        {
+            let mut task_ref_counter = task_ref_counters[&node].lock().map_err(|_| ())?;
+            // TODO: combine output delta with these
+            let altered_ptrs: HashSet<AllocationPointer> =
+                task_ref_counter.refcount_deltas.keys().copied().collect();
+
+            for altered_ptr in altered_ptrs {
+                let delta = task_ref_counter.refcount_deltas[&altered_ptr];
+
+                if delta != 0 {
+                    self.refcount_global_add(altered_ptr, delta)?;
+                }
             }
+
+            task_ref_counter.refcount_deltas.clear();
         }
 
         Ok(())
@@ -266,7 +392,8 @@ impl Allocator {
         delta: isize,
     ) -> Result<bool, ()>
     {
-        if let Some(allocation) = self.allocations.get(allocation_ptr.as_usize()) {
+        let allocations = self.allocations.read().unwrap();
+        if let Some(allocation) = allocations.vec.get(allocation_ptr.as_usize()) {
             let refcount = &allocation.refcount;
 
             if delta > 0 {
@@ -304,30 +431,60 @@ impl Allocator {
     }
 
     /// Safety: Access safety must be ensured externally by the execution graph.
-    pub unsafe fn deref_ptr(&self, allocation_ptr: AllocationPointer) -> Option<AllocationRefGuard<'_>> {
-        self.allocations.get(allocation_ptr.as_usize()).map(|ref_guard| AllocationRefGuard::new(ref_guard))
+    ///         Extra caution must be taken to request a correct lifetime 'a.
+    unsafe fn deref_ptr<'a>(
+        &self,
+        allocation_ptr: AllocationPointer,
+    ) -> Option<(&'a dyn AllocatedType, &'a TypeEnum)>
+    {
+        let allocations = self.allocations.read().unwrap();
+        allocations.vec.get(allocation_ptr.as_usize()).map(|allocation| {
+            let allocation_inner =
+                allocation.ptr.as_ref().as_ref().expect("Dereferencing a freed value.").as_ref();
+
+            (allocation_inner.data.as_ref(), &allocation_inner.ty)
+        })
     }
 
-    // /// Safety: Access safety must be ensured externally by the execution graph.
-    // pub unsafe fn deref_mut_ptr(
-    //     &self,
-    //     allocation_ptr: AllocationPointer,
-    // ) -> Option<AllocationRefMutGuard<'_>>
-    // {
-    //     self.allocations.get(allocation_ptr.as_usize()).map(|ref_guard| AllocationRefMutGuard::new(ref_guard))
-    // }
+    /// Safety: Access safety must be ensured externally by the execution graph.
+    ///         Extra caution must be taken to request a correct lifetime 'a.
+    unsafe fn deref_mut_ptr<'a>(
+        &self,
+        allocation_ptr: AllocationPointer,
+    ) -> Option<(&'a mut dyn AllocatedType, &'a TypeEnum)>
+    {
+        let allocations = self.allocations.read().unwrap();
+        allocations.vec.get(allocation_ptr.as_usize()).map(|allocation| {
+            let allocation_inner =
+                allocation.ptr.as_ref().as_ref().expect("Dereferencing a freed value.").as_mut();
 
-    // /// Safety: Access safety must be ensured externally by the execution graph.
-    // pub unsafe fn deref<T: TypeTrait>(&self, reference: &dyn RefExt<T>) -> Option<AllocationRefGuard<'_>> {
-    //     self.deref_ptr(reference.get_ptr())
-    // }
+            (allocation_inner.data.as_mut(), &allocation_inner.ty)
+        })
+    }
 
-    // /// Safety: Access safety must be ensured externally by the execution graph.
-    // pub unsafe fn deref_mut<T: TypeTrait>(
-    //     &self,
-    //     reference: &dyn RefMutExt<T>,
-    // ) -> Option<AllocationRefMutGuard<'_>>
-    // {
-    //     self.deref_mut_ptr(reference.get_ptr())
-    // }
+    pub fn deref<'a, T: DynTypeAllocator>(
+        &self,
+        reference: &dyn RefExt<'a, T>,
+    ) -> Option<(&'a T::DynAlloc, &'a T)>
+    {
+        let (data, ty) = unsafe { self.deref_ptr(reference.get_ptr())? };
+
+        Some((
+            data.downcast_ref().expect("Type mismatch when dereferencing."),
+            ty.downcast_ref().expect("Type mismatch when dereferencing."),
+        ))
+    }
+
+    pub fn deref_mut<'a, T: DynTypeAllocator>(
+        &self,
+        reference: &mut dyn RefMutExt<'a, T>,
+    ) -> Option<(&'a mut T::DynAlloc, &'a T)>
+    {
+        let (data, ty) = unsafe { self.deref_mut_ptr(reference.get_ptr())? };
+
+        Some((
+            data.downcast_mut().expect("Type mismatch when dereferencing."),
+            ty.downcast_ref().expect("Type mismatch when dereferencing."),
+        ))
+    }
 }

@@ -1,4 +1,4 @@
-use super::{DowncastFromTypeEnum, DynTypeTrait, TypeEnum};
+use super::{DowncastFromTypeEnum, DynTypeDescriptor, DynTypeTrait, TypeEnum};
 use std::fmt::Display;
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone)]
@@ -21,6 +21,12 @@ impl From<TextureType> for TypeEnum {
 // TODO
 // pub struct TextureDispatcher;
 pub struct TextureDescriptor;
+
+impl DynTypeDescriptor<TextureType> for TextureDescriptor {
+    fn get_type(&self) -> TextureType {
+        TextureType {}
+    }
+}
 
 impl DynTypeTrait for TextureType {
     // type DynAllocDispatcher = TextureDispatcher;

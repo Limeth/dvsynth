@@ -4,8 +4,8 @@ use crate::node::behaviour::{
 };
 use crate::node::ty::TypeTrait;
 use crate::node::{
-    AllocationPointer, ChannelDirection, ChannelValueRefs, ChannelValues, DynTypeTrait, ListDescriptor,
-    ListType, NodeConfiguration, RefExt, RefMutExt, TypeEnum,
+    AllocationPointer, ChannelDirection, ChannelValueRefs, ChannelValues, DowncastFromTypeEnum, DynTypeTrait,
+    ListDescriptor, ListType, NodeConfiguration, RefExt, RefMutExt, TypeEnum,
 };
 use crate::style::{self, consts, Theme, Themeable};
 use crate::widgets::{
@@ -15,7 +15,7 @@ use crate::widgets::{
 use crate::ApplicationFlags;
 use crate::Message;
 use crate::NodeMessage;
-use alloc::Allocator;
+use alloc::{AllocatedType, Allocator};
 use arc_swap::ArcSwapOption;
 use downcast_rs::Downcast;
 use iced::{Element, Settings};
@@ -65,6 +65,7 @@ static_assertions::assert_impl_all!(Arc<PreparedExecution>: Send, Sync);
 
 impl PreparedExecution {
     fn from(schedule: &Schedule, context: &mut ApplicationContext, mut previous: Option<Self>) -> Self {
+        Allocator::get().prepare_for_schedule(schedule);
         let previous_node_index_map: Option<HashMap<NodeIndex, usize>> =
             previous.as_ref().map(|prepared_execution| {
                 prepared_execution
@@ -131,7 +132,8 @@ impl PreparedExecution {
             };
             let current_task: &mut PreparedTask = &mut tasks_following[0].write().unwrap();
             let task_state = current_task.state.as_mut().map(|state| state.as_mut());
-            let mut allocator_handle: AllocatorHandle = Default::default();
+            // let ref_guards = HashMap::new();
+            let allocator_handle = unsafe { AllocatorHandle::with_node_index(task.node_index) };
 
             {
                 let execution_context = ExecutionContext {
@@ -396,8 +398,8 @@ impl Deref for TextureAllocation {
     }
 }
 
-pub trait DynTypeAllocator: DynTypeTrait {
-    type DynAlloc: Downcast + Send + Sync + 'static;
+pub trait DynTypeAllocator: DynTypeTrait + DowncastFromTypeEnum {
+    type DynAlloc: AllocatedType;
 
     fn create_value_from_descriptor(descriptor: Self::Descriptor) -> Self::DynAlloc;
 }

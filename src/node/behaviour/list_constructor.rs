@@ -1,6 +1,6 @@
 use crate::graph::ListAllocation;
 use crate::node::ty::TypeTrait;
-use crate::node::{ListDescriptor, ListRefExt, ListRefMutExt, ListType, OwnedRefMut};
+use crate::node::{ListDescriptor, ListRefExt, ListRefMutExt, ListType, OwnedRefMut, RefExt, RefMutExt};
 use crate::{
     node::{
         behaviour::{ExecutionContext, NodeBehaviour, NodeCommand, NodeEvent},
@@ -131,11 +131,11 @@ impl NodeBehaviour for ListConstructorNodeBehaviour {
     fn create_executor(&self) -> Self::FnExecutor {
         let ty = self.ty;
         Box::new(move |context: ExecutionContext<'_, ()>| {
-            let list: OwnedRefMut<ListType> =
+            let mut list: OwnedRefMut<ListType> =
                 context.allocator_handle.allocate(ListDescriptor { item_type: ty.into() });
             let values: Vec<u8> = (0..ty.value_size() as u8).collect();
-            // list.push_item(&mut context.allocator_handle, &values[..]).unwrap();
-            // dbg!(list.len(context.allocator_handle));
+            (&mut list).push_item(&values[..]).unwrap();
+            dbg!((&list).len());
             let mut cursor = Cursor::new(context.outputs[0].as_mut());
 
             for input in context.inputs.values.iter() {

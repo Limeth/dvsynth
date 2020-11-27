@@ -1,4 +1,4 @@
-use crate::graph::alloc::{Allocation, AllocationRefGuard, Allocator, TaskRefCounter};
+use crate::graph::alloc::{Allocation, Allocator, TaskRefCounter};
 use crate::graph::{ApplicationContext, DynTypeAllocator, NodeIndex};
 use crate::node::NodeConfiguration;
 use crate::node::{ChannelValueRefs, ChannelValues};
@@ -105,17 +105,25 @@ impl_downcast!(NodeExecutorState);
 /////
 ///// If one could allocate values on or send them to another thread,
 ///// we would not be able to guarantee safe access to the underlying data.
-#[derive(Default)]
+#[derive(Clone, Copy)]
 pub struct AllocatorHandle<'a> {
-    pub(crate) ref_resolver: TaskRefResolver<'a>,
+    // pub(crate) ref_resolver: &'a TaskRefResolver<'a>,
     pub(crate) node: NodeIndex,
-    // __marker: PhantomData<&'a ()>,
+    __marker: PhantomData<&'a ()>,
 }
 
-#[derive(Default)]
-pub(crate) struct TaskRefResolver<'a> {
-    pub(crate) ref_guards: HashMap<AllocationPointer, AllocationRefGuard<'a>>,
+impl<'a> AllocatorHandle<'a> {
+    pub(crate) unsafe fn with_node_index(node: NodeIndex) -> Self {
+        Self { node, __marker: Default::default() }
+    }
 }
+
+// #[derive(Default)]
+// pub(crate) struct TaskRefResolver<'a> {
+//     pub(crate) ref_guards: HashMap<AllocationPointer, AllocationRefGuard<'a>>,
+// }
+
+// impl<'a> TaskRefResolver<'a> {}
 
 // static_assertions::const_assert_eq!(std::mem::size_of::<AllocatorHandle<'_>>(), 0);
 
@@ -127,52 +135,52 @@ impl<'a> AllocatorHandle<'a> {
     //     OwnedRefMut::<T>::allocate_default(self)
     // }
 
-    pub fn allocate<T: DynTypeAllocator>(&self, descriptor: T::Descriptor) -> OwnedRefMut<T> {
-        OwnedRefMut::<T>::allocate(descriptor, &self)
+    pub fn allocate<T: DynTypeAllocator>(self, descriptor: T::Descriptor) -> OwnedRefMut<T> {
+        OwnedRefMut::<T>::allocate(descriptor, self)
     }
 
-    pub(crate) fn deref<T: DynTypeAllocator + DowncastFromTypeEnum>(
-        &'a mut self,
-        reference: &dyn RefExt<T>,
-    ) -> (&'a T::DynAlloc, &'a T)
-    {
-        match self.ref_resolver.ref_guards.entry(reference.get_ptr()) {
-            Entry::Occupied(_) => (),
-            Entry::Vacant(entry) => {
-                let value: AllocationRefGuard<'a> =
-                    unsafe { Allocator::get().deref_ptr(reference.get_ptr()) }
-                        .expect("Attempt to dereference a freed value.");
-                entry.insert(value);
-            }
-        };
+    // pub(crate) fn deref<T: DynTypeAllocator + DowncastFromTypeEnum>(
+    //     &self,
+    //     reference: &dyn RefExt<T>,
+    // ) -> Option<(&'a T::DynAlloc, &'a T)>
+    // {
+    //     // match self.ref_resolver.ref_guards.entry(reference.get_ptr()) {
+    //     //     Entry::Occupied(_) => (),
+    //     //     Entry::Vacant(entry) => {
+    //     //         let value: AllocationRefGuard<'a> =
+    //     //             unsafe { Allocator::get().deref_ptr(reference.get_ptr()) }
+    //     //                 .expect("Attempt to dereference a freed value.");
+    //     //         entry.insert(value);
+    //     //     }
+    //     // };
 
-        let ref_guard = self.ref_resolver.ref_guards.get(&reference.get_ptr()).unwrap();
+    //     let ref_guard = self.ref_resolver.ref_guards.get(&reference.get_ptr()).unwrap();
+    //     let ty = ref_guard.ty().downcast_ref::<T>()?;
+    //     let value_ref = unsafe { ref_guard.deref() }.downcast_ref().unwrap();
 
-        (unsafe { ref_guard.deref() }.downcast_ref().unwrap(), ref_guard.ty().downcast_ref::<T>().unwrap())
-    }
+    //     Some((value_ref, ty))
+    // }
 
-    pub(crate) fn deref_mut<T: DynTypeAllocator + DowncastFromTypeEnum>(
-        &'a mut self,
-        reference: &dyn RefMutExt<T>,
-    ) -> (&'a mut T::DynAlloc, &'a T)
-    {
-        match self.ref_resolver.ref_guards.entry(reference.get_ptr()) {
-            Entry::Occupied(_) => (),
-            Entry::Vacant(entry) => {
-                let value: AllocationRefGuard<'a> =
-                    unsafe { Allocator::get().deref_ptr(reference.get_ptr()) }
-                        .expect("Attempt to dereference a freed value.");
-                entry.insert(value);
-            }
-        };
+    // pub(crate) fn deref_mut<T: DynTypeAllocator + DowncastFromTypeEnum>(
+    //     &mut self,
+    //     reference: &dyn RefMutExt<T>,
+    // ) -> Option<(&'a mut T::DynAlloc, &'a T)>
+    // {
+    //     // match self.ref_resolver.ref_guards.entry(reference.get_ptr()) {
+    //     //     Entry::Occupied(_) => (),
+    //     //     Entry::Vacant(entry) => {
+    //     //         let value: AllocationRefGuard<'a> =
+    //     //             unsafe { Allocator::get().deref_ptr(reference.get_ptr()) }
+    //     //                 .expect("Attempt to dereference a freed value.");
+    //     //         entry.insert(value);
+    //     //     }
+    //     // };
 
-        let ref_guard = self.ref_resolver.ref_guards.get_mut(&reference.get_ptr()).unwrap();
-
-        (
-            unsafe { ref_guard.deref_mut() }.downcast_mut().unwrap(),
-            ref_guard.ty().downcast_ref::<T>().unwrap(),
-        )
-    }
+    //     let ref_guard = Allocator::get().deref
+    //     let ty = ref_guard.ty().downcast_ref::<T>()?;
+    //     let value_ref = unsafe { ref_guard.deref_mut() }.downcast_mut().unwrap();
+    //     Some((value_ref, ty))
+    // }
 }
 
 pub struct ExecutionContext<'a, S: ?Sized> {
