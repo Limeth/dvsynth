@@ -99,7 +99,7 @@ impl<T: TypeTrait> Drop for OwnedRefMut<T> {
     fn drop(&mut self) {
         unsafe {
             Allocator::get()
-                .refcount_owned_increment(self.ptr, self.node)
+                .refcount_owned_decrement(self.ptr, self.node)
                 .expect("Could not decrement the refcount of an OwnedRefMut while dropping.");
         }
     }
@@ -127,7 +127,7 @@ impl<T: TypeTrait> OwnedRef<T> {
         Self { ptr: reference.ptr, node: handle.node, __marker: Default::default() }
     }
 
-    pub fn to_ref<'a>(self, handle: AllocatorHandle<'a>) -> Ref<'a, T> {
+    pub fn to_ref<'a>(self, _handle: AllocatorHandle<'a>) -> Ref<'a, T> {
         unsafe {
             Allocator::get()
                 .refcount_owned_decrement(self.ptr, self.node)
@@ -148,7 +148,7 @@ impl<T: TypeTrait> Drop for OwnedRef<T> {
     fn drop(&mut self) {
         unsafe {
             Allocator::get()
-                .refcount_owned_increment(self.ptr, self.node)
+                .refcount_owned_decrement(self.ptr, self.node)
                 .expect("Could not decrement the refcount of an OwnedRef while dropping.");
         }
     }

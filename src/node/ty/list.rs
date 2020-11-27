@@ -52,7 +52,7 @@ where T: RefExt<'a, ListType>
 {
     fn len(&self) -> usize {
         let (data, ty) = Allocator::get().deref(self).unwrap();
-        data.data.len()
+        data.data.len() / ty.item_type.value_size()
     }
 
     fn read_item(&self, index: usize) -> Result<&'a [u8], ()> {

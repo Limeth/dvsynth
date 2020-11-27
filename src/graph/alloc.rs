@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use std::collections::{hash_map::Entry, HashMap};
 use std::convert::TryInto;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Mutex, RwLock};
 
 use crossbeam::deque::Injector;
@@ -95,6 +95,7 @@ pub(crate) struct AllocationInner {
 pub(crate) struct Allocation {
     pub(crate) ptr: AllocationCell<Option<AllocationCell<AllocationInner>>>,
     pub(crate) refcount: AtomicUsize,
+    pub(crate) deallocating: AtomicBool,
 }
 
 impl Allocation {
@@ -106,7 +107,8 @@ impl Allocation {
         let ty_enum: TypeEnum = ty.into();
         let data = Box::new(data) as Box<dyn AllocatedType>;
         *ptr = Some(AllocationCell::new(AllocationInner { ty: ty_enum, data }));
-        self.refcount.store(1, Ordering::SeqCst);
+        self.refcount.store(0, Ordering::SeqCst);
+        self.deallocating.store(false, Ordering::SeqCst);
     }
 
     unsafe fn free(&self) {
@@ -114,6 +116,7 @@ impl Allocation {
 
         *ptr = None;
         self.refcount.store(0, Ordering::SeqCst);
+        self.deallocating.store(true, Ordering::SeqCst);
     }
 }
 
@@ -288,11 +291,17 @@ impl Allocator {
         let allocation =
             allocations.vec.get(allocation_ptr.as_usize()).expect("Attempt to free a freed value.");
 
+        if allocation.deallocating.compare_and_swap(false, true, Ordering::SeqCst) {
+            // Already deallocated.
+            return;
+        }
+
         unsafe {
             allocation.free();
         }
 
         self.free_indices.push(allocation_ptr.as_u64());
+        println!("Deallocated: {:?}", allocation_ptr);
     }
 
     pub unsafe fn apply_owned_and_output_refcounts(
@@ -301,10 +310,7 @@ impl Allocator {
         output_delta: (),
     ) -> Result<(), ()>
     {
-        let mut task_ref_counters = self.task_ref_counters.counters.write().map_err(|_| ())?;
-
-        dbg!(node);
-        dbg!(&*task_ref_counters);
+        let task_ref_counters = self.task_ref_counters.counters.write().map_err(|_| ())?;
 
         {
             let mut task_ref_counter = task_ref_counters[&node].lock().map_err(|_| ())?;
@@ -315,9 +321,7 @@ impl Allocator {
             for altered_ptr in altered_ptrs {
                 let delta = task_ref_counter.refcount_deltas[&altered_ptr];
 
-                if delta != 0 {
-                    self.refcount_global_add(altered_ptr, delta)?;
-                }
+                self.refcount_global_add(altered_ptr, delta)?;
             }
 
             task_ref_counter.refcount_deltas.clear();
@@ -399,7 +403,7 @@ impl Allocator {
             if delta > 0 {
                 refcount.fetch_add(delta as usize, Ordering::SeqCst);
                 Ok(false)
-            } else if delta < 0 {
+            } else {
                 let mut refcount_before_swap = refcount.load(Ordering::SeqCst);
                 let mut refcount_new;
 
@@ -415,15 +419,13 @@ impl Allocator {
                     }
                 }
 
-                if refcount_before_swap > 0 && refcount_new == 0 {
+                if refcount_new == 0 {
                     self.deallocate(allocation_ptr);
                     Ok(true)
                 } else {
                     // Deallocation was already performed (before_swap == 0) or was not necessary (new > 0).
                     Ok(false)
                 }
-            } else {
-                Ok(false)
             }
         } else {
             Err(())
