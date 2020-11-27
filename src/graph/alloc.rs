@@ -466,7 +466,7 @@ impl Allocator {
 
     pub fn deref<'a, T: DynTypeAllocator>(
         &self,
-        reference: &dyn RefExt<'a, T>,
+        reference: impl RefExt<'a, T>,
     ) -> Option<(&'a T::DynAlloc, &'a T)>
     {
         let (data, ty) = unsafe { self.deref_ptr(reference.get_ptr())? };
@@ -479,7 +479,7 @@ impl Allocator {
 
     pub fn deref_mut<'a, T: DynTypeAllocator>(
         &self,
-        reference: &mut dyn RefMutExt<'a, T>,
+        reference: impl RefMutExt<'a, T>,
     ) -> Option<(&'a mut T::DynAlloc, &'a T)>
     {
         let (data, ty) = unsafe { self.deref_mut_ptr(reference.get_ptr())? };

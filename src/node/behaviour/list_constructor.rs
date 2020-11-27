@@ -134,8 +134,9 @@ impl NodeBehaviour for ListConstructorNodeBehaviour {
             let mut list: OwnedRefMut<ListType> =
                 context.allocator_handle.allocate(ListDescriptor { item_type: ty.into() });
             let values: Vec<u8> = (0..ty.value_size() as u8).collect();
-            (&mut list).push_item(&values[..]).unwrap();
-            dbg!((&list).len());
+            list.push_item(&values[..]).unwrap();
+            list.push_item(&values[..]).unwrap();
+            dbg!(list.len());
             let mut cursor = Cursor::new(context.outputs[0].as_mut());
 
             for input in context.inputs.values.iter() {

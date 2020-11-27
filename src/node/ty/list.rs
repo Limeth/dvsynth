@@ -39,23 +39,23 @@ impl DynTypeTrait for ListType {
 }
 
 pub trait ListRefExt<'a> {
-    fn len(&self) -> usize;
-    fn read_item(&self, index: usize) -> Result<&'a [u8], ()>;
+    fn len(self) -> usize;
+    fn read_item(self, index: usize) -> Result<&'a [u8], ()>;
 }
 
 pub trait ListRefMutExt<'a> {
-    fn push_item(&mut self, data: &[u8]) -> Result<(), ()>;
+    fn push_item(self, data: &[u8]) -> Result<(), ()>;
 }
 
 impl<'a, T> ListRefExt<'a> for T
 where T: RefExt<'a, ListType>
 {
-    fn len(&self) -> usize {
+    fn len(self) -> usize {
         let (data, ty) = Allocator::get().deref(self).unwrap();
         data.data.len() / ty.item_type.value_size()
     }
 
-    fn read_item(&self, index: usize) -> Result<&'a [u8], ()> {
+    fn read_item(self, index: usize) -> Result<&'a [u8], ()> {
         let (data, ty) = Allocator::get().deref(self).unwrap();
 
         if ty.has_safe_binary_representation() {
@@ -75,7 +75,7 @@ where T: RefExt<'a, ListType>
 impl<'a, T> ListRefMutExt<'a> for T
 where T: RefMutExt<'a, ListType>
 {
-    fn push_item(&mut self, item: &[u8]) -> Result<(), ()> {
+    fn push_item(self, item: &[u8]) -> Result<(), ()> {
         let (data, ty) = Allocator::get().deref_mut(self).unwrap();
 
         if ty.item_type.has_safe_binary_representation() {

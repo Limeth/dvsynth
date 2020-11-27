@@ -3,11 +3,12 @@ use crate::graph::alloc::Allocator;
 use crate::graph::{DynTypeAllocator, NodeIndex};
 use crate::node::behaviour::AllocatorHandle;
 use std::marker::PhantomData;
+use std::ops::{Deref, DerefMut};
 
 /// A common trait for references that allow for shared access.
 /// The lifetime `'a` denotes how long the underlying data may be accessed for.
 pub trait RefExt<'a, T: TypeTrait> {
-    fn get_ptr(&self) -> AllocationPointer;
+    fn get_ptr(self) -> AllocationPointer;
 }
 
 /// A common trait for references that allow for mutable access.
@@ -82,13 +83,13 @@ impl<T: TypeTrait> OwnedRefMut<T> {
 }
 
 impl<'a, T: TypeTrait> RefExt<'a, T> for &'a OwnedRefMut<T> {
-    fn get_ptr(&self) -> AllocationPointer {
+    fn get_ptr(self) -> AllocationPointer {
         self.ptr
     }
 }
 
 impl<'a, T: TypeTrait> RefExt<'a, T> for &'a mut OwnedRefMut<T> {
-    fn get_ptr(&self) -> AllocationPointer {
+    fn get_ptr(self) -> AllocationPointer {
         self.ptr
     }
 }
@@ -139,7 +140,7 @@ impl<T: TypeTrait> OwnedRef<T> {
 }
 
 impl<'a, T: TypeTrait> RefExt<'a, T> for &'a OwnedRef<T> {
-    fn get_ptr(&self) -> AllocationPointer {
+    fn get_ptr(self) -> AllocationPointer {
         self.ptr
     }
 }
@@ -179,7 +180,7 @@ impl<'a, T: TypeTrait> RefMut<'a, T> {
 }
 
 impl<'a, T: TypeTrait> RefExt<'a, T> for RefMut<'a, T> {
-    fn get_ptr(&self) -> AllocationPointer {
+    fn get_ptr(self) -> AllocationPointer {
         self.ptr
     }
 }
@@ -204,7 +205,7 @@ impl<'a, T: TypeTrait> Ref<'a, T> {
 }
 
 impl<'a, T: TypeTrait> RefExt<'a, T> for Ref<'a, T> {
-    fn get_ptr(&self) -> AllocationPointer {
+    fn get_ptr(self) -> AllocationPointer {
         self.ptr
     }
 }
