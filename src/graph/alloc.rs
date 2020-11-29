@@ -19,7 +19,7 @@ use crate::node::{
     TypeTrait,
 };
 
-use super::{DynTypeAllocator, NodeIndex, Schedule};
+use super::{DynTypeTrait, NodeIndex, Schedule};
 
 #[derive(Default, Debug)]
 pub struct TaskRefCounters {
@@ -34,7 +34,7 @@ pub struct TaskRefCounter {
 }
 
 impl AllocationPointer {
-    fn new(index: u64) -> Self {
+    pub(crate) fn new(index: u64) -> Self {
         Self { index }
     }
 
@@ -99,7 +99,7 @@ pub(crate) struct Allocation {
 }
 
 impl Allocation {
-    unsafe fn claim<T: DynTypeAllocator>(&self, data: T::DynAlloc, ty: T) {
+    unsafe fn claim<T: DynTypeTrait>(&self, data: T::DynAlloc, ty: T) {
         let ptr = self.ptr.as_mut();
 
         assert!(ptr.is_none(), "Allocation already claimed.");
@@ -119,60 +119,6 @@ impl Allocation {
         self.deallocating.store(true, Ordering::SeqCst);
     }
 }
-
-// pub struct AllocationRefGuard<'a> {
-//     ref_guard: sharded_slab::pool::Ref<'a, Allocation>,
-// }
-
-// impl<'a> AllocationRefGuard<'a> {
-//     fn new(ref_guard: sharded_slab::pool::Ref<'a, Allocation>) -> Self {
-//         Self { ref_guard }
-//     }
-// }
-
-// impl<'a> AllocationRefGuard<'a> {
-//     pub fn ty(&self) -> &TypeEnum {
-//         // self.ref_guard.ty.as_ref().unwrap()
-//         unsafe { &(*self.ref_guard.ptr.as_ref().unwrap().as_ptr()).ty }
-//     }
-
-//     pub unsafe fn deref(&self) -> &dyn AllocatedType {
-//         &(*self.ref_guard.ptr.as_ref().unwrap().as_ptr()).data
-//     }
-
-//     pub unsafe fn deref_mut(&self) -> &mut dyn AllocatedType {
-//         &mut (*self.ref_guard.ptr.as_ref().unwrap().as_mut_ptr()).data
-//     }
-// }
-
-// pub struct AllocationRefMutGuard<'a> {
-//     ref_guard: sharded_slab::pool::Ref<'a, Allocation>,
-// }
-
-// impl<'a> AllocationRefMutGuard<'a> {
-//     fn new(ref_guard: sharded_slab::pool::Ref<'a, Allocation>) -> Self {
-//         Self { ref_guard }
-//     }
-// }
-
-// impl<'a> AllocationRefMutGuard<'a> {
-//     pub fn ty(&self) -> &TypeEnum {
-//         self.ref_guard.ty.as_ref().unwrap()
-//     }
-
-//     pub unsafe fn deref(&self) -> &dyn AllocatedType {
-//         &mut *self.ref_guard.ptr.as_ref().unwrap().as_mut_ptr()
-//     }
-
-//     pub unsafe fn deref_mut(&mut self) -> &mut dyn AllocatedType {
-//         &mut *self.ref_guard.ptr.as_ref().unwrap().as_mut_ptr()
-//     }
-// }
-
-// struct AllocatorImpl {
-//     allocations: Vec<AllocationCell<Allocation>>,
-//     freed_indices: Vec<usize>,
-// }
 
 #[derive(Default)]
 struct Allocations {
@@ -222,7 +168,7 @@ impl Allocator {
     }
 
     /// Allocates the value with refcount set to 1.
-    fn allocate_value<'a, T: DynTypeAllocator>(
+    fn allocate_value<'a, T: DynTypeTrait>(
         &self,
         value: T::DynAlloc,
         ty: T,
@@ -276,7 +222,7 @@ impl Allocator {
         ptr
     }
 
-    pub fn allocate<'a, T: DynTypeAllocator>(
+    pub fn allocate<'a, T: DynTypeTrait>(
         &self,
         descriptor: T::Descriptor,
         handle: AllocatorHandle<'a>,
@@ -434,7 +380,7 @@ impl Allocator {
 
     /// Safety: Access safety must be ensured externally by the execution graph.
     ///         Extra caution must be taken to request a correct lifetime 'a.
-    unsafe fn deref_ptr<'a>(
+    pub unsafe fn deref_ptr<'a>(
         &self,
         allocation_ptr: AllocationPointer,
     ) -> Option<(&'a dyn AllocatedType, &'a TypeEnum)>
@@ -450,7 +396,7 @@ impl Allocator {
 
     /// Safety: Access safety must be ensured externally by the execution graph.
     ///         Extra caution must be taken to request a correct lifetime 'a.
-    unsafe fn deref_mut_ptr<'a>(
+    pub unsafe fn deref_mut_ptr<'a>(
         &self,
         allocation_ptr: AllocationPointer,
     ) -> Option<(&'a mut dyn AllocatedType, &'a TypeEnum)>
@@ -464,29 +410,29 @@ impl Allocator {
         })
     }
 
-    pub fn deref<'a, T: DynTypeAllocator>(
-        &self,
-        reference: impl RefExt<'a, T>,
-    ) -> Option<(&'a T::DynAlloc, &'a T)>
-    {
-        let (data, ty) = unsafe { self.deref_ptr(reference.get_ptr())? };
+    // pub fn deref<'a, T: DynTypeTrait>(
+    //     &self,
+    //     reference: impl RefExt<'a, T>,
+    // ) -> Option<(&'a T::DynAlloc, &'a T)>
+    // {
+    //     let (data, ty) = unsafe { self.deref_ptr(reference.get_ptr())? };
 
-        Some((
-            data.downcast_ref().expect("Type mismatch when dereferencing."),
-            ty.downcast_ref().expect("Type mismatch when dereferencing."),
-        ))
-    }
+    //     Some((
+    //         data.downcast_ref().expect("Type mismatch when dereferencing."),
+    //         ty.downcast_ref().expect("Type mismatch when dereferencing."),
+    //     ))
+    // }
 
-    pub fn deref_mut<'a, T: DynTypeAllocator>(
-        &self,
-        reference: impl RefMutExt<'a, T>,
-    ) -> Option<(&'a mut T::DynAlloc, &'a T)>
-    {
-        let (data, ty) = unsafe { self.deref_mut_ptr(reference.get_ptr())? };
+    // pub fn deref_mut<'a, T: DynTypeTrait>(
+    //     &self,
+    //     reference: impl RefMutExt<'a, T>,
+    // ) -> Option<(&'a mut T::DynAlloc, &'a T)>
+    // {
+    //     let (data, ty) = unsafe { self.deref_mut_ptr(reference.get_ptr())? };
 
-        Some((
-            data.downcast_mut().expect("Type mismatch when dereferencing."),
-            ty.downcast_ref().expect("Type mismatch when dereferencing."),
-        ))
-    }
+    //     Some((
+    //         data.downcast_mut().expect("Type mismatch when dereferencing."),
+    //         ty.downcast_ref().expect("Type mismatch when dereferencing."),
+    //     ))
+    // }
 }

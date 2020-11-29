@@ -1,7 +1,6 @@
 use crate::graph::alloc::{Allocation, Allocator, TaskRefCounter};
-use crate::graph::{ApplicationContext, DynTypeAllocator, NodeIndex};
-use crate::node::NodeConfiguration;
-use crate::node::{ChannelValueRefs, ChannelValues};
+use crate::graph::{ApplicationContext, NodeIndex};
+use crate::node::{ChannelValueRefs, ChannelValues, DynTypeTrait, NodeConfiguration};
 use crate::style::Theme;
 use downcast_rs::{impl_downcast, Downcast};
 use iced::Element;
@@ -135,7 +134,7 @@ impl<'a> AllocatorHandle<'a> {
     //     OwnedRefMut::<T>::allocate_default(self)
     // }
 
-    pub fn allocate<T: DynTypeAllocator>(self, descriptor: T::Descriptor) -> OwnedRefMut<T> {
+    pub fn allocate<T: DynTypeTrait>(self, descriptor: T::Descriptor) -> OwnedRefMut<T> {
         OwnedRefMut::<T>::allocate(descriptor, self)
     }
 

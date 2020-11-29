@@ -1,5 +1,5 @@
 use crate::graph::ListAllocation;
-use crate::node::ty::TypeTrait;
+use crate::node::ty::TypeExt;
 use crate::node::{ListDescriptor, ListRefExt, ListRefMutExt, ListType, OwnedRefMut, RefExt, RefMutExt};
 use crate::{
     node::{

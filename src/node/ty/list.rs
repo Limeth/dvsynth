@@ -3,8 +3,9 @@ use std::fmt::Display;
 use crate::graph::alloc::{AllocatedType, Allocator};
 use crate::graph::ListAllocation;
 use crate::node::behaviour::AllocatorHandle;
+use crate::ty::prelude::*;
 
-use super::{DowncastFromTypeEnum, DynTypeDescriptor, DynTypeTrait, RefExt, RefMutExt, TypeEnum, TypeTrait};
+use super::{DowncastFromTypeEnum, DynTypeDescriptor, DynTypeTrait, RefExt, RefMutExt, TypeEnum, TypeExt};
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone)]
 pub struct ListType {
@@ -34,8 +35,12 @@ impl DynTypeDescriptor<ListType> for ListDescriptor {
 }
 
 impl DynTypeTrait for ListType {
-    // type DynAllocDispatcher = ListDispatcher;
     type Descriptor = ListDescriptor;
+    type DynAlloc = ListAllocation;
+
+    fn create_value_from_descriptor(descriptor: Self::Descriptor) -> Self::DynAlloc {
+        descriptor.into()
+    }
 }
 
 pub trait ListRefExt<'a> {
@@ -51,12 +56,12 @@ impl<'a, T> ListRefExt<'a> for T
 where T: RefExt<'a, ListType>
 {
     fn len(self) -> usize {
-        let (data, ty) = Allocator::get().deref(self).unwrap();
+        let (data, ty) = self.get_inner().deref_ref().unwrap();
         data.data.len() / ty.item_type.value_size()
     }
 
     fn read_item(self, index: usize) -> Result<&'a [u8], ()> {
-        let (data, ty) = Allocator::get().deref(self).unwrap();
+        let (data, ty) = self.get_inner().deref_ref().unwrap();
 
         if ty.has_safe_binary_representation() {
             let item_size = ty.item_type.value_size();
@@ -76,7 +81,7 @@ impl<'a, T> ListRefMutExt<'a> for T
 where T: RefMutExt<'a, ListType>
 {
     fn push_item(self, item: &[u8]) -> Result<(), ()> {
-        let (data, ty) = Allocator::get().deref_mut(self).unwrap();
+        let (data, ty) = self.get_mut_inner().deref_ref_mut().unwrap();
 
         if ty.item_type.has_safe_binary_representation() {
             let item_size = ty.item_type.value_size();

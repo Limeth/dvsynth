@@ -2,7 +2,7 @@ use crate::node::behaviour::{
     AllocatorHandle, ExecutionContext, MainThreadTask, NodeBehaviourContainer, NodeCommand,
     NodeEventContainer, NodeExecutorContainer, NodeExecutorState, NodeStateInitializerContainer,
 };
-use crate::node::ty::TypeTrait;
+use crate::node::ty::TypeExt;
 use crate::node::{
     AllocationPointer, ChannelDirection, ChannelValueRefs, ChannelValues, DowncastFromTypeEnum, DynTypeTrait,
     ListDescriptor, ListType, NodeConfiguration, RefExt, RefMutExt, TypeEnum,
@@ -395,20 +395,6 @@ impl Deref for TextureAllocation {
             TextureAllocation::TextureView(texture_view) => texture_view,
             TextureAllocation::SwapchainFrame(swapchain_frame) => &swapchain_frame.output.view,
         }
-    }
-}
-
-pub trait DynTypeAllocator: DynTypeTrait + DowncastFromTypeEnum {
-    type DynAlloc: AllocatedType;
-
-    fn create_value_from_descriptor(descriptor: Self::Descriptor) -> Self::DynAlloc;
-}
-
-impl DynTypeAllocator for ListType {
-    type DynAlloc = ListAllocation;
-
-    fn create_value_from_descriptor(descriptor: Self::Descriptor) -> Self::DynAlloc {
-        descriptor.into()
     }
 }
 

@@ -1,5 +1,5 @@
 use super::*;
-use crate::node::{ChannelRef, NodeConfiguration, TypeEnum, TypeTrait};
+use crate::node::{ChannelRef, NodeConfiguration, TypeEnum, TypeExt};
 use crate::util::{RectangleExt, Segments};
 use crate::{style, util, ChannelDirection, ChannelIdentifier, Connection};
 use iced::widget::Space;

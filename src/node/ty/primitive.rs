@@ -1,4 +1,4 @@
-use super::{DowncastFromTypeEnum, RefExt, TypeEnum, TypeTrait};
+use super::{DowncastFromTypeEnum, RefExt, TypeEnum, TypeExt, TypeTrait};
 use byteorder::{ByteOrder, ReadBytesExt, WriteBytesExt};
 use std::fmt::Display;
 use std::io::{Cursor, Read, Write};
@@ -214,7 +214,7 @@ impl Display for PrimitiveType {
     }
 }
 
-impl TypeTrait for PrimitiveType {
+impl TypeExt for PrimitiveType {
     fn value_size(&self) -> usize {
         use PrimitiveType::*;
         match self {

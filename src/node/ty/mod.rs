@@ -1,6 +1,10 @@
 use std::any::TypeId;
 use std::borrow::Cow;
 use std::fmt::{Debug, Display};
+use std::io::{Cursor, Read, Write};
+use std::marker::PhantomData;
+
+use byteorder::{ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
 
 pub use array::*;
 use downcast_rs::Downcast;
@@ -9,11 +13,20 @@ pub use primitive::*;
 pub use reference::*;
 pub use texture::*;
 
+use crate::graph::alloc::{AllocatedType, Allocator};
+
+use super::behaviour::AllocatorHandle;
+
 pub mod array;
 pub mod list;
 pub mod primitive;
 pub mod reference;
 pub mod texture;
+
+pub mod prelude {
+    pub use super::reference::{RefExt, RefMutExt};
+    pub use super::{InnerRef, InnerRefMut};
+}
 
 #[derive(Eq, PartialEq, Debug, Clone, Copy, Hash)]
 #[repr(transparent)]
@@ -21,7 +34,108 @@ pub struct AllocationPointer {
     pub(crate) index: u64,
 }
 
-pub trait TypeTrait: Into<TypeEnum> + Send + Sync + 'static {
+pub trait InnerRef<'a>: Sized + Clone + Copy {
+    type OutputData: ?Sized;
+    type OutputType: TypeTrait;
+
+    unsafe fn from_raw_bytes(
+        bytes: &'a [u8],
+        ty: &'a Self::OutputType,
+        handle: AllocatorHandle<'a>,
+    ) -> Result<Self, ()>;
+    fn deref_ref(self) -> Result<(&'a Self::OutputData, &'a Self::OutputType), ()>;
+}
+
+pub trait InnerRefMut<'a>: Sized {
+    type OutputData: ?Sized;
+    type OutputType: TypeTrait;
+    type InnerRef: self::InnerRef<'a>;
+
+    unsafe fn from_raw_bytes(
+        bytes: &'a mut [u8],
+        ty: &'a Self::OutputType,
+        handle: AllocatorHandle<'a>,
+    ) -> Result<Self, ()>;
+
+    fn deref_ref_mut(self) -> Result<(&'a mut Self::OutputData, &'a Self::OutputType), ()>;
+}
+
+pub trait InnerRefTypes {
+    type InnerRef<'a>: self::InnerRef<'a>;
+    type InnerRefMut<'a>: self::InnerRefMut<'a>;
+
+    fn downgrade<'a>(from: Self::InnerRefMut<'a>) -> Self::InnerRef<'a>;
+}
+
+pub struct DirectInnerRef<'a, T: TypeTrait> {
+    bytes: &'a [u8],
+    ty: &'a T,
+}
+
+impl<'a, T: TypeTrait> Clone for DirectInnerRef<'a, T> {
+    fn clone(&self) -> Self {
+        Self { bytes: self.bytes, ty: self.ty }
+    }
+}
+
+impl<'a, T: TypeTrait> Copy for DirectInnerRef<'a, T> {}
+
+impl<'a, T: TypeTrait> InnerRef<'a> for DirectInnerRef<'a, T> {
+    type OutputData = [u8];
+    type OutputType = T;
+
+    unsafe fn from_raw_bytes(
+        bytes: &'a [u8],
+        ty: &'a Self::OutputType,
+        _handle: AllocatorHandle<'a>,
+    ) -> Result<Self, ()>
+    {
+        Ok(Self { bytes, ty })
+    }
+
+    fn deref_ref(self) -> Result<(&'a Self::OutputData, &'a Self::OutputType), ()> {
+        Ok((self.bytes, self.ty))
+    }
+}
+
+pub struct DirectInnerRefMut<'a, T: TypeTrait> {
+    bytes: &'a mut [u8],
+    ty: &'a T,
+}
+
+impl<'a, T: TypeTrait> InnerRefMut<'a> for DirectInnerRefMut<'a, T> {
+    type OutputData = [u8];
+    type OutputType = T;
+    type InnerRef = DirectInnerRef<'a, T>;
+
+    unsafe fn from_raw_bytes(
+        bytes: &'a mut [u8],
+        ty: &'a Self::OutputType,
+        _handle: AllocatorHandle<'a>,
+    ) -> Result<Self, ()>
+    {
+        Ok(Self { bytes, ty })
+    }
+
+    fn deref_ref_mut(self) -> Result<(&'a mut Self::OutputData, &'a Self::OutputType), ()> {
+        Ok((self.bytes, self.ty))
+    }
+}
+
+pub struct DirectInnerRefTypes<T> {
+    __marker: PhantomData<T>,
+}
+
+impl<T: TypeTrait> InnerRefTypes for DirectInnerRefTypes<T> {
+    type InnerRef<'a> = DirectInnerRef<'a, T>;
+    type InnerRefMut<'a> = DirectInnerRefMut<'a, T>;
+
+    fn downgrade<'a>(from: Self::InnerRefMut<'a>) -> Self::InnerRef<'a> {
+        DirectInnerRef { bytes: &*from.bytes, ty: from.ty }
+    }
+}
+
+pub trait TypeExt: Into<TypeEnum> + PartialEq + Eq + Send + Sync + 'static {
     /// Returns the size of the associated value, in bytes.
     fn value_size(&self) -> usize;
 
@@ -34,6 +148,10 @@ pub trait TypeTrait: Into<TypeEnum> + Send + Sync + 'static {
     ///
     /// Pointers are the typical case which is not safe.
     fn has_safe_binary_representation(&self) -> bool;
+}
+
+pub trait TypeTrait: TypeExt + DowncastFromTypeEnum {
+    type InnerRefTypes: self::InnerRefTypes = DirectInnerRefTypes<Self>;
 }
 
 pub trait DowncastFromTypeEnum {
@@ -54,16 +172,135 @@ pub trait DynTypeDescriptor<T: DynTypeTrait<Descriptor = Self>>: Send + Sync + '
 }
 
 /// A type that can only be created on the heap.
-pub trait DynTypeTrait: Into<TypeEnum> + Send + Sync + 'static {
-    // /// The interface to access the dynamically allocated data.
-    // /// Abstracts away the underlying implementation.
-    // type DynAllocDispatcher: Send + Sync + 'static;
-
+pub trait DynTypeTrait
+where Self: TypeTrait<InnerRefTypes = IndirectInnerRefTypes<Self>>
+{
     /// The type to initialize the allocation with.
     type Descriptor: DynTypeDescriptor<Self>;
+    type DynAlloc: AllocatedType;
+
+    fn create_value_from_descriptor(descriptor: Self::Descriptor) -> Self::DynAlloc;
+}
+
+pub struct IndirectInnerRef<'a, T: AllocatedType> {
+    pub(crate) ptr: AllocationPointer,
+    pub(crate) ty: &'a T,
+    __marker: PhantomData<T>,
+}
+
+impl<'a, T: DynTypeTrait> IndirectInnerRef<'a, T> {
+    pub fn new(ptr: AllocationPointer) -> Self {
+        let (_, ty) = unsafe { Allocator::get().deref_ptr(ptr).unwrap() };
+        let ty = ty.downcast_ref().unwrap();
+        Self { ptr, ty, __marker: Default::default() }
+    }
+}
+
+impl<'a, T: DynTypeTrait> Clone for IndirectInnerRef<'a, T> {
+    fn clone(&self) -> Self {
+        Self { ptr: self.ptr, ty: self.ty, __marker: Default::default() }
+    }
+}
+
+impl<'a, T: DynTypeTrait> Copy for IndirectInnerRef<'a, T> {}
+
+impl<'a, T: DynTypeTrait> InnerRef<'a> for IndirectInnerRef<'a, T> {
+    type OutputData = T::DynAlloc;
+    type OutputType = T;
+
+    unsafe fn from_raw_bytes(
+        bytes: &'a [u8],
+        ty: &'a Self::OutputType,
+        _handle: AllocatorHandle<'a>,
+    ) -> Result<Self, ()>
+    {
+        if bytes.len() != std::mem::size_of::<AllocationPointer>() {
+            return Err(());
+        }
+        let mut read = Cursor::new(bytes);
+        let ptr = AllocationPointer::new(read.read_u64::<LittleEndian>().unwrap());
+        Ok(Self { ptr, ty, __marker: Default::default() })
+    }
+
+    fn deref_ref(self) -> Result<(&'a Self::OutputData, &'a Self::OutputType), ()> {
+        let (data, ty) = unsafe { Allocator::get().deref_ptr(self.ptr).unwrap() };
+        let ty = ty.downcast_ref().ok_or(())?;
+
+        if ty != self.ty {
+            return Err(());
+        }
+
+        Ok((data.downcast_ref().ok_or(())?, ty))
+    }
+}
+
+pub struct IndirectInnerRefMut<'a, T: AllocatedType> {
+    pub(crate) ptr: AllocationPointer,
+    pub(crate) ty: &'a T,
+    __marker: PhantomData<T>,
+}
+
+impl<'a, T: DynTypeTrait> IndirectInnerRefMut<'a, T> {
+    pub fn new(ptr: AllocationPointer) -> Self {
+        let (_, ty) = unsafe { Allocator::get().deref_ptr(ptr).unwrap() };
+        let ty = ty.downcast_ref().unwrap();
+        Self { ptr, ty, __marker: Default::default() }
+    }
+}
+
+impl<'a, T> InnerRefMut<'a> for IndirectInnerRefMut<'a, T>
+where T: DynTypeTrait
+{
+    type OutputData = T::DynAlloc;
+    type OutputType = T;
+    type InnerRef = IndirectInnerRef<'a, T>;
+
+    unsafe fn from_raw_bytes(
+        bytes: &'a mut [u8],
+        ty: &'a Self::OutputType,
+        _handle: AllocatorHandle<'a>,
+    ) -> Result<Self, ()>
+    {
+        if bytes.len() != std::mem::size_of::<AllocationPointer>() {
+            return Err(());
+        }
+        let mut read = Cursor::new(bytes);
+        let ptr = AllocationPointer::new(read.read_u64::<LittleEndian>().unwrap());
+        Ok(Self { ptr, ty, __marker: Default::default() })
+    }
+
+    fn deref_ref_mut(self) -> Result<(&'a mut Self::OutputData, &'a Self::OutputType), ()> {
+        let (data, ty) = unsafe { Allocator::get().deref_mut_ptr(self.ptr).unwrap() };
+        let ty = ty.downcast_ref().ok_or(())?;
+
+        if ty != self.ty {
+            return Err(());
+        }
+
+        Ok((data.downcast_mut().ok_or(())?, ty))
+    }
+}
+
+pub struct IndirectInnerRefTypes<T> {
+    __marker: PhantomData<T>,
+}
+
+impl<T: DynTypeTrait> InnerRefTypes for IndirectInnerRefTypes<T> {
+    type InnerRef<'a> = IndirectInnerRef<'a, T>;
+    type InnerRefMut<'a> = IndirectInnerRefMut<'a, T>;
+
+    fn downgrade<'a>(from: Self::InnerRefMut<'a>) -> Self::InnerRef<'a> {
+        IndirectInnerRef { ptr: from.ptr, ty: from.ty, __marker: Default::default() }
+    }
 }
 
 impl<T> TypeTrait for T
+where T: DynTypeTrait
+{
+    type InnerRefTypes = IndirectInnerRefTypes<Self>;
+}
+
+impl<T> TypeExt for T
 where T: DynTypeTrait
 {
     fn value_size(&self) -> usize {
@@ -110,7 +347,7 @@ impl Display for TypeEnum {
     }
 }
 
-impl TypeTrait for TypeEnum {
+impl TypeExt for TypeEnum {
     fn value_size(&self) -> usize {
         use TypeEnum::*;
         match self {

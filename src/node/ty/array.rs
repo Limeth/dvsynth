@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use super::{DowncastFromTypeEnum, TypeEnum, TypeTrait};
+use super::{DowncastFromTypeEnum, TypeEnum, TypeExt, TypeTrait};
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone)]
 pub struct ArrayType {
@@ -24,7 +24,7 @@ impl Display for ArrayType {
     }
 }
 
-impl TypeTrait for ArrayType {
+impl TypeExt for ArrayType {
     fn value_size(&self) -> usize {
         self.len * self.item_type.value_size()
     }

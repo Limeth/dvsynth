@@ -1,3 +1,5 @@
+use crate::graph::TextureAllocation;
+
 use super::{DowncastFromTypeEnum, DynTypeDescriptor, DynTypeTrait, TypeEnum};
 use std::fmt::Display;
 
@@ -31,6 +33,11 @@ impl DynTypeDescriptor<TextureType> for TextureDescriptor {
 impl DynTypeTrait for TextureType {
     // type DynAllocDispatcher = TextureDispatcher;
     type Descriptor = TextureDescriptor;
+    type DynAlloc = TextureAllocation;
+
+    fn create_value_from_descriptor(descriptor: Self::Descriptor) -> Self::DynAlloc {
+        todo!()
+    }
 }
 
 impl DowncastFromTypeEnum for TextureType {
