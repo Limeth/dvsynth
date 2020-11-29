@@ -5,7 +5,10 @@ use crate::graph::ListAllocation;
 use crate::node::behaviour::AllocatorHandle;
 use crate::ty::prelude::*;
 
-use super::{DowncastFromTypeEnum, DynTypeDescriptor, DynTypeTrait, RefExt, RefMutExt, TypeEnum, TypeExt};
+use super::{
+    DowncastFromTypeEnum, DynTypeDescriptor, DynTypeTrait, RefAny, RefExt, RefMutAny, RefMutExt, TypeEnum,
+    TypeExt,
+};
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone)]
 pub struct ListType {
@@ -45,34 +48,31 @@ impl DynTypeTrait for ListType {
 
 pub trait ListRefExt<'a> {
     fn len(self) -> usize;
-    fn read_item(self, index: usize) -> Result<&'a [u8], ()>;
+    fn get_item(self, index: usize) -> Result<RefAny<'a>, ()>;
 }
 
 pub trait ListRefMutExt<'a> {
-    fn push_item(self, data: &[u8]) -> Result<(), ()>;
+    fn get_item_mut(self, index: usize) -> Result<RefMutAny<'a>, ()>;
+    fn push_item<'b>(self, item: impl RefMutDynExt<'b>) -> Result<(), ()>;
 }
 
 impl<'a, T> ListRefExt<'a> for T
 where T: RefExt<'a, ListType>
 {
     fn len(self) -> usize {
-        let (data, ty) = self.get_inner().deref_ref().unwrap();
+        let (data, ty) = unsafe { self.get_inner().deref_ref().unwrap() };
         data.data.len() / ty.item_type.value_size()
     }
 
-    fn read_item(self, index: usize) -> Result<&'a [u8], ()> {
-        let (data, ty) = self.get_inner().deref_ref().unwrap();
+    fn get_item(self, index: usize) -> Result<RefAny<'a>, ()> {
+        let (data, ty) = unsafe { self.get_inner().deref_ref().unwrap() };
+        let item_size = ty.item_type.value_size();
 
-        if ty.has_safe_binary_representation() {
-            let item_size = ty.item_type.value_size();
-
-            if (index + 1) * item_size > data.data.len() {
-                Err(())
-            } else {
-                Ok(&data.data[(index * item_size)..((index + 1) * item_size)])
-            }
-        } else {
+        if (index + 1) * item_size > data.data.len() {
             Err(())
+        } else {
+            let bytes = &data.data[(index * item_size)..((index + 1) * item_size)];
+            Ok(unsafe { RefAny::from(bytes, ty.item_type.as_ref()) })
         }
     }
 }
@@ -80,21 +80,28 @@ where T: RefExt<'a, ListType>
 impl<'a, T> ListRefMutExt<'a> for T
 where T: RefMutExt<'a, ListType>
 {
-    fn push_item(self, item: &[u8]) -> Result<(), ()> {
-        let (data, ty) = self.get_mut_inner().deref_ref_mut().unwrap();
+    fn get_item_mut(self, index: usize) -> Result<RefMutAny<'a>, ()> {
+        let (data, ty) = unsafe { self.get_inner().deref_ref().unwrap() };
+        let item_size = ty.item_type.value_size();
 
-        if ty.item_type.has_safe_binary_representation() {
-            let item_size = ty.item_type.value_size();
-
-            if item_size == item.len() {
-                data.data.extend(item);
-                Ok(())
-            } else {
-                Err(())
-            }
-        } else {
+        if (index + 1) * item_size > data.data.len() {
             Err(())
+        } else {
+            let bytes = &mut data.data[(index * item_size)..((index + 1) * item_size)];
+            Ok(unsafe { RefMutAny::from(bytes, ty.item_type.as_ref()) })
         }
+    }
+
+    fn push_item<'b>(self, item: impl RefMutDynExt<'b>) -> Result<(), ()> {
+        let (data, ty) = unsafe { self.get_mut_inner().deref_ref_mut().unwrap() };
+        let item_size = ty.item_type.value_size();
+
+        if !item.ty_equals(&ty.item_type) {
+            return Err(());
+        }
+
+        data.data.extend(unsafe { item.bytes() });
+        Ok(())
     }
 }
 

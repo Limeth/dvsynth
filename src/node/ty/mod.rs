@@ -24,7 +24,7 @@ pub mod reference;
 pub mod texture;
 
 pub mod prelude {
-    pub use super::reference::{RefExt, RefMutExt};
+    pub use super::reference::{RefDynExt, RefExt, RefMutDynExt, RefMutExt};
     pub use super::{InnerRef, InnerRefMut};
 }
 
@@ -43,7 +43,9 @@ pub trait InnerRef<'a>: Sized + Clone + Copy {
         ty: &'a Self::OutputType,
         handle: AllocatorHandle<'a>,
     ) -> Result<Self, ()>;
-    fn deref_ref(self) -> Result<(&'a Self::OutputData, &'a Self::OutputType), ()>;
+
+    unsafe fn raw_bytes(&self) -> &[u8];
+    unsafe fn deref_ref(self) -> Result<(&'a Self::OutputData, &'a Self::OutputType), ()>;
 }
 
 pub trait InnerRefMut<'a>: Sized {
@@ -57,12 +59,12 @@ pub trait InnerRefMut<'a>: Sized {
         handle: AllocatorHandle<'a>,
     ) -> Result<Self, ()>;
 
-    fn deref_ref_mut(self) -> Result<(&'a mut Self::OutputData, &'a Self::OutputType), ()>;
+    unsafe fn deref_ref_mut(self) -> Result<(&'a mut Self::OutputData, &'a Self::OutputType), ()>;
 }
 
-pub trait InnerRefTypes {
-    type InnerRef<'a>: self::InnerRef<'a>;
-    type InnerRefMut<'a>: self::InnerRefMut<'a>;
+pub trait InnerRefTypes<T: TypeTrait> {
+    type InnerRef<'a>: self::InnerRef<'a, OutputType = T>;
+    type InnerRefMut<'a>: self::InnerRefMut<'a, OutputType = T>;
 
     fn downgrade<'a>(from: Self::InnerRefMut<'a>) -> Self::InnerRef<'a>;
 }
@@ -93,7 +95,11 @@ impl<'a, T: TypeTrait> InnerRef<'a> for DirectInnerRef<'a, T> {
         Ok(Self { bytes, ty })
     }
 
-    fn deref_ref(self) -> Result<(&'a Self::OutputData, &'a Self::OutputType), ()> {
+    unsafe fn raw_bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+
+    unsafe fn deref_ref(self) -> Result<(&'a Self::OutputData, &'a Self::OutputType), ()> {
         Ok((self.bytes, self.ty))
     }
 }
@@ -117,7 +123,7 @@ impl<'a, T: TypeTrait> InnerRefMut<'a> for DirectInnerRefMut<'a, T> {
         Ok(Self { bytes, ty })
     }
 
-    fn deref_ref_mut(self) -> Result<(&'a mut Self::OutputData, &'a Self::OutputType), ()> {
+    unsafe fn deref_ref_mut(self) -> Result<(&'a mut Self::OutputData, &'a Self::OutputType), ()> {
         Ok((self.bytes, self.ty))
     }
 }
@@ -126,7 +132,7 @@ pub struct DirectInnerRefTypes<T> {
     __marker: PhantomData<T>,
 }
 
-impl<T: TypeTrait> InnerRefTypes for DirectInnerRefTypes<T> {
+impl<T: TypeTrait> InnerRefTypes<T> for DirectInnerRefTypes<T> {
     type InnerRef<'a> = DirectInnerRef<'a, T>;
     type InnerRefMut<'a> = DirectInnerRefMut<'a, T>;
 
@@ -151,7 +157,7 @@ pub trait TypeExt: Into<TypeEnum> + PartialEq + Eq + Send + Sync + 'static {
 }
 
 pub trait TypeTrait: TypeExt + DowncastFromTypeEnum {
-    type InnerRefTypes: self::InnerRefTypes = DirectInnerRefTypes<Self>;
+    type InnerRefTypes: self::InnerRefTypes<Self> = DirectInnerRefTypes<Self>;
 }
 
 pub trait DowncastFromTypeEnum {
@@ -222,8 +228,12 @@ impl<'a, T: DynTypeTrait> InnerRef<'a> for IndirectInnerRef<'a, T> {
         Ok(Self { ptr, ty, __marker: Default::default() })
     }
 
-    fn deref_ref(self) -> Result<(&'a Self::OutputData, &'a Self::OutputType), ()> {
-        let (data, ty) = unsafe { Allocator::get().deref_ptr(self.ptr).unwrap() };
+    unsafe fn raw_bytes(&self) -> &[u8] {
+        safe_transmute::transmute_to_bytes(&[self.ptr.as_u64()])
+    }
+
+    unsafe fn deref_ref(self) -> Result<(&'a Self::OutputData, &'a Self::OutputType), ()> {
+        let (data, ty) = Allocator::get().deref_ptr(self.ptr).unwrap();
         let ty = ty.downcast_ref().ok_or(())?;
 
         if ty != self.ty {
@@ -269,8 +279,8 @@ where T: DynTypeTrait
         Ok(Self { ptr, ty, __marker: Default::default() })
     }
 
-    fn deref_ref_mut(self) -> Result<(&'a mut Self::OutputData, &'a Self::OutputType), ()> {
-        let (data, ty) = unsafe { Allocator::get().deref_mut_ptr(self.ptr).unwrap() };
+    unsafe fn deref_ref_mut(self) -> Result<(&'a mut Self::OutputData, &'a Self::OutputType), ()> {
+        let (data, ty) = Allocator::get().deref_mut_ptr(self.ptr).unwrap();
         let ty = ty.downcast_ref().ok_or(())?;
 
         if ty != self.ty {
@@ -285,7 +295,7 @@ pub struct IndirectInnerRefTypes<T> {
     __marker: PhantomData<T>,
 }
 
-impl<T: DynTypeTrait> InnerRefTypes for IndirectInnerRefTypes<T> {
+impl<T: DynTypeTrait> InnerRefTypes<T> for IndirectInnerRefTypes<T> {
     type InnerRef<'a> = IndirectInnerRef<'a, T>;
     type InnerRefMut<'a> = IndirectInnerRefMut<'a, T>;
 

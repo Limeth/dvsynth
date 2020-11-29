@@ -1,4 +1,7 @@
-use super::{AllocationPointer, IndirectInnerRef, IndirectInnerRefMut, InnerRefTypes, TypeTrait};
+use super::{
+    AllocationPointer, IndirectInnerRef, IndirectInnerRefMut, InnerRef, InnerRefMut, InnerRefTypes, TypeEnum,
+    TypeTrait,
+};
 use crate::graph::alloc::{AllocatedType, Allocator};
 use crate::graph::NodeIndex;
 use crate::node::behaviour::AllocatorHandle;
@@ -29,14 +32,42 @@ use std::ops::{Deref, DerefMut};
 
 /// A common trait for references that allow for shared access.
 /// The lifetime `'a` denotes how long the underlying data may be accessed for.
-pub trait RefExt<'a, T: TypeTrait> {
-    fn get_inner(self) -> <T::InnerRefTypes as InnerRefTypes>::InnerRef<'a>;
+pub trait RefExt<'a, T: TypeTrait>: RefDynExt<'a> {
+    fn get_inner(self) -> <T::InnerRefTypes as InnerRefTypes<T>>::InnerRef<'a>;
 }
 
 /// A common trait for references that allow for mutable access.
 /// The lifetime `'a` denotes how long the underlying data may be accessed for.
-pub trait RefMutExt<'a, T: TypeTrait>: RefExt<'a, T> {
-    fn get_mut_inner(self) -> <T::InnerRefTypes as InnerRefTypes>::InnerRefMut<'a>;
+pub trait RefMutExt<'a, T: TypeTrait>: RefExt<'a, T> + RefMutDynExt<'a> {
+    fn get_mut_inner(self) -> <T::InnerRefTypes as InnerRefTypes<T>>::InnerRefMut<'a>;
+}
+
+pub trait RefDynExt<'a> {
+    unsafe fn bytes(&self) -> &[u8];
+    fn ty_equals(&self, ty: &TypeEnum) -> bool;
+}
+
+pub trait RefMutDynExt<'a>: RefDynExt<'a> {}
+
+macro_rules! impl_ref_dyn_exts {
+    (impl[$($generics:tt)*] RefDynExt<'a> for $($rest:tt)*) => {
+        impl<$($generics)*> RefDynExt<'a> for $($rest)* {
+            unsafe fn bytes(&self) -> &[u8] {
+                self.get_inner().raw_bytes()
+            }
+
+            fn ty_equals(&self, other_ty: &TypeEnum) -> bool {
+                let (_, ty) = unsafe { self.get_inner().deref_ref().unwrap() };
+
+                other_ty.downcast_ref() == Some(ty)
+            }
+        }
+    };
+
+    (impl[$($generics:tt)*] RefMutDynExt<'a> for $($rest:tt)*) => {
+        impl<$($generics)*> RefMutDynExt<'a> for $($rest)* {
+        }
+    };
 }
 
 /// A refcounted mutable reference to `T`.
@@ -102,7 +133,7 @@ where T: DynTypeTrait
 impl<'a, T> RefExt<'a, T> for &'a OwnedRefMut<T>
 where T: DynTypeTrait
 {
-    fn get_inner(self) -> <T::InnerRefTypes as InnerRefTypes>::InnerRef<'a> {
+    fn get_inner(self) -> <T::InnerRefTypes as InnerRefTypes<T>>::InnerRef<'a> {
         IndirectInnerRef::new(self.ptr)
     }
 }
@@ -110,7 +141,7 @@ where T: DynTypeTrait
 impl<'a, T> RefExt<'a, T> for &'a mut OwnedRefMut<T>
 where T: DynTypeTrait
 {
-    fn get_inner(self) -> <T::InnerRefTypes as InnerRefTypes>::InnerRef<'a> {
+    fn get_inner(self) -> <T::InnerRefTypes as InnerRefTypes<T>>::InnerRef<'a> {
         IndirectInnerRef::new(self.ptr)
     }
 }
@@ -118,10 +149,14 @@ where T: DynTypeTrait
 impl<'a, T> RefMutExt<'a, T> for &'a mut OwnedRefMut<T>
 where T: DynTypeTrait
 {
-    fn get_mut_inner(self) -> <T::InnerRefTypes as InnerRefTypes>::InnerRefMut<'a> {
+    fn get_mut_inner(self) -> <T::InnerRefTypes as InnerRefTypes<T>>::InnerRefMut<'a> {
         IndirectInnerRefMut::new(self.ptr)
     }
 }
+
+impl_ref_dyn_exts!(impl['a, T: DynTypeTrait] RefDynExt<'a> for &'a OwnedRefMut<T>);
+impl_ref_dyn_exts!(impl['a, T: DynTypeTrait] RefDynExt<'a> for &'a mut OwnedRefMut<T>);
+impl_ref_dyn_exts!(impl['a, T: DynTypeTrait] RefMutDynExt<'a> for &'a mut OwnedRefMut<T>);
 
 impl<T> Drop for OwnedRefMut<T>
 where T: DynTypeTrait
@@ -174,10 +209,12 @@ where T: DynTypeTrait
 impl<'a, T> RefExt<'a, T> for &'a OwnedRef<T>
 where T: DynTypeTrait
 {
-    fn get_inner(self) -> <T::InnerRefTypes as InnerRefTypes>::InnerRef<'a> {
+    fn get_inner(self) -> <T::InnerRefTypes as InnerRefTypes<T>>::InnerRef<'a> {
         IndirectInnerRef::new(self.ptr)
     }
 }
+
+impl_ref_dyn_exts!(impl['a, T: DynTypeTrait] RefDynExt<'a> for &'a OwnedRef<T>);
 
 impl<T> Drop for OwnedRef<T>
 where T: DynTypeTrait
@@ -196,7 +233,7 @@ where T: DynTypeTrait
 pub struct RefMut<'a, T>
 where T: TypeTrait
 {
-    inner: <T::InnerRefTypes as InnerRefTypes>::InnerRefMut<'a>,
+    inner: <T::InnerRefTypes as InnerRefTypes<T>>::InnerRefMut<'a>,
     // ptr: AllocationPointer,
     __marker: PhantomData<(&'a mut T, *mut T)>,
 }
@@ -224,7 +261,7 @@ where T: DynTypeTrait
 impl<'a, T> RefExt<'a, T> for RefMut<'a, T>
 where T: TypeTrait
 {
-    fn get_inner(self) -> <T::InnerRefTypes as InnerRefTypes>::InnerRef<'a> {
+    fn get_inner(self) -> <T::InnerRefTypes as InnerRefTypes<T>>::InnerRef<'a> {
         T::InnerRefTypes::downgrade(self.inner)
     }
 }
@@ -232,10 +269,13 @@ where T: TypeTrait
 impl<'a, T> RefMutExt<'a, T> for RefMut<'a, T>
 where T: TypeTrait
 {
-    fn get_mut_inner(self) -> <T::InnerRefTypes as InnerRefTypes>::InnerRefMut<'a> {
+    fn get_mut_inner(self) -> <T::InnerRefTypes as InnerRefTypes<T>>::InnerRefMut<'a> {
         self.inner
     }
 }
+
+impl_ref_dyn_exts!(impl['a, T: TypeTrait] RefDynExt<'a> for RefMut<'a, T>);
+impl_ref_dyn_exts!(impl['a, T: TypeTrait] RefMutDynExt<'a> for RefMut<'a, T>);
 
 /// A non-refcounted shared reference to `T`.
 #[derive(Clone, Copy)]
@@ -243,7 +283,7 @@ where T: TypeTrait
 pub struct Ref<'a, T>
 where T: TypeTrait
 {
-    inner: <T::InnerRefTypes as InnerRefTypes>::InnerRef<'a>,
+    inner: <T::InnerRefTypes as InnerRefTypes<T>>::InnerRef<'a>,
     // ptr: AllocationPointer,
     __marker: PhantomData<(&'a T, *const T)>,
 }
@@ -259,7 +299,78 @@ where T: DynTypeTrait
 impl<'a, T> RefExt<'a, T> for Ref<'a, T>
 where T: TypeTrait
 {
-    fn get_inner(self) -> <T::InnerRefTypes as InnerRefTypes>::InnerRef<'a> {
+    fn get_inner(self) -> <T::InnerRefTypes as InnerRefTypes<T>>::InnerRef<'a> {
         self.inner
+    }
+}
+
+impl_ref_dyn_exts!(impl['a, T: TypeTrait] RefDynExt<'a> for Ref<'a, T>);
+
+pub struct RefMutAny<'a> {
+    bytes: &'a mut [u8],
+    ty: &'a TypeEnum,
+}
+
+impl<'a> RefMutAny<'a> {
+    pub unsafe fn from(bytes: &'a mut [u8], ty: &'a TypeEnum) -> Self {
+        Self { bytes, ty }
+    }
+
+    pub fn downcast_mut<T: TypeTrait>(self, handle: AllocatorHandle<'a>) -> Option<RefMut<'a, T>> {
+        self.ty
+            .downcast_ref::<T>()
+            .and_then(move |ty: &'a T| unsafe {
+                <<T::InnerRefTypes as InnerRefTypes<T>>::InnerRefMut<'a> as InnerRefMut<'a>>::from_raw_bytes(
+                    self.bytes, ty, handle,
+                )
+                .ok()
+            })
+            .map(|inner| RefMut { inner, __marker: Default::default() })
+    }
+}
+
+impl<'a> RefDynExt<'a> for RefMutAny<'a> {
+    unsafe fn bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+
+    fn ty_equals(&self, ty: &TypeEnum) -> bool {
+        ty == self.ty
+    }
+}
+
+impl<'a> RefMutDynExt<'a> for RefMutAny<'a> {}
+
+#[derive(Clone, Copy)]
+pub struct RefAny<'a> {
+    bytes: &'a [u8],
+    ty: &'a TypeEnum,
+}
+
+impl<'a> RefAny<'a> {
+    pub unsafe fn from(bytes: &'a [u8], ty: &'a TypeEnum) -> Self {
+        Self { bytes, ty }
+    }
+
+    pub fn downcast_ref<T: TypeTrait>(self, handle: AllocatorHandle<'a>) -> Option<Ref<'a, T>> {
+        self.ty
+            .downcast_ref::<T>()
+            .and_then(move |ty: &'a T| unsafe {
+                <<T::InnerRefTypes as InnerRefTypes<T>>::InnerRef<'a> as InnerRef<'a>>::from_raw_bytes(
+                    self.bytes, ty, handle,
+                )
+                .ok()
+            })
+            .map(|inner| Ref { inner, __marker: Default::default() })
+    }
+}
+
+impl<'a> RefDynExt<'a> for RefAny<'a> {
+    unsafe fn bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+
+    fn ty_equals(&self, ty: &TypeEnum) -> bool {
+        ty == self.ty
     }
 }

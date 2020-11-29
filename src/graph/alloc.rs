@@ -38,11 +38,11 @@ impl AllocationPointer {
         Self { index }
     }
 
-    fn as_u64(&self) -> u64 {
+    pub(crate) fn as_u64(&self) -> u64 {
         self.index
     }
 
-    fn as_usize(&self) -> usize {
+    pub(crate) fn as_usize(&self) -> usize {
         self.index as usize
     }
 }
