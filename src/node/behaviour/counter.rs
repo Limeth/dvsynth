@@ -40,7 +40,7 @@ impl NodeBehaviour for CounterNodeBehaviour {
     }
 
     fn create_executor(&self) -> Self::FnExecutor {
-        Box::new(|mut context: ExecutionContext<'_, State>| {
+        Box::new(|mut context: ExecutionContext<'_, '_, State>| {
             let state = context.state.take().unwrap();
             let mut cursor = Cursor::new(context.outputs[0].as_mut());
 

@@ -330,7 +330,7 @@ impl NodeBehaviour for WindowNodeBehaviour {
 
     fn create_executor(&self) -> Self::FnExecutor {
         let settings = self.settings.clone();
-        Box::new(move |mut context: ExecutionContext<'_, State>| {
+        Box::new(move |mut context: ExecutionContext<'_, '_, State>| {
             let state = context.state.take().unwrap();
 
             if state.window.is_none() {
@@ -392,7 +392,7 @@ pub struct WindowSurface {
 }
 
 impl WindowSurface {
-    pub fn from(window: Window, context: &ExecutionContext<'_, State>) -> Self {
+    pub fn from(window: Window, context: &ExecutionContext<'_, '_, State>) -> Self {
         Self {
             surface: unsafe { context.application_context.renderer.instance.create_surface(&window) },
             window,

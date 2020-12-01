@@ -127,7 +127,7 @@ impl NodeBehaviour for ArrayConstructorNodeBehaviour {
     }
 
     fn create_executor(&self) -> Self::FnExecutor {
-        Box::new(move |context: ExecutionContext<'_, Self::State>| {
+        Box::new(move |context: ExecutionContext<'_, '_, Self::State>| {
             let mut cursor = Cursor::new(context.outputs[0].as_mut());
 
             for input in context.inputs.values.iter() {

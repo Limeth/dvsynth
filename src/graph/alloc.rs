@@ -15,8 +15,7 @@ use sharded_slab::{pool::Pool, Clear};
 
 use crate::node::behaviour::AllocatorHandle;
 use crate::node::{
-    AllocationPointer, DynTypeDescriptor, OwnedRef, OwnedRefMut, Ref, RefExt, RefMut, RefMutExt, TypeEnum,
-    TypeTrait,
+    AllocationPointer, DynTypeDescriptor, Ref, RefExt, RefMut, RefMutExt, TypeEnum, TypeTrait,
 };
 
 use super::{DynTypeTrait, NodeIndex, Schedule};
@@ -168,11 +167,11 @@ impl Allocator {
     }
 
     /// Allocates the value with refcount set to 1.
-    fn allocate_value<'a, T: DynTypeTrait>(
+    fn allocate_value<'invocation, 'state: 'invocation, T: DynTypeTrait>(
         &self,
         value: T::DynAlloc,
         ty: T,
-        handle: AllocatorHandle<'a>,
+        handle: AllocatorHandle<'invocation, 'state>,
     ) -> AllocationPointer
     {
         const EXPAND_BY: usize = 64;
@@ -222,10 +221,10 @@ impl Allocator {
         ptr
     }
 
-    pub fn allocate<'a, T: DynTypeTrait>(
+    pub fn allocate<'invocation, 'state: 'invocation, T: DynTypeTrait>(
         &self,
         descriptor: T::Descriptor,
-        handle: AllocatorHandle<'a>,
+        handle: AllocatorHandle<'invocation, 'state>,
     ) -> AllocationPointer
     {
         let ty = descriptor.get_type();

@@ -8,6 +8,10 @@
 #![feature(trait_alias)]
 //!
 //! Task list:
+//! * Pointer types (shared, unique)
+//! * Bind OwnedRef types to state lifetime so as to make sure it is not sent between tasks
+//!   externally.
+//! * Node generics
 //! * Window node:
 //!     * Make window size accessible only when resizable is false
 //!     * Fullscreen modes

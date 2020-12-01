@@ -137,7 +137,7 @@ impl NodeBehaviour for ConstantNodeBehaviour {
 
     fn create_executor(&self) -> Self::FnExecutor {
         let value = self.value;
-        Box::new(move |context: ExecutionContext<'_, Self::State>| {
+        Box::new(move |context: ExecutionContext<'_, '_, Self::State>| {
             let mut cursor = Cursor::new(context.outputs[0].as_mut());
 
             value.write::<LittleEndian>(&mut cursor).unwrap();

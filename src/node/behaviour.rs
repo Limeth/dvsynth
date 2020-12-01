@@ -97,21 +97,13 @@ impl_downcast!(NodeExecutorState);
 
 /// Makes it possible for tasks (nodes) to dynamically allocate data
 /// that can be shared with other tasks via channels.
-///
-///// It is `!Send` and `!Sync` so that we can guarantee the borrowing model, that:
-///// * a mutable reference can be held by up to one task;
-///// * a shared reference can be held by multiple tasks.
-/////
-///// If one could allocate values on or send them to another thread,
-///// we would not be able to guarantee safe access to the underlying data.
 #[derive(Clone, Copy)]
-pub struct AllocatorHandle<'a> {
-    // pub(crate) ref_resolver: &'a TaskRefResolver<'a>,
+pub struct AllocatorHandle<'invocation, 'state: 'invocation> {
     pub(crate) node: NodeIndex,
-    __marker: PhantomData<&'a ()>,
+    __marker: PhantomData<(&'invocation (), &'state ())>,
 }
 
-impl<'a> AllocatorHandle<'a> {
+impl<'invocation, 'state: 'invocation> AllocatorHandle<'invocation, 'state> {
     pub(crate) unsafe fn with_node_index(node: NodeIndex) -> Self {
         Self { node, __marker: Default::default() }
     }
@@ -126,15 +118,15 @@ impl<'a> AllocatorHandle<'a> {
 
 // static_assertions::const_assert_eq!(std::mem::size_of::<AllocatorHandle<'_>>(), 0);
 
-impl<'a> !Send for AllocatorHandle<'a> {}
-impl<'a> !Sync for AllocatorHandle<'a> {}
+impl<'invocation, 'state: 'invocation> !Send for AllocatorHandle<'invocation, 'state> {}
+impl<'invocation, 'state: 'invocation> !Sync for AllocatorHandle<'invocation, 'state> {}
 
-impl<'a> AllocatorHandle<'a> {
+impl<'invocation, 'state: 'invocation> AllocatorHandle<'invocation, 'state> {
     // pub fn allocate_default<T: TypeTrait + Default>(self) -> OwnedRefMut<T> {
     //     OwnedRefMut::<T>::allocate_default(self)
     // }
 
-    pub fn allocate<T: DynTypeTrait>(self, descriptor: T::Descriptor) -> OwnedRefMut<T> {
+    pub fn allocate<T: DynTypeTrait>(self, descriptor: T::Descriptor) -> OwnedRefMut<'state, T> {
         OwnedRefMut::<T>::allocate(descriptor, self)
     }
 
@@ -182,20 +174,20 @@ impl<'a> AllocatorHandle<'a> {
     // }
 }
 
-pub struct ExecutionContext<'a, S: ?Sized> {
-    pub application_context: &'a ApplicationContext,
+pub struct ExecutionContext<'invocation, 'state: 'invocation, S: 'state + ?Sized> {
+    pub application_context: &'invocation ApplicationContext,
     // pub allocator_handle: &'a mut AllocatorHandle<'a>,
-    pub allocator_handle: AllocatorHandle<'a>,
-    pub state: Option<&'a mut S>,
-    pub inputs: &'a ChannelValueRefs<'a>,
-    pub outputs: &'a mut ChannelValues,
+    pub allocator_handle: AllocatorHandle<'invocation, 'state>,
+    pub state: Option<&'state mut S>,
+    pub inputs: &'invocation ChannelValueRefs<'invocation>,
+    pub outputs: &'invocation mut ChannelValues,
 }
 
-impl<'a, S: ?Sized> ExecutionContext<'a, S> {
-    pub fn map_state<R: ?Sized + 'a>(
+impl<'invocation, 'state: 'invocation, S: ?Sized> ExecutionContext<'invocation, 'state, S> {
+    pub fn map_state<R: ?Sized + 'state>(
         self,
-        map: impl FnOnce(&'a mut S) -> &'a mut R,
-    ) -> ExecutionContext<'a, R>
+        map: impl FnOnce(&'state mut S) -> &'state mut R,
+    ) -> ExecutionContext<'invocation, 'state, R>
     {
         ExecutionContext {
             application_context: self.application_context,
@@ -207,18 +199,20 @@ impl<'a, S: ?Sized> ExecutionContext<'a, S> {
     }
 }
 
-pub type ExecutionContextContainer<'a> = ExecutionContext<'a, dyn NodeExecutorState>;
+pub type ExecutionContextContainer<'invocation, 'state> =
+    ExecutionContext<'invocation, 'state, dyn NodeExecutorState>;
 
 pub type NodeExecutorContainer = dyn Send + Sync + Fn(ExecutionContextContainer);
 
 pub trait NodeExecutor<S>: 'static + Send + Sync {
-    fn execute(&self, context: ExecutionContext<'_, S>);
+    fn execute<'invocation, 'state: 'invocation>(&self, context: ExecutionContext<'invocation, 'state, S>);
 }
 
-pub type BoxNodeExecutor<S> = Box<dyn Send + Sync + for<'a> Fn(ExecutionContext<'a, S>)>;
+pub type BoxNodeExecutor<S> =
+    Box<dyn Send + Sync + for<'invocation, 'state> Fn(ExecutionContext<'invocation, 'state, S>)>;
 
 impl<S: 'static> NodeExecutor<S> for BoxNodeExecutor<S> {
-    fn execute(&self, context: ExecutionContext<'_, S>) {
+    fn execute<'invocation, 'state: 'invocation>(&self, context: ExecutionContext<'invocation, 'state, S>) {
         (self)(context)
     }
 }
@@ -291,7 +285,7 @@ impl<T: NodeBehaviour> NodeBehaviourContainer for T {
     fn create_executor(&self) -> Arc<NodeExecutorContainer> {
         let typed_executor = NodeBehaviour::create_executor(self);
 
-        Arc::new(move |context: ExecutionContextContainer<'_>| {
+        Arc::new(move |context: ExecutionContextContainer<'_, '_>| {
             let context =
                 context.map_state(|state| state.downcast_mut::<<Self as NodeBehaviour>::State>().unwrap());
 

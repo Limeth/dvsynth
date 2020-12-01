@@ -130,12 +130,12 @@ impl NodeBehaviour for ListConstructorNodeBehaviour {
 
     fn create_executor(&self) -> Self::FnExecutor {
         let ty = self.ty;
-        Box::new(move |context: ExecutionContext<'_, ()>| {
+        Box::new(move |context: ExecutionContext<'_, '_, ()>| {
             let mut list: OwnedRefMut<ListType> =
                 context.allocator_handle.allocate(ListDescriptor { item_type: ty.into() });
             let values: Vec<u8> = (0..ty.value_size() as u8).collect();
-            list.push_item(&values[..]).unwrap();
-            list.push_item(&values[..]).unwrap();
+            // list.push(&values[..]).unwrap();
+            // list.push(&values[..]).unwrap();
             dbg!(list.len());
             let mut cursor = Cursor::new(context.outputs[0].as_mut());
 

@@ -125,7 +125,7 @@ impl NodeBehaviour for BinaryOpNodeBehaviour {
     fn create_executor(&self) -> Self::FnExecutor {
         let pick_list_ty_value = self.pick_list_ty_value;
         let op = self.op;
-        Box::new(move |context: ExecutionContext<'_, Self::State>| {
+        Box::new(move |context: ExecutionContext<'_, '_, Self::State>| {
             let lhs = pick_list_ty_value.read::<LittleEndian, _>(&context.inputs[0].as_ref()).unwrap();
             let rhs = pick_list_ty_value.read::<LittleEndian, _>(&context.inputs[1].as_ref()).unwrap();
             let result = op.apply_dyn(lhs, rhs);

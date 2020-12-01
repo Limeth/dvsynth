@@ -91,7 +91,7 @@ impl NodeBehaviour for DebugNodeBehaviour {
 
     fn create_executor(&self) -> Self::FnExecutor {
         let ty = self.ty;
-        Box::new(move |context: ExecutionContext<'_, ()>| {
+        Box::new(move |context: ExecutionContext<'_, '_, ()>| {
             let value = ty.read::<LittleEndian, _>(&context.inputs[0].as_ref()).unwrap();
             println!("{:?}", value);
         })
