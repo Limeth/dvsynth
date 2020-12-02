@@ -1,6 +1,7 @@
 use crate::graph::ListAllocation;
 use crate::node::ty::TypeExt;
-use crate::node::{ListDescriptor, ListRefExt, ListRefMutExt, ListType, OwnedRefMut, RefExt, RefMutExt};
+use crate::node::{prelude::*, RefMut};
+use crate::node::{ListDescriptor, ListType, OwnedRefMut, Unique};
 use crate::{
     node::{
         behaviour::{ExecutionContext, NodeBehaviour, NodeCommand, NodeEvent},
@@ -53,7 +54,7 @@ impl ListConstructorNodeBehaviour {
                 .into_iter()
                 .map(|channel_index| Channel::new(format!("item #{}", channel_index), self.ty))
                 .collect(),
-            channels_output: vec![Channel::new("list", ListType::new(self.ty))],
+            channels_output: vec![Channel::new("list", Unique::new(ListType::new(self.ty)))],
         })
     }
 }
@@ -76,6 +77,7 @@ impl NodeBehaviour for ListConstructorNodeBehaviour {
                 match message {
                     UpdateType(ty) => {
                         self.ty = ty;
+                        commands.push(self.get_configure_command());
                     }
                     AddChannel => {
                         self.channel_count = NonZeroUsize::new(self.channel_count.get() + 1).unwrap();
@@ -131,11 +133,20 @@ impl NodeBehaviour for ListConstructorNodeBehaviour {
     fn create_executor(&self) -> Self::FnExecutor {
         let ty = self.ty;
         Box::new(move |context: ExecutionContext<'_, '_, ()>| {
-            let mut list: OwnedRefMut<ListType> =
-                context.allocator_handle.allocate(ListDescriptor { item_type: ty.into() });
-            let values: Vec<u8> = (0..ty.value_size() as u8).collect();
-            // list.push(&values[..]).unwrap();
-            // list.push(&values[..]).unwrap();
+            let mut list_ptr: OwnedRefMut<Unique> =
+                context.allocator_handle.allocate::<ListType>(ListDescriptor::new_if_sized(ty).unwrap());
+            let mut list: RefMut<ListType> =
+                list_ptr.deref_mut().downcast_mut(context.allocator_handle).unwrap();
+            list.push_item_bytes_with(|bytes| {
+                bytes.iter_mut().enumerate().for_each(|(i, byte)| *byte = i as u8);
+            })
+            .unwrap();
+            list.push_item_bytes_with(|bytes| {
+                bytes.iter_mut().enumerate().for_each(|(i, byte)| *byte = 2 * i as u8);
+            })
+            .unwrap();
+            dbg!(list.get(0).unwrap().bytes_if_sized());
+            dbg!(list.get(1).unwrap().bytes_if_sized());
             dbg!(list.len());
             let mut cursor = Cursor::new(context.outputs[0].as_mut());
 

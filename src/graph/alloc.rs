@@ -409,6 +409,25 @@ impl Allocator {
         })
     }
 
+    pub unsafe fn map_type<'a>(
+        &self,
+        allocation_ptr: AllocationPointer,
+        map: impl FnOnce(&mut TypeEnum),
+    ) -> Result<(), ()>
+    {
+        let allocations = self.allocations.read().unwrap();
+        allocations
+            .vec
+            .get(allocation_ptr.as_usize())
+            .map(|allocation| {
+                let allocation_inner =
+                    allocation.ptr.as_ref().as_ref().expect("Dereferencing a freed value.").as_mut();
+
+                (map)(&mut allocation_inner.ty);
+            })
+            .ok_or(())
+    }
+
     // pub fn deref<'a, T: DynTypeTrait>(
     //     &self,
     //     reference: impl RefExt<'a, T>,

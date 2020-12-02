@@ -1,7 +1,9 @@
-use super::{DowncastFromTypeEnum, RefExt, TypeEnum, TypeExt, TypeTrait};
+use super::{DowncastFromTypeEnum, RefExt, SizedTypeExt, TypeEnum, TypeExt, TypeTrait};
 use byteorder::{ByteOrder, ReadBytesExt, WriteBytesExt};
 use std::fmt::Display;
 use std::io::{Cursor, Read, Write};
+
+pub mod prelude {}
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
 pub enum PrimitiveKind {
@@ -214,7 +216,7 @@ impl Display for PrimitiveType {
     }
 }
 
-impl TypeExt for PrimitiveType {
+impl SizedTypeExt for PrimitiveType {
     fn value_size(&self) -> usize {
         use PrimitiveType::*;
         match self {
@@ -224,6 +226,12 @@ impl TypeExt for PrimitiveType {
             U64 | I64 | F64 => 8,
             U128 | I128 => 16,
         }
+    }
+}
+
+impl TypeExt for PrimitiveType {
+    fn value_size_if_sized(&self) -> Option<usize> {
+        Some(self.value_size())
     }
 
     fn is_abi_compatible(&self, other: &Self) -> bool {

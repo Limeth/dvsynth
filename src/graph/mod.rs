@@ -400,7 +400,7 @@ impl Deref for TextureAllocation {
 
 impl From<ListDescriptor> for ListAllocation {
     fn from(descriptor: ListDescriptor) -> Self {
-        Self { item_size: descriptor.item_type.value_size(), descriptor, data: Vec::new() }
+        Self { item_size: descriptor.child_ty().value_size_if_sized().unwrap(), descriptor, data: Vec::new() }
     }
 }
 

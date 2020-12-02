@@ -107,8 +107,8 @@ impl ChannelValue {
 }
 
 impl ChannelValue {
-    pub fn zeroed(ty: &TypeEnum) -> Self {
-        Self { data: vec![0_u8; ty.value_size()].into_boxed_slice() }
+    pub fn zeroed(ty: &TypeEnum) -> Option<Self> {
+        ty.value_size_if_sized().map(|value_size| Self { data: vec![0_u8; value_size].into_boxed_slice() })
     }
 }
 
@@ -149,7 +149,12 @@ impl ChannelValues {
         Self {
             values: channels
                 .iter()
-                .map(|channel| ChannelValue::zeroed(&channel.ty))
+                .map(|channel| {
+                    ChannelValue::zeroed(&channel.ty).unwrap_or_else(|| {
+                        dbg!(&channel);
+                        panic!()
+                    })
+                })
                 .collect::<Vec<_>>()
                 .into_boxed_slice(),
         }

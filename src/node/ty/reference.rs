@@ -11,20 +11,29 @@ use std::io::{Cursor, Read, Write};
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 
+pub mod prelude {
+    pub use super::{RefDynExt, RefExt, RefMutDynExt, RefMutExt};
+}
+
 /// A common trait for references that allow for shared access.
 /// The lifetime `'a` denotes how long the underlying data may be accessed for.
-pub trait RefExt<'a, T: TypeTrait>: RefDynExt<'a> {}
+pub trait RefExt<'a, T: TypeTrait>: RefDynExt<'a> {
+    type Ref<'b, R: TypeTrait>: RefExt<'b, R>;
+}
 
 /// A common trait for references that allow for mutable access.
 /// The lifetime `'a` denotes how long the underlying data may be accessed for.
-pub trait RefMutExt<'a, T: TypeTrait>: RefExt<'a, T> + RefMutDynExt<'a> {}
+pub trait RefMutExt<'a, T: TypeTrait>: RefExt<'a, T> + RefMutDynExt<'a> {
+    type RefMut<'b, R: TypeTrait>: RefMutExt<'b, R>;
+}
 
 pub trait RefDynExt<'a> {
-    unsafe fn typed_bytes(self) -> TypedBytes<'a>;
+    unsafe fn typed_bytes<'b>(&'b self) -> TypedBytes<'b>;
 }
 
 pub trait RefMutDynExt<'a>: RefDynExt<'a> {
-    unsafe fn typed_bytes_mut(self) -> TypedBytesMut<'a>;
+    unsafe fn typed_bytes_mut<'b>(&'b mut self) -> TypedBytesMut<'b>;
+    unsafe fn into_typed_bytes_mut(self) -> TypedBytesMut<'a>;
 }
 
 // TODO: Consider allowing the lifetime to be a sub-lifetime of 'state?
@@ -34,6 +43,12 @@ pub struct OwnedRefMut<'state, T> {
     ptr: AllocationPointer,
     node: NodeIndex,
     __marker: PhantomData<&'state T>,
+}
+
+impl<'state, T> OwnedRefMut<'state, T> {
+    pub(crate) fn into_mut_any(self) -> OwnedRefMutAny<'state> {
+        OwnedRefMut { ptr: self.ptr, node: self.node, __marker: Default::default() }
+    }
 }
 
 impl<'state> OwnedRefMut<'state, ()> {
@@ -76,10 +91,8 @@ impl<'state> OwnedRefMut<'state, ()> {
     }
 }
 
-impl<'state, T> OwnedRefMut<'state, T>
-where T: DynTypeTrait
-{
-    pub fn allocate<'invocation>(
+impl<'state> OwnedRefMut<'state, Unique> {
+    pub fn allocate<'invocation, T: DynTypeTrait>(
         descriptor: T::Descriptor,
         handle: AllocatorHandle<'invocation, 'state>,
     ) -> Self
@@ -141,12 +154,20 @@ where T: TypeTrait
     }
 }
 
-impl<'a, T> RefExt<'a, T> for OwnedRefMut<'a, T> where T: TypeTrait {}
+impl<'a, T> RefExt<'a, T> for OwnedRefMut<'a, T>
+where T: TypeTrait
+{
+    type Ref<'b, R: TypeTrait> = OwnedRef<'b, R>;
+}
 
-impl<'a, T> RefMutExt<'a, T> for OwnedRefMut<'a, T> where T: TypeTrait {}
+impl<'a, T> RefMutExt<'a, T> for OwnedRefMut<'a, T>
+where T: TypeTrait
+{
+    type RefMut<'b, R: TypeTrait> = OwnedRefMut<'b, R>;
+}
 
 impl<'a, T> RefDynExt<'a> for OwnedRefMut<'a, T> {
-    unsafe fn typed_bytes(self) -> TypedBytes<'a> {
+    unsafe fn typed_bytes<'b>(&'b self) -> TypedBytes<'b> {
         let (object, ty) = Allocator::get().deref_ptr(self.ptr).unwrap();
 
         TypedBytes::from(object, ty)
@@ -154,7 +175,13 @@ impl<'a, T> RefDynExt<'a> for OwnedRefMut<'a, T> {
 }
 
 impl<'a, T> RefMutDynExt<'a> for OwnedRefMut<'a, T> {
-    unsafe fn typed_bytes_mut(self) -> TypedBytesMut<'a> {
+    unsafe fn typed_bytes_mut<'b>(&'b mut self) -> TypedBytesMut<'b> {
+        let (object, ty) = Allocator::get().deref_mut_ptr(self.ptr).unwrap();
+
+        TypedBytesMut::from(object, ty)
+    }
+
+    unsafe fn into_typed_bytes_mut(self) -> TypedBytesMut<'a> {
         let (object, ty) = Allocator::get().deref_mut_ptr(self.ptr).unwrap();
 
         TypedBytesMut::from(object, ty)
@@ -239,10 +266,14 @@ where T: TypeTrait
     }
 }
 
-impl<'a, T> RefExt<'a, T> for OwnedRef<'a, T> where T: TypeTrait {}
+impl<'a, T> RefExt<'a, T> for OwnedRef<'a, T>
+where T: TypeTrait
+{
+    type Ref<'b, R: TypeTrait> = OwnedRef<'b, R>;
+}
 
 impl<'a, T> RefDynExt<'a> for OwnedRef<'a, T> {
-    unsafe fn typed_bytes(self) -> TypedBytes<'a> {
+    unsafe fn typed_bytes<'b>(&'b self) -> TypedBytes<'b> {
         let (object, ty) = Allocator::get().deref_ptr(self.ptr).unwrap();
 
         TypedBytes::from(object, ty)
@@ -317,18 +348,30 @@ impl<'a, P: SharedTrait> RefMut<'a, P> {
     }
 }
 
-impl<'a, T> RefExt<'a, T> for RefMut<'a, T> where T: TypeTrait {}
+impl<'a, T> RefExt<'a, T> for RefMut<'a, T>
+where T: TypeTrait
+{
+    type Ref<'b, R: TypeTrait> = Ref<'b, R>;
+}
 
-impl<'a, T> RefMutExt<'a, T> for RefMut<'a, T> where T: TypeTrait {}
+impl<'a, T> RefMutExt<'a, T> for RefMut<'a, T>
+where T: TypeTrait
+{
+    type RefMut<'b, R: TypeTrait> = RefMut<'b, R>;
+}
 
 impl<'a, T> RefDynExt<'a> for RefMut<'a, T> {
-    unsafe fn typed_bytes(self) -> TypedBytes<'a> {
-        self.typed_bytes.into()
+    unsafe fn typed_bytes<'b>(&'b self) -> TypedBytes<'b> {
+        self.typed_bytes.borrow()
     }
 }
 
 impl<'a, T> RefMutDynExt<'a> for RefMut<'a, T> {
-    unsafe fn typed_bytes_mut(self) -> TypedBytesMut<'a> {
+    unsafe fn typed_bytes_mut<'b>(&'b mut self) -> TypedBytesMut<'b> {
+        self.typed_bytes.borrow_mut()
+    }
+
+    unsafe fn into_typed_bytes_mut(self) -> TypedBytesMut<'a> {
         self.typed_bytes
     }
 }
@@ -371,10 +414,14 @@ impl<'a, P: SharedTrait> Ref<'a, P> {
     }
 }
 
-impl<'a, T> RefExt<'a, T> for Ref<'a, T> where T: TypeTrait {}
+impl<'a, T> RefExt<'a, T> for Ref<'a, T>
+where T: TypeTrait
+{
+    type Ref<'b, R: TypeTrait> = Ref<'b, R>;
+}
 
 impl<'a, T> RefDynExt<'a> for Ref<'a, T> {
-    unsafe fn typed_bytes(self) -> TypedBytes<'a> {
+    unsafe fn typed_bytes<'b>(&'b self) -> TypedBytes<'b> {
         self.typed_bytes.into()
     }
 }

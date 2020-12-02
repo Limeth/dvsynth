@@ -3,6 +3,8 @@ use crate::graph::TextureAllocation;
 use super::{DowncastFromTypeEnum, DynTypeDescriptor, DynTypeTrait, TypeEnum};
 use std::fmt::Display;
 
+pub mod prelude {}
+
 #[derive(Debug, Hash, PartialEq, Eq, Clone)]
 pub struct TextureType {
     // TODO texture format, size?

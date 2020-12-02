@@ -8,7 +8,7 @@
 #![feature(trait_alias)]
 //!
 //! Task list:
-//! * Pointer types (shared, unique)
+//! * Make it possible to own sized types (and fix allocation)
 //! * Bind OwnedRef types to state lifetime so as to make sure it is not sent between tasks
 //!   externally.
 //! * Node generics

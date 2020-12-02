@@ -3,11 +3,23 @@ use std::fmt::Display;
 use std::io::{Cursor, Read, Write};
 
 use crate::graph::alloc::Allocator;
+use crate::node::behaviour::AllocatorHandle;
 
 use super::{
-    AllocationPointer, DowncastFromTypeEnum, RefAny, RefExt, RefMutAny, RefMutExt, TypeEnum, TypeExt,
-    TypeTrait, TypedBytes, TypedBytesMut,
+    AllocationPointer, DowncastFromTypeEnum, OwnedRefMut, RefAny, RefDynExt, RefExt, RefMut, RefMutAny,
+    RefMutDynExt, RefMutExt, SizedTypeExt, TypeEnum, TypeExt, TypeTrait, TypedBytes, TypedBytesMut,
 };
+
+pub mod prelude {
+    pub use super::{IntoShared, SharedRefExt, SharedRefMutExt, UniqueRefExt, UniqueRefMutExt};
+}
+
+fn bytes_to_ptr(typed_bytes: TypedBytes<'_>) -> AllocationPointer {
+    let bytes = typed_bytes.bytes().bytes().unwrap();
+    assert_eq!(bytes.len(), std::mem::size_of::<AllocationPointer>());
+    let mut read = Cursor::new(bytes);
+    AllocationPointer::new(read.read_u64::<LittleEndian>().unwrap())
+}
 
 pub unsafe trait SharedTrait: TypeTrait {}
 pub unsafe trait UniqueTrait: SharedTrait {}
@@ -18,8 +30,8 @@ pub struct Unique {
 }
 
 impl Unique {
-    pub fn new(child_ty: Box<TypeEnum>) -> Self {
-        Self { child_ty }
+    pub fn new(child_ty: impl Into<TypeEnum>) -> Self {
+        Self { child_ty: Box::new(child_ty.into()) }
     }
 }
 
@@ -29,9 +41,15 @@ impl Display for Unique {
     }
 }
 
-impl TypeExt for Unique {
+impl SizedTypeExt for Unique {
     fn value_size(&self) -> usize {
         std::mem::size_of::<AllocationPointer>()
+    }
+}
+
+impl TypeExt for Unique {
+    fn value_size_if_sized(&self) -> Option<usize> {
+        Some(self.value_size())
     }
 
     fn is_abi_compatible(&self, other: &Self) -> bool {
@@ -39,7 +57,7 @@ impl TypeExt for Unique {
     }
 
     fn has_safe_binary_representation(&self) -> bool {
-        true
+        false
     }
 }
 
@@ -72,19 +90,17 @@ unsafe impl SharedTrait for Unique {}
 unsafe impl UniqueTrait for Unique {}
 
 pub trait UniqueRefExt<'a> {
-    fn deref(self) -> RefAny<'a>;
+    fn deref(&self) -> RefAny<'_>;
 }
 
 pub trait UniqueRefMutExt<'a> {
-    fn deref_mut(self) -> RefMutAny<'a>;
+    fn deref_mut(&mut self) -> RefMutAny<'_>;
 }
 
 impl<'a, T> UniqueRefMutExt<'a> for T
-where T: RefMutExt<'a, Unique>
+where T: RefMutExt<'a, Unique> + 'a
 {
-    fn deref_mut(self) -> RefMutAny<'a> {
-        // FIXME check types?
-
+    fn deref_mut(&mut self) -> RefMutAny<'_> {
         let typed_bytes = unsafe { self.typed_bytes() };
         let bytes = typed_bytes.bytes().bytes().unwrap();
 
@@ -101,12 +117,49 @@ where T: RefMutExt<'a, Unique>
     }
 }
 
+pub trait IntoShared<'a>: RefMutDynExt<'a> {
+    type Target<T: TypeTrait>;
+
+    fn into_shared(self, handle: AllocatorHandle<'a, '_>) -> Self::Target<Shared>;
+}
+
+unsafe fn change_type_to_shared<'a>(reference: &(impl RefMutDynExt<'a> + IntoShared<'a>)) {
+    let ptr = bytes_to_ptr(reference.typed_bytes());
+    Allocator::get()
+        .map_type(ptr, |ty| {
+            let unique_ty = ty.downcast_ref::<Unique>().unwrap();
+            let child_ty = unique_ty.child_ty.as_ref().clone();
+            *ty = Shared::new(child_ty).into();
+        })
+        .unwrap();
+}
+
+impl<'a> IntoShared<'a> for RefMut<'a, Unique> {
+    type Target<T: TypeTrait> = RefMut<'a, T>;
+
+    fn into_shared(self, handle: AllocatorHandle<'a, '_>) -> Self::Target<Shared> {
+        unsafe {
+            change_type_to_shared(&self);
+            RefMut::from(self.into_typed_bytes_mut()).downcast_mut(handle).unwrap()
+        }
+    }
+}
+
+impl<'a> IntoShared<'a> for OwnedRefMut<'a, Unique> {
+    type Target<T: TypeTrait> = OwnedRefMut<'a, T>;
+
+    fn into_shared(self, handle: AllocatorHandle<'a, '_>) -> Self::Target<Shared> {
+        unsafe {
+            change_type_to_shared(&self);
+            self.into_mut_any().downcast_mut(handle).unwrap()
+        }
+    }
+}
+
 impl<'a, T> UniqueRefExt<'a> for T
 where T: RefExt<'a, Unique>
 {
-    fn deref(self) -> RefAny<'a> {
-        // FIXME check types?
-
+    fn deref(&self) -> RefAny<'_> {
         let typed_bytes = unsafe { self.typed_bytes() };
         let bytes = typed_bytes.bytes().bytes().unwrap();
 
@@ -129,8 +182,8 @@ pub struct Shared {
 }
 
 impl Shared {
-    pub fn new(child_ty: Box<TypeEnum>) -> Self {
-        Self { child_ty }
+    pub fn new(child_ty: impl Into<TypeEnum>) -> Self {
+        Self { child_ty: Box::new(child_ty.into()) }
     }
 }
 
@@ -140,9 +193,15 @@ impl Display for Shared {
     }
 }
 
-impl TypeExt for Shared {
+impl SizedTypeExt for Shared {
     fn value_size(&self) -> usize {
         std::mem::size_of::<AllocationPointer>()
+    }
+}
+
+impl TypeExt for Shared {
+    fn value_size_if_sized(&self) -> Option<usize> {
+        Some(self.value_size())
     }
 
     fn is_abi_compatible(&self, other: &Self) -> bool {
@@ -150,7 +209,7 @@ impl TypeExt for Shared {
     }
 
     fn has_safe_binary_representation(&self) -> bool {
-        true
+        false
     }
 }
 
@@ -182,7 +241,7 @@ impl TypeTrait for Shared {}
 unsafe impl SharedTrait for Shared {}
 
 pub trait SharedRefExt<'a> {
-    fn deref(self) -> RefAny<'a>;
+    fn deref(&self) -> RefAny<'_>;
 }
 
 pub trait SharedRefMutExt<'a> {}
@@ -190,9 +249,7 @@ pub trait SharedRefMutExt<'a> {}
 impl<'a, T> SharedRefExt<'a> for T
 where T: RefExt<'a, Shared>
 {
-    fn deref(self) -> RefAny<'a> {
-        // FIXME check types?
-
+    fn deref(&self) -> RefAny<'_> {
         let typed_bytes = unsafe { self.typed_bytes() };
         let bytes = typed_bytes.bytes().bytes().unwrap();
 

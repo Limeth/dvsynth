@@ -1,6 +1,8 @@
 use std::fmt::Display;
 
-use super::{DowncastFromTypeEnum, TypeEnum, TypeExt, TypeTrait};
+use super::{DowncastFromTypeEnum, SizedTypeExt, TypeEnum, TypeExt, TypeTrait};
+
+pub mod prelude {}
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone)]
 pub struct ArrayType {
@@ -9,12 +11,21 @@ pub struct ArrayType {
 }
 
 impl ArrayType {
-    pub fn new(item_type: impl Into<TypeEnum>, len: usize) -> Self {
+    pub fn new(item_type: impl Into<TypeEnum> + SizedTypeExt, len: usize) -> Self {
         Self { item_type: Box::new(item_type.into()), len }
     }
 
-    pub fn single(item_type: impl Into<TypeEnum>) -> Self {
+    pub fn single(item_type: impl Into<TypeEnum> + SizedTypeExt) -> Self {
         Self::new(item_type, 1)
+    }
+
+    pub fn new_if_sized(item_type: impl Into<TypeEnum>, len: usize) -> Option<Self> {
+        let item_type = item_type.into();
+        item_type.value_size_if_sized().map(|_| Self { item_type: Box::new(item_type), len })
+    }
+
+    pub fn single_if_sized(item_type: impl Into<TypeEnum>) -> Option<Self> {
+        Self::new_if_sized(item_type, 1)
     }
 }
 
@@ -24,9 +35,15 @@ impl Display for ArrayType {
     }
 }
 
-impl TypeExt for ArrayType {
+impl SizedTypeExt for ArrayType {
     fn value_size(&self) -> usize {
-        self.len * self.item_type.value_size()
+        self.len * self.item_type.value_size_if_sized().unwrap()
+    }
+}
+
+impl TypeExt for ArrayType {
+    fn value_size_if_sized(&self) -> Option<usize> {
+        Some(self.value_size())
     }
 
     fn is_abi_compatible(&self, other: &Self) -> bool {
