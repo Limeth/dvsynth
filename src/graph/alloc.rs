@@ -90,7 +90,7 @@ pub trait AllocatedType = Any + Send + Sync + 'static;
 
 #[derive(Debug)]
 pub(crate) enum AllocationType {
-    Bytes(Vec<u8>),
+    Bytes(Box<[u8]>),
     Object { ty_name: &'static str, data: Box<dyn AllocatedType> },
 }
 
@@ -125,14 +125,14 @@ impl AllocationType {
 
     pub fn as_ref(&self) -> Bytes<'_> {
         match self {
-            AllocationType::Bytes(inner) => Bytes::Bytes(&*inner),
+            AllocationType::Bytes(inner) => Bytes::Bytes(inner.as_ref()),
             AllocationType::Object { ty_name, data } => Bytes::Object { ty_name, data: data.as_ref() },
         }
     }
 
     pub fn as_mut(&mut self) -> BytesMut<'_> {
         match self {
-            AllocationType::Bytes(inner) => BytesMut::Bytes(&mut *inner),
+            AllocationType::Bytes(inner) => BytesMut::Bytes(inner.as_mut()),
             AllocationType::Object { ty_name, data } => BytesMut::Object { ty_name, data: data.as_mut() },
         }
     }
@@ -159,6 +159,7 @@ impl AllocationInner {
 
     pub fn new_bytes<T: TypeTrait + SizedTypeExt>(ty: T) -> Self {
         let data: Vec<u8> = std::iter::repeat(0u8).take(ty.value_size()).collect();
+        let data: Box<[u8]> = data.into_boxed_slice();
         let inner = AllocationType::Bytes(data);
         let ty_enum: TypeEnum = ty.into();
 
