@@ -1,8 +1,8 @@
 use super::{
-    AllocationPointer, Shared, SharedTrait, TypeEnum, TypeTrait, TypedBytes, TypedBytesMut, Unique,
-    UniqueTrait,
+    AllocationPointer, Shared, SharedTrait, SizedTypeExt, TypeEnum, TypeTrait, TypedBytes, TypedBytesMut,
+    Unique, UniqueTrait,
 };
-use crate::graph::alloc::{AllocatedType, Allocator};
+use crate::graph::alloc::{AllocatedType, AllocationInner, Allocator};
 use crate::graph::NodeIndex;
 use crate::node::behaviour::AllocatorHandle;
 use crate::node::ty::DynTypeTrait;
@@ -80,8 +80,7 @@ impl<'state> OwnedRefMut<'state, ()> {
     where
         'state: 'invocation,
     {
-        let (object, ty) = unsafe { Allocator::get().deref_mut_ptr(self.ptr) }.unwrap();
-        let typed_bytes = TypedBytesMut::from(object, ty);
+        let typed_bytes = unsafe { Allocator::get().deref_mut_ptr(self.ptr) }.unwrap();
 
         typed_bytes.ty().downcast_ref::<T>().map(|_| OwnedRefMut {
             ptr: self.ptr,
@@ -91,17 +90,31 @@ impl<'state> OwnedRefMut<'state, ()> {
     }
 }
 
-impl<'state> OwnedRefMut<'state, Unique> {
-    pub fn allocate<'invocation, T: DynTypeTrait>(
+impl<'state, T> OwnedRefMut<'state, T>
+where T: DynTypeTrait
+{
+    pub fn allocate_object<'invocation>(
         descriptor: T::Descriptor,
         handle: AllocatorHandle<'invocation, 'state>,
     ) -> Self
     where
         'state: 'invocation,
-        T: DynTypeTrait,
     {
         Self {
-            ptr: Allocator::get().allocate::<T>(descriptor, handle),
+            ptr: Allocator::get().allocate_object::<T>(descriptor, handle),
+            node: handle.node,
+            __marker: Default::default(),
+        }
+    }
+}
+
+impl<'state, T> OwnedRefMut<'state, T>
+where T: TypeTrait + SizedTypeExt
+{
+    pub fn allocate_bytes<'invocation>(ty: T, handle: AllocatorHandle<'invocation, 'state>) -> Self
+    where 'state: 'invocation {
+        Self {
+            ptr: Allocator::get().allocate_bytes::<T>(ty, handle),
             node: handle.node,
             __marker: Default::default(),
         }
@@ -128,27 +141,25 @@ where T: TypeTrait
     where
         'state: 'invocation,
     {
-        let (object, ty) = unsafe {
+        let typed_bytes = unsafe {
             Allocator::get()
                 .refcount_owned_decrement(self.ptr, self.node)
                 .expect("Could not decrement the refcount of an OwnedRef while converting to Ref.");
 
             Allocator::get().deref_mut_ptr(self.ptr).unwrap()
         };
-        let typed_bytes = TypedBytesMut::from(object, ty);
 
         RefMut { typed_bytes, __marker: Default::default() }
     }
 
     pub fn to_ref<'invocation>(self, _handle: AllocatorHandle<'invocation, 'state>) -> Ref<'invocation, T> {
-        let (object, ty) = unsafe {
+        let typed_bytes = unsafe {
             Allocator::get()
                 .refcount_owned_decrement(self.ptr, self.node)
                 .expect("Could not decrement the refcount of an OwnedRef while converting to Ref.");
 
             Allocator::get().deref_ptr(self.ptr).unwrap()
         };
-        let typed_bytes = TypedBytes::from(object, ty);
 
         Ref { typed_bytes, __marker: Default::default() }
     }
@@ -168,23 +179,17 @@ where T: TypeTrait
 
 impl<'a, T> RefDynExt<'a> for OwnedRefMut<'a, T> {
     unsafe fn typed_bytes<'b>(&'b self) -> TypedBytes<'b> {
-        let (object, ty) = Allocator::get().deref_ptr(self.ptr).unwrap();
-
-        TypedBytes::from(object, ty)
+        Allocator::get().deref_ptr(self.ptr).unwrap()
     }
 }
 
 impl<'a, T> RefMutDynExt<'a> for OwnedRefMut<'a, T> {
     unsafe fn typed_bytes_mut<'b>(&'b mut self) -> TypedBytesMut<'b> {
-        let (object, ty) = Allocator::get().deref_mut_ptr(self.ptr).unwrap();
-
-        TypedBytesMut::from(object, ty)
+        Allocator::get().deref_mut_ptr(self.ptr).unwrap()
     }
 
     unsafe fn into_typed_bytes_mut(self) -> TypedBytesMut<'a> {
-        let (object, ty) = Allocator::get().deref_mut_ptr(self.ptr).unwrap();
-
-        TypedBytesMut::from(object, ty)
+        Allocator::get().deref_mut_ptr(self.ptr).unwrap()
     }
 }
 
@@ -237,8 +242,7 @@ impl<'state> OwnedRef<'state, ()> {
     where
         'state: 'invocation,
     {
-        let (object, ty) = unsafe { Allocator::get().deref_ptr(self.ptr) }.unwrap();
-        let typed_bytes = TypedBytes::from(object, ty);
+        let typed_bytes = unsafe { Allocator::get().deref_ptr(self.ptr) }.unwrap();
 
         typed_bytes.ty().downcast_ref::<T>().map(|_| OwnedRef {
             ptr: self.ptr,
@@ -253,14 +257,13 @@ where T: TypeTrait
 {
     pub fn to_ref<'invocation>(self, _handle: AllocatorHandle<'invocation, 'state>) -> Ref<'invocation, T>
     where 'state: 'invocation {
-        let (object, ty) = unsafe {
+        let typed_bytes = unsafe {
             Allocator::get()
                 .refcount_owned_decrement(self.ptr, self.node)
                 .expect("Could not decrement the refcount of an OwnedRef while converting to Ref.");
 
             Allocator::get().deref_ptr(self.ptr).unwrap()
         };
-        let typed_bytes = TypedBytes::from(object, ty);
 
         Ref { typed_bytes, __marker: Default::default() }
     }
@@ -274,9 +277,7 @@ where T: TypeTrait
 
 impl<'a, T> RefDynExt<'a> for OwnedRef<'a, T> {
     unsafe fn typed_bytes<'b>(&'b self) -> TypedBytes<'b> {
-        let (object, ty) = Allocator::get().deref_ptr(self.ptr).unwrap();
-
-        TypedBytes::from(object, ty)
+        Allocator::get().deref_ptr(self.ptr).unwrap()
     }
 }
 

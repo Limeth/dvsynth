@@ -382,6 +382,7 @@ impl Renderer {
     }
 }
 
+#[derive(Debug)]
 pub enum TextureAllocation {
     TextureView(wgpu::TextureView),
     SwapchainFrame(wgpu::SwapChainFrame),
@@ -404,6 +405,7 @@ impl From<ListDescriptor> for ListAllocation {
     }
 }
 
+#[derive(Debug)]
 pub struct ListAllocation {
     // FIXME: probably not necessary, as type info is stored for each allocation anyway
     pub descriptor: ListDescriptor,

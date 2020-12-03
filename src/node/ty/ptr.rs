@@ -111,9 +111,11 @@ where T: RefMutExt<'a, Unique> + 'a
             AllocationPointer::new(read.read_u64::<LittleEndian>().unwrap())
         };
 
-        let (data, ty) = unsafe { Allocator::get().deref_mut_ptr(ptr).unwrap() };
+        unsafe {
+            let typed_bytes = Allocator::get().deref_mut_ptr(ptr).unwrap();
 
-        unsafe { RefMutAny::from(TypedBytesMut::from(data, ty)) }
+            RefMutAny::from(typed_bytes)
+        }
     }
 }
 
@@ -170,9 +172,10 @@ where T: RefExt<'a, Unique>
             AllocationPointer::new(read.read_u64::<LittleEndian>().unwrap())
         };
 
-        let (data, ty) = unsafe { Allocator::get().deref_ptr(ptr).unwrap() };
-
-        unsafe { RefAny::from(TypedBytes::from(data, ty)) }
+        unsafe {
+            let typed_bytes = Allocator::get().deref_ptr(ptr).unwrap();
+            RefAny::from(typed_bytes)
+        }
     }
 }
 
@@ -260,9 +263,10 @@ where T: RefExt<'a, Shared>
             AllocationPointer::new(read.read_u64::<LittleEndian>().unwrap())
         };
 
-        let (data, ty) = unsafe { Allocator::get().deref_ptr(ptr).unwrap() };
-
-        unsafe { RefAny::from(TypedBytes::from(data, ty)) }
+        unsafe {
+            let typed_bytes = Allocator::get().deref_ptr(ptr).unwrap();
+            RefAny::from(typed_bytes)
+        }
     }
 }
 

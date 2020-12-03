@@ -1,4 +1,4 @@
-use std::any::Any;
+use std::any::{Any, TypeId};
 use std::collections::HashSet;
 use std::collections::{hash_map::Entry, HashMap};
 use std::convert::TryInto;
@@ -15,7 +15,8 @@ use sharded_slab::{pool::Pool, Clear};
 
 use crate::node::behaviour::AllocatorHandle;
 use crate::node::{
-    AllocationPointer, DynTypeDescriptor, Ref, RefExt, RefMut, RefMutExt, TypeEnum, TypeTrait,
+    AllocationPointer, Bytes, BytesMut, DynTypeDescriptor, Ref, RefExt, RefMut, RefMutExt, SizedType,
+    SizedTypeExt, TypeEnum, TypeTrait, TypedBytes, TypedBytesMut,
 };
 
 use super::{DynTypeTrait, NodeIndex, Schedule};
@@ -84,10 +85,109 @@ unsafe impl<T> Send for AllocationCell<T> {}
 unsafe impl<T> Sync for AllocationCell<T> {}
 
 pub trait AllocatedType = Any + Send + Sync + 'static;
+// pub trait AllocatedType: std::fmt::Debug + Any + Send + Sync + 'static {}
+// impl<T> AllocatedType for T where T: std::fmt::Debug + Any + Send + Sync + 'static {}
 
+#[derive(Debug)]
+pub(crate) enum AllocationType {
+    Bytes(Vec<u8>),
+    Object { ty_name: &'static str, data: Box<dyn AllocatedType> },
+}
+
+impl AllocationType {
+    pub fn bytes_mut(&mut self) -> Option<&mut [u8]> {
+        match self {
+            AllocationType::Bytes(inner) => Some(inner),
+            _ => None,
+        }
+    }
+
+    pub fn bytes(&self) -> Option<&[u8]> {
+        match self {
+            AllocationType::Bytes(inner) => Some(inner),
+            _ => None,
+        }
+    }
+
+    pub fn object_mut(&mut self) -> Option<&mut dyn AllocatedType> {
+        match self {
+            AllocationType::Object { data, .. } => Some(data.as_mut()),
+            _ => None,
+        }
+    }
+
+    pub fn object(&self) -> Option<&dyn AllocatedType> {
+        match self {
+            AllocationType::Object { data, .. } => Some(data.as_ref()),
+            _ => None,
+        }
+    }
+
+    pub fn as_ref(&self) -> Bytes<'_> {
+        match self {
+            AllocationType::Bytes(inner) => Bytes::Bytes(&*inner),
+            AllocationType::Object { ty_name, data } => Bytes::Object { ty_name, data: data.as_ref() },
+        }
+    }
+
+    pub fn as_mut(&mut self) -> BytesMut<'_> {
+        match self {
+            AllocationType::Bytes(inner) => BytesMut::Bytes(&mut *inner),
+            AllocationType::Object { ty_name, data } => BytesMut::Object { ty_name, data: data.as_mut() },
+        }
+    }
+}
+
+#[derive(Debug)]
 pub(crate) struct AllocationInner {
     ty: TypeEnum,
-    data: Box<dyn AllocatedType>,
+    inner: AllocationType,
+}
+
+impl AllocationInner {
+    pub fn new_object<T: DynTypeTrait>(data: T::DynAlloc, ty: T) -> Self {
+        assert!(
+            TypeId::of::<T::DynAlloc>() != TypeId::of::<[u8]>(),
+            "Type `[u8]` may not be allocated as an object. Allocate it as bytes instead."
+        );
+        let ty_enum: TypeEnum = ty.into();
+        let data = Box::new(data) as Box<dyn AllocatedType>;
+        let inner = AllocationType::Object { ty_name: std::any::type_name::<T::DynAlloc>(), data };
+
+        Self { ty: ty_enum, inner }
+    }
+
+    pub fn new_bytes<T: TypeTrait + SizedTypeExt>(ty: T) -> Self {
+        let data: Vec<u8> = std::iter::repeat(0u8).take(ty.value_size()).collect();
+        let inner = AllocationType::Bytes(data);
+        let ty_enum: TypeEnum = ty.into();
+
+        Self { ty: ty_enum, inner }
+    }
+
+    pub fn as_ref(&self) -> TypedBytes<'_> {
+        TypedBytes::from(self.inner.as_ref(), &self.ty)
+    }
+
+    pub fn as_mut(&mut self) -> TypedBytesMut<'_> {
+        TypedBytesMut::from(self.inner.as_mut(), &mut self.ty)
+    }
+
+    pub fn ty_mut(&mut self) -> &mut TypeEnum {
+        &mut self.ty
+    }
+
+    pub fn ty(&self) -> &TypeEnum {
+        &self.ty
+    }
+
+    pub fn inner_mut(&mut self) -> &mut AllocationType {
+        &mut self.inner
+    }
+
+    pub fn inner(&self) -> &AllocationType {
+        &self.inner
+    }
 }
 
 #[derive(Default)]
@@ -98,14 +198,12 @@ pub(crate) struct Allocation {
 }
 
 impl Allocation {
-    unsafe fn claim<T: DynTypeTrait>(&self, data: T::DynAlloc, ty: T) {
+    unsafe fn claim_with(&self, inner: AllocationInner) {
         let ptr = self.ptr.as_mut();
 
         assert!(ptr.is_none(), "Allocation already claimed.");
 
-        let ty_enum: TypeEnum = ty.into();
-        let data = Box::new(data) as Box<dyn AllocatedType>;
-        *ptr = Some(AllocationCell::new(AllocationInner { ty: ty_enum, data }));
+        *ptr = Some(AllocationCell::new(inner));
         self.refcount.store(0, Ordering::SeqCst);
         self.deallocating.store(false, Ordering::SeqCst);
     }
@@ -167,16 +265,8 @@ impl Allocator {
     }
 
     /// Allocates the value with refcount set to 1.
-    fn allocate_value<'invocation, 'state: 'invocation, T: DynTypeTrait>(
-        &self,
-        value: T::DynAlloc,
-        ty: T,
-        handle: AllocatorHandle<'invocation, 'state>,
-    ) -> AllocationPointer
-    {
+    fn allocate_value(&self, inner: AllocationInner, handle: AllocatorHandle<'_, '_>) -> AllocationPointer {
         const EXPAND_BY: usize = 64;
-
-        println!("Allocating...");
 
         let free_index = loop {
             match self.free_indices.steal() {
@@ -209,7 +299,7 @@ impl Allocator {
         let allocation = &allocations.vec[free_index as usize];
 
         unsafe {
-            allocation.claim(value, ty);
+            allocation.claim_with(inner);
         }
 
         let ptr = AllocationPointer { index: free_index };
@@ -218,17 +308,31 @@ impl Allocator {
             self.refcount_owned_increment(ptr, handle.node).unwrap();
         }
 
+        println!("Allocated: {:?}", &ptr);
+
         ptr
     }
 
-    pub fn allocate<'invocation, 'state: 'invocation, T: DynTypeTrait>(
+    pub fn allocate_object<T: DynTypeTrait>(
         &self,
         descriptor: T::Descriptor,
-        handle: AllocatorHandle<'invocation, 'state>,
+        handle: AllocatorHandle<'_, '_>,
     ) -> AllocationPointer
     {
         let ty = descriptor.get_type();
-        self.allocate_value(T::create_value_from_descriptor(descriptor), ty, handle)
+        let value = T::create_value_from_descriptor(descriptor);
+        let inner = AllocationInner::new_object(value, ty);
+        self.allocate_value(inner, handle)
+    }
+
+    pub fn allocate_bytes<T: TypeTrait + SizedTypeExt>(
+        &self,
+        ty: T,
+        handle: AllocatorHandle<'_, '_>,
+    ) -> AllocationPointer
+    {
+        let inner = AllocationInner::new_bytes(ty);
+        self.allocate_value(inner, handle)
     }
 
     pub fn deallocate(&self, allocation_ptr: AllocationPointer) {
@@ -379,33 +483,25 @@ impl Allocator {
 
     /// Safety: Access safety must be ensured externally by the execution graph.
     ///         Extra caution must be taken to request a correct lifetime 'a.
-    pub unsafe fn deref_ptr<'a>(
-        &self,
-        allocation_ptr: AllocationPointer,
-    ) -> Option<(&'a dyn AllocatedType, &'a TypeEnum)>
-    {
+    pub unsafe fn deref_ptr<'a>(&self, allocation_ptr: AllocationPointer) -> Option<TypedBytes<'a>> {
         let allocations = self.allocations.read().unwrap();
         allocations.vec.get(allocation_ptr.as_usize()).map(|allocation| {
             let allocation_inner =
                 allocation.ptr.as_ref().as_ref().expect("Dereferencing a freed value.").as_ref();
 
-            (allocation_inner.data.as_ref(), &allocation_inner.ty)
+            allocation_inner.as_ref()
         })
     }
 
     /// Safety: Access safety must be ensured externally by the execution graph.
     ///         Extra caution must be taken to request a correct lifetime 'a.
-    pub unsafe fn deref_mut_ptr<'a>(
-        &self,
-        allocation_ptr: AllocationPointer,
-    ) -> Option<(&'a mut dyn AllocatedType, &'a TypeEnum)>
-    {
+    pub unsafe fn deref_mut_ptr<'a>(&self, allocation_ptr: AllocationPointer) -> Option<TypedBytesMut<'a>> {
         let allocations = self.allocations.read().unwrap();
         allocations.vec.get(allocation_ptr.as_usize()).map(|allocation| {
             let allocation_inner =
                 allocation.ptr.as_ref().as_ref().expect("Dereferencing a freed value.").as_mut();
 
-            (allocation_inner.data.as_mut(), &allocation_inner.ty)
+            allocation_inner.as_mut()
         })
     }
 

@@ -1,3 +1,4 @@
+use std::any::TypeId;
 use std::fmt::Display;
 use std::ops::{Range, RangeBounds};
 
@@ -37,6 +38,7 @@ impl Display for ListType {
     }
 }
 
+#[derive(Debug)]
 pub struct ListDescriptor {
     child_ty: TypeEnum,
 }
@@ -81,14 +83,14 @@ where T: RefExt<'a, ListType>
 {
     fn len(&self) -> usize {
         let typed_bytes = unsafe { self.typed_bytes() };
-        let list = typed_bytes.bytes().object().unwrap().downcast_ref::<ListAllocation>().unwrap();
+        let list = typed_bytes.bytes().downcast_ref_unwrap::<ListAllocation>();
         let ty = typed_bytes.ty().downcast_ref::<ListType>().unwrap();
         list.data.len() / ty.child_ty.value_size_if_sized().unwrap()
     }
 
     fn get(&self, index: usize) -> Result<RefAny<'_>, ()> {
         let typed_bytes = unsafe { self.typed_bytes() };
-        let list = typed_bytes.bytes().object().unwrap().downcast_ref::<ListAllocation>().unwrap();
+        let list = typed_bytes.bytes().downcast_ref_unwrap::<ListAllocation>();
         let ty = typed_bytes.ty().downcast_ref::<ListType>().unwrap();
         let item_size = ty.child_ty.value_size_if_sized().unwrap();
 
@@ -122,7 +124,7 @@ where T: RefMutExt<'a, ListType>
         let (bytes, ty) = typed_bytes.into();
         let ty = ty.downcast_ref::<ListType>().unwrap();
         let item_size = ty.child_ty.value_size_if_sized().unwrap();
-        let list = bytes.object_mut().unwrap().downcast_mut::<ListAllocation>().unwrap();
+        let list = bytes.downcast_mut_unwrap::<ListAllocation>();
 
         if (index + 1) * item_size > list.data.len() {
             Err(())
@@ -136,7 +138,7 @@ where T: RefMutExt<'a, ListType>
         let typed_bytes = unsafe { self.typed_bytes_mut() };
         let ty = typed_bytes.borrow().ty().downcast_ref::<ListType>().unwrap();
         let item_size = ty.child_ty.value_size_if_sized().unwrap();
-        let list = typed_bytes.bytes_mut().object_mut().unwrap().downcast_mut::<ListAllocation>().unwrap();
+        let list = typed_bytes.bytes_mut().downcast_mut_unwrap::<ListAllocation>();
         let mapped_range = Range { start: range.start * item_size, end: range.end * item_size };
 
         if mapped_range.end > list.data.len() {
@@ -160,7 +162,7 @@ where T: RefMutExt<'a, ListType>
             return Err(());
         }
 
-        let list = typed_bytes.bytes_mut().object_mut().unwrap().downcast_mut::<ListAllocation>().unwrap();
+        let list = typed_bytes.bytes_mut().downcast_mut_unwrap::<ListAllocation>();
         let bytes = item_typed_bytes
             .bytes()
             .bytes()
@@ -198,7 +200,7 @@ where T: RefMutExt<'a, ListType>
         }
 
         let child_size = ty.child_ty.value_size_if_sized().unwrap();
-        let list = typed_bytes.bytes_mut().object_mut().unwrap().downcast_mut::<ListAllocation>().unwrap();
+        let list = typed_bytes.bytes_mut().downcast_mut_unwrap::<ListAllocation>();
         list.data.extend(std::iter::repeat(0).take(child_size));
         self.get_mut(self.len() - 1).map(|mut item| (write_bytes)(item.bytes_mut_if_sized().unwrap()))
     }
@@ -211,8 +213,7 @@ where T: RefMutExt<'a, ListType>
         if !item_typed_bytes.ty().is_abi_compatible(&ty.child_ty) {
             return Err(());
         }
-
-        let list = typed_bytes.bytes_mut().object_mut().unwrap().downcast_mut::<ListAllocation>().unwrap();
+        let list = typed_bytes.bytes_mut().downcast_mut_unwrap::<ListAllocation>();
         let item_size = ty.child_ty.value_size_if_sized().unwrap();
         let bytes = item_typed_bytes
             .bytes()

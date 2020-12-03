@@ -1,4 +1,4 @@
-use std::any::TypeId;
+use std::any::{Any, TypeId};
 use std::borrow::Cow;
 use std::fmt::{Debug, Display};
 use std::io::{Cursor, Read, Write};
@@ -15,7 +15,7 @@ pub use ptr::*;
 pub use reference::*;
 pub use texture::*;
 
-use crate::graph::alloc::{AllocatedType, Allocator};
+use crate::graph::alloc::{AllocatedType, AllocationInner, Allocator};
 
 use super::behaviour::AllocatorHandle;
 
@@ -77,10 +77,10 @@ pub struct AllocationPointer {
 //     fn downgrade<'a>(from: Self::InnerRefMut<'a>) -> Self::InnerRef<'a>;
 // }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub enum Bytes<'a> {
     Bytes(&'a [u8]),
-    Object(&'a dyn AllocatedType),
+    Object { ty_name: &'static str, data: &'a dyn AllocatedType },
 }
 
 impl<'a> Bytes<'a> {
@@ -93,10 +93,33 @@ impl<'a> Bytes<'a> {
     }
 
     pub fn object(self) -> Option<&'a dyn AllocatedType> {
-        if let Bytes::Object(inner) = self {
-            Some(inner)
+        if let Bytes::Object { data, .. } = self {
+            Some(data)
         } else {
             None
+        }
+    }
+
+    pub fn downcast_ref_unwrap<T: Any>(self) -> &'a T {
+        if TypeId::of::<T>() == TypeId::of::<[u8]>() {
+            match self {
+                Bytes::Bytes(inner) => unsafe { &*(inner as *const _ as *const T) },
+                Bytes::Object { ty_name, .. } => {
+                    panic!("Attempt to downcast type `{}` to `{}`.", ty_name, std::any::type_name::<T>())
+                }
+            }
+        } else {
+            if let Bytes::Object { ty_name, data } = self {
+                data.downcast_ref::<T>().unwrap_or_else(|| {
+                    panic!("Attempt to downcast type `{}` to `{}`.", ty_name, std::any::type_name::<T>())
+                })
+            } else {
+                panic!(
+                    "Attempt to downcast type `{}` to `{}`.",
+                    std::any::type_name::<[u8]>(),
+                    std::any::type_name::<T>()
+                )
+            }
         }
     }
 }
@@ -107,16 +130,16 @@ impl<'a> From<&'a [u8]> for Bytes<'a> {
     }
 }
 
-impl<'a> From<&'a dyn AllocatedType> for Bytes<'a> {
-    fn from(val: &'a dyn AllocatedType) -> Self {
-        Bytes::Object(val)
-    }
-}
-
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct TypedBytes<'a> {
     bytes: Bytes<'a>,
     ty: &'a TypeEnum,
+}
+
+impl<'a> From<&'a AllocationInner> for TypedBytes<'a> {
+    fn from(inner: &'a AllocationInner) -> Self {
+        inner.as_ref()
+    }
 }
 
 impl<'a> TypedBytes<'a> {
@@ -133,9 +156,10 @@ impl<'a> TypedBytes<'a> {
     }
 }
 
+#[derive(Debug)]
 pub enum BytesMut<'a> {
     Bytes(&'a mut [u8]),
-    Object(&'a mut dyn AllocatedType),
+    Object { ty_name: &'static str, data: &'a mut dyn AllocatedType },
 }
 
 impl<'a> BytesMut<'a> {
@@ -143,7 +167,7 @@ impl<'a> BytesMut<'a> {
         unsafe {
             match self {
                 BytesMut::Bytes(inner) => Bytes::Bytes(&*(inner as *const _)),
-                BytesMut::Object(inner) => Bytes::Object(&*(inner as *const _)),
+                BytesMut::Object { ty_name, data } => Bytes::Object { ty_name, data: &*(data as *const _) },
             }
         }
     }
@@ -152,8 +176,10 @@ impl<'a> BytesMut<'a> {
     where 'a: 'b {
         unsafe {
             match self {
-                &BytesMut::<'a>::Bytes(ref inner) => Bytes::Bytes(&*(*inner as *const _)),
-                &BytesMut::<'a>::Object(ref inner) => Bytes::Object(&*(*inner as *const _)),
+                &BytesMut::Bytes(ref inner) => Bytes::Bytes(&*(*inner as *const _)),
+                &BytesMut::Object { ty_name, ref data } => {
+                    Bytes::Object { ty_name, data: &*(*data as *const _) }
+                }
             }
         }
     }
@@ -162,8 +188,10 @@ impl<'a> BytesMut<'a> {
     where 'a: 'b {
         unsafe {
             match self {
-                &mut BytesMut::<'a>::Bytes(ref mut inner) => BytesMut::Bytes(&mut *(*inner as *mut _)),
-                &mut BytesMut::<'a>::Object(ref mut inner) => BytesMut::Object(&mut *(*inner as *mut _)),
+                &mut BytesMut::Bytes(ref mut inner) => BytesMut::Bytes(&mut *(*inner as *mut _)),
+                &mut BytesMut::Object { ty_name, ref mut data } => {
+                    BytesMut::Object { ty_name, data: &mut *(*data as *mut _) }
+                }
             }
         }
     }
@@ -177,8 +205,8 @@ impl<'a> BytesMut<'a> {
     }
 
     pub fn object(self) -> Option<&'a dyn AllocatedType> {
-        if let BytesMut::Object(inner) = self {
-            Some(&*inner)
+        if let BytesMut::Object { data, .. } = self {
+            Some(&*data)
         } else {
             None
         }
@@ -193,10 +221,56 @@ impl<'a> BytesMut<'a> {
     }
 
     pub fn object_mut(self) -> Option<&'a mut dyn AllocatedType> {
-        if let BytesMut::Object(inner) = self {
-            Some(inner)
+        if let BytesMut::Object { data, .. } = self {
+            Some(data)
         } else {
             None
+        }
+    }
+
+    pub fn downcast_ref_unwrap<T: Any>(self) -> &'a T {
+        if TypeId::of::<T>() == TypeId::of::<[u8]>() {
+            match self {
+                BytesMut::Bytes(inner) => unsafe { &*(inner as *const _ as *const T) },
+                BytesMut::Object { ty_name, .. } => {
+                    panic!("Attempt to downcast type `{}` to `{}`.", ty_name, std::any::type_name::<T>())
+                }
+            }
+        } else {
+            if let BytesMut::Object { ty_name, data } = self {
+                data.downcast_ref::<T>().unwrap_or_else(|| {
+                    panic!("Attempt to downcast type `{}` to `{}`.", ty_name, std::any::type_name::<T>())
+                })
+            } else {
+                panic!(
+                    "Attempt to downcast type `{}` to `{}`.",
+                    std::any::type_name::<[u8]>(),
+                    std::any::type_name::<T>()
+                )
+            }
+        }
+    }
+
+    pub fn downcast_mut_unwrap<T: Any>(self) -> &'a mut T {
+        if TypeId::of::<T>() == TypeId::of::<[u8]>() {
+            match self {
+                BytesMut::Bytes(inner) => unsafe { &mut *(inner as *mut _ as *mut T) },
+                BytesMut::Object { ty_name, .. } => {
+                    panic!("Attempt to downcast type `{}` to `{}`.", ty_name, std::any::type_name::<T>())
+                }
+            }
+        } else {
+            if let BytesMut::Object { ty_name, data } = self {
+                data.downcast_mut::<T>().unwrap_or_else(|| {
+                    panic!("Attempt to downcast type `{}` to `{}`.", ty_name, std::any::type_name::<T>())
+                })
+            } else {
+                panic!(
+                    "Attempt to downcast type `{}` to `{}`.",
+                    std::any::type_name::<[u8]>(),
+                    std::any::type_name::<T>()
+                )
+            }
         }
     }
 }
@@ -207,15 +281,16 @@ impl<'a> From<&'a mut [u8]> for BytesMut<'a> {
     }
 }
 
-impl<'a> From<&'a mut dyn AllocatedType> for BytesMut<'a> {
-    fn from(val: &'a mut dyn AllocatedType) -> Self {
-        BytesMut::Object(val)
-    }
-}
-
+#[derive(Debug)]
 pub struct TypedBytesMut<'a> {
     bytes: BytesMut<'a>,
     ty: &'a TypeEnum,
+}
+
+impl<'a> From<&'a mut AllocationInner> for TypedBytesMut<'a> {
+    fn from(inner: &'a mut AllocationInner) -> Self {
+        inner.as_mut()
+    }
 }
 
 impl<'a> TypedBytesMut<'a> {

@@ -22,7 +22,8 @@ pub use list_constructor::*;
 pub use window::*;
 
 use super::{
-    AllocationPointer, DowncastFromTypeEnum, OwnedRefMut, RefExt, RefMutExt, TypeEnum, TypeTrait, Unique,
+    AllocationPointer, DowncastFromTypeEnum, OwnedRefMut, RefExt, RefMutExt, SizedTypeExt, TypeEnum,
+    TypeTrait, Unique,
 };
 
 pub struct Input {
@@ -128,8 +129,12 @@ impl<'invocation, 'state: 'invocation> AllocatorHandle<'invocation, 'state> {
     //     OwnedRefMut::<T>::allocate_default(self)
     // }
 
-    pub fn allocate<T: DynTypeTrait>(self, descriptor: T::Descriptor) -> OwnedRefMut<'state, Unique> {
-        OwnedRefMut::<Unique>::allocate::<T>(descriptor, self)
+    pub fn allocate_object<T: DynTypeTrait>(self, descriptor: T::Descriptor) -> OwnedRefMut<'state, T> {
+        OwnedRefMut::allocate_object(descriptor, self)
+    }
+
+    pub fn allocate_bytes<T: TypeTrait + SizedTypeExt>(self, ty: T) -> OwnedRefMut<'state, T> {
+        OwnedRefMut::allocate_bytes(ty, self)
     }
 
     // pub(crate) fn deref<T: DynTypeAllocator + DowncastFromTypeEnum>(

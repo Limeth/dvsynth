@@ -133,10 +133,9 @@ impl NodeBehaviour for ListConstructorNodeBehaviour {
     fn create_executor(&self) -> Self::FnExecutor {
         let ty = self.ty;
         Box::new(move |context: ExecutionContext<'_, '_, ()>| {
-            let mut list_ptr: OwnedRefMut<Unique> =
-                context.allocator_handle.allocate::<ListType>(ListDescriptor::new_if_sized(ty).unwrap());
-            let mut list: RefMut<ListType> =
-                list_ptr.deref_mut().downcast_mut(context.allocator_handle).unwrap();
+            let mut list: OwnedRefMut<ListType> = context
+                .allocator_handle
+                .allocate_object::<ListType>(ListDescriptor::new_if_sized(ty).unwrap());
             list.push_item_bytes_with(|bytes| {
                 bytes.iter_mut().enumerate().for_each(|(i, byte)| *byte = i as u8);
             })
