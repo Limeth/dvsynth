@@ -16,6 +16,28 @@ pub mod prelude {
     pub use super::{RefDynExt, RefExt, RefMutDynExt, RefMutExt};
 }
 
+pub unsafe fn visit_recursively<'a>(typed_bytes: TypedBytes<'a>, visit: &mut dyn FnMut(TypedBytes<'_>)) {
+    (visit)(typed_bytes.borrow());
+
+    for child in typed_bytes.children() {
+        visit_recursively(child, visit);
+    }
+}
+
+pub unsafe fn refcount_owned_increment_recursive<'a>(reference: &impl RefDynExt<'a>, node: NodeIndex) {
+    visit_recursively(reference.pointing_typed_bytes(), &mut |typed_bytes| {
+        let ptr = crate::ty::ptr::typed_bytes_to_ptr(typed_bytes).unwrap();
+        Allocator::get().refcount_owned_increment(ptr, node).unwrap()
+    });
+}
+
+pub unsafe fn refcount_owned_decrement_recursive<'a>(reference: &impl RefDynExt<'a>, node: NodeIndex) {
+    visit_recursively(reference.pointing_typed_bytes(), &mut |typed_bytes| {
+        let ptr = crate::ty::ptr::typed_bytes_to_ptr(typed_bytes).unwrap();
+        Allocator::get().refcount_owned_decrement(ptr, node).unwrap()
+    });
+}
+
 /// A common trait for references that allow for shared access.
 /// The lifetime `'a` denotes how long the underlying data may be accessed for.
 pub trait RefExt<'a, T: TypeTrait>: RefDynExt<'a> {
@@ -53,9 +75,7 @@ pub trait RefMutDynExt<'a>: RefDynExt<'a> {
 
     unsafe fn into_pointee_typed_bytes(self) -> TypedBytesMut<'a>;
 
-    unsafe fn into_pointing_typed_bytes(self) -> TypedBytesMut<'a> {
-        self.into_pointee_typed_bytes()
-    }
+    // unsafe fn children_mut<'b>(&'b mut self) -> Self::IterMutChildren<'b>;
 }
 
 // TODO: Consider allowing the lifetime to be a sub-lifetime of 'state?
@@ -182,32 +202,6 @@ where T: TypeTrait
     }
 }
 
-impl<'state, T> OwnedRefMut<'state, T> {
-    unsafe fn into_unique_ref_bytes(self) -> TypedBytesMut<'state> {
-        let typed_bytes = unsafe { Allocator::get().deref_mut_ptr(self.ptr) }.unwrap();
-        let ptr_mut = unsafe { Allocator::get().ptr_mut(self.ptr) }.unwrap();
-        let ptr_ty = Unique::new(typed_bytes.borrow().ty().into_owned()).into();
-
-        TypedBytesMut::from(ptr_mut.as_bytes_mut(), Cow::Owned(ptr_ty))
-    }
-
-    unsafe fn unique_ref_bytes_mut(&mut self) -> TypedBytesMut<'_> {
-        let typed_bytes = unsafe { Allocator::get().deref_mut_ptr(self.ptr) }.unwrap();
-        let ptr_mut = unsafe { Allocator::get().ptr_mut(self.ptr) }.unwrap();
-        let ptr_ty = Unique::new(typed_bytes.borrow().ty().into_owned()).into();
-
-        TypedBytesMut::from(ptr_mut.as_bytes_mut(), Cow::Owned(ptr_ty))
-    }
-
-    unsafe fn unique_ref_bytes(&self) -> TypedBytes<'_> {
-        let typed_bytes = unsafe { Allocator::get().deref_ptr(self.ptr) }.unwrap();
-        let ptr_ref = unsafe { Allocator::get().ptr_ref(self.ptr) }.unwrap();
-        let ptr_ty = Unique::new(typed_bytes.borrow().ty().into_owned()).into();
-
-        TypedBytes::from(ptr_ref.as_bytes(), Cow::Owned(ptr_ty))
-    }
-}
-
 impl<'a, T> RefExt<'a, T> for OwnedRefMut<'a, T>
 where T: TypeTrait
 {
@@ -226,7 +220,10 @@ impl<'a, T> RefDynExt<'a> for OwnedRefMut<'a, T> {
     }
 
     unsafe fn pointing_typed_bytes<'b>(&'b self) -> TypedBytes<'b> {
-        self.unique_ref_bytes()
+        let typed_bytes = Allocator::get().deref_ptr(self.ptr).unwrap();
+        let ptr_ty = Unique::new(typed_bytes.borrow().ty().into_owned()).into();
+
+        TypedBytes::from(self.ptr.as_bytes(), Cow::Owned(ptr_ty))
     }
 }
 
@@ -236,15 +233,14 @@ impl<'a, T> RefMutDynExt<'a> for OwnedRefMut<'a, T> {
     }
 
     unsafe fn pointing_typed_bytes_mut<'b>(&'b mut self) -> TypedBytesMut<'b> {
-        self.unique_ref_bytes_mut()
+        let typed_bytes = Allocator::get().deref_mut_ptr(self.ptr).unwrap();
+        let ptr_ty = Unique::new(typed_bytes.borrow().ty().into_owned()).into();
+
+        TypedBytesMut::from(self.ptr.as_bytes_mut(), Cow::Owned(ptr_ty))
     }
 
     unsafe fn into_pointee_typed_bytes(self) -> TypedBytesMut<'a> {
         Allocator::get().deref_mut_ptr(self.ptr).unwrap()
-    }
-
-    unsafe fn into_pointing_typed_bytes(self) -> TypedBytesMut<'a> {
-        self.into_unique_ref_bytes()
     }
 }
 
@@ -321,11 +317,10 @@ where T: TypeTrait
 
 impl<'state, T> OwnedRef<'state, T> {
     unsafe fn shared_ref_bytes(&self) -> TypedBytes<'_> {
-        let typed_bytes = unsafe { Allocator::get().deref_ptr(self.ptr) }.unwrap();
-        let ptr_ref = unsafe { Allocator::get().ptr_ref(self.ptr) }.unwrap();
-        let ptr_ty = Shared::new(typed_bytes.borrow().ty().into_owned()).into();
+        let typed_bytes = Allocator::get().deref_ptr(self.ptr).unwrap();
+        let ptr_ty = Unique::new(typed_bytes.borrow().ty().into_owned()).into();
 
-        TypedBytes::from(ptr_ref.as_bytes(), Cow::Owned(ptr_ty))
+        TypedBytes::from(self.ptr.as_bytes(), Cow::Owned(ptr_ty))
     }
 }
 

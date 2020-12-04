@@ -1,6 +1,6 @@
 use crate::graph::TextureAllocation;
 
-use super::{DowncastFromTypeEnum, DynTypeDescriptor, DynTypeTrait, TypeEnum};
+use super::{Bytes, DowncastFromTypeEnum, DynTypeDescriptor, DynTypeTrait, TypeEnum, TypedBytes};
 use std::fmt::Display;
 
 pub mod prelude {}
@@ -49,6 +49,10 @@ impl DynTypeTrait for TextureType {
 
     fn is_abi_compatible(&self, other: &Self) -> bool {
         todo!()
+    }
+
+    unsafe fn children<'a>(&'a self, data: &Bytes<'a>) -> Vec<TypedBytes<'a>> {
+        vec![]
     }
 }
 

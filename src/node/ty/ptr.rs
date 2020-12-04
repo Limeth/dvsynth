@@ -6,19 +6,31 @@ use crate::graph::alloc::Allocator;
 use crate::node::behaviour::AllocatorHandle;
 
 use super::{
-    AllocationPointer, DowncastFromTypeEnum, OwnedRefMut, RefAny, RefDynExt, RefExt, RefMut, RefMutAny,
-    RefMutDynExt, RefMutExt, SizedTypeExt, TypeEnum, TypeExt, TypeTrait, TypedBytes, TypedBytesMut,
+    AllocationPointer, Bytes, BytesMut, DowncastFromTypeEnum, OwnedRefMut, RefAny, RefDynExt, RefExt, RefMut,
+    RefMutAny, RefMutDynExt, RefMutExt, SizedTypeExt, TypeEnum, TypeExt, TypeTrait, TypedBytes,
+    TypedBytesMut,
 };
 
 pub mod prelude {
     pub use super::{IntoShared, SharedRefExt, SharedRefMutExt, UniqueRefExt, UniqueRefMutExt};
 }
 
-fn bytes_to_ptr(typed_bytes: TypedBytes<'_>) -> AllocationPointer {
-    let bytes = typed_bytes.bytes().bytes().unwrap();
+pub fn bytes_to_ptr(bytes: Bytes<'_>) -> AllocationPointer {
+    let bytes = bytes.bytes().unwrap();
     assert_eq!(bytes.len(), std::mem::size_of::<AllocationPointer>());
     let mut read = Cursor::new(bytes);
     AllocationPointer::new(read.read_u64::<LittleEndian>().unwrap())
+}
+
+pub fn typed_bytes_to_ptr(typed_bytes: TypedBytes<'_>) -> Option<AllocationPointer> {
+    if typed_bytes.borrow().ty().is_pointer() {
+        let bytes = typed_bytes.bytes().bytes().unwrap();
+        assert_eq!(bytes.len(), std::mem::size_of::<AllocationPointer>());
+        let mut read = Cursor::new(bytes);
+        Some(AllocationPointer::new(read.read_u64::<LittleEndian>().unwrap()))
+    } else {
+        None
+    }
 }
 
 pub unsafe trait SharedTrait: TypeTrait {}
@@ -60,6 +72,16 @@ impl TypeExt for Unique {
 
     fn has_safe_binary_representation(&self) -> bool {
         false
+    }
+
+    fn is_pointer(&self) -> bool {
+        true
+    }
+
+    unsafe fn children<'a>(&'a self, data: &Bytes<'a>) -> Vec<TypedBytes<'a>> {
+        let ptr = bytes_to_ptr(data.borrow());
+        let typed_bytes = Allocator::get().deref_ptr(ptr).unwrap();
+        vec![typed_bytes]
     }
 }
 
@@ -128,7 +150,7 @@ pub trait IntoShared<'a>: RefMutDynExt<'a> {
 }
 
 unsafe fn change_type_to_shared<'a>(reference: &(impl RefMutDynExt<'a> + IntoShared<'a>)) {
-    let ptr = bytes_to_ptr(reference.pointee_typed_bytes());
+    let ptr = typed_bytes_to_ptr(reference.pointee_typed_bytes()).unwrap();
     Allocator::get()
         .map_type(ptr, |ty| {
             let unique_ty = ty.downcast_ref::<Unique>().unwrap();
@@ -215,6 +237,16 @@ impl TypeExt for Shared {
 
     fn has_safe_binary_representation(&self) -> bool {
         false
+    }
+
+    fn is_pointer(&self) -> bool {
+        true
+    }
+
+    unsafe fn children<'a>(&'a self, data: &Bytes<'a>) -> Vec<TypedBytes<'a>> {
+        let ptr = bytes_to_ptr(data.borrow());
+        let typed_bytes = Allocator::get().deref_ptr(ptr).unwrap();
+        vec![typed_bytes]
     }
 }
 

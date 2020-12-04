@@ -9,7 +9,7 @@ use crate::node::behaviour::AllocatorHandle;
 use crate::util::CowMapExt;
 
 use super::{
-    DowncastFromTypeEnum, DynTypeDescriptor, DynTypeTrait, RefAny, RefExt, RefMutAny, RefMutDynExt,
+    Bytes, DowncastFromTypeEnum, DynTypeDescriptor, DynTypeTrait, RefAny, RefExt, RefMutAny, RefMutDynExt,
     RefMutExt, SizeRefMutExt, SizedTypeExt, TypeEnum, TypeExt, TypeTrait, TypedBytes, TypedBytesMut,
 };
 
@@ -76,6 +76,16 @@ impl DynTypeTrait for ListType {
 
     fn is_abi_compatible(&self, other: &Self) -> bool {
         self.child_ty.is_abi_compatible(&other.child_ty)
+    }
+
+    unsafe fn children<'a>(&'a self, data: &Bytes<'a>) -> Vec<TypedBytes<'a>> {
+        let value_size = self.child_ty.value_size_if_sized().unwrap();
+        let bytes = data.bytes().unwrap();
+
+        bytes
+            .chunks_exact(value_size)
+            .map(|chunk| TypedBytes::from(chunk, Cow::Borrowed(self.child_ty.as_ref())))
+            .collect()
     }
 }
 
@@ -169,9 +179,9 @@ where T: RefMutExt<'a, ListType>
         self.remove_range(index..(index + 1))
     }
 
-    fn push<'b>(&mut self, item: impl RefMutDynExt<'b> + 'b) -> Result<(), ()> {
+    fn push<'b>(&mut self, mut item: impl RefMutDynExt<'b> + 'b) -> Result<(), ()> {
         let mut typed_bytes = unsafe { self.pointee_typed_bytes_mut() };
-        let item_typed_bytes = unsafe { item.into_pointing_typed_bytes() };
+        let item_typed_bytes = unsafe { item.pointing_typed_bytes_mut() };
         let ty = typed_bytes.borrow().ty();
         let ty = ty.downcast_ref::<ListType>().unwrap();
 
@@ -226,9 +236,9 @@ where T: RefMutExt<'a, ListType>
         self.get_mut(self.len() - 1).map(|mut item| (write_bytes)(item.bytes_mut_if_sized().unwrap()))
     }
 
-    fn insert<'b>(&mut self, index: usize, item: impl RefMutDynExt<'b> + 'b) -> Result<(), ()> {
+    fn insert<'b>(&mut self, index: usize, mut item: impl RefMutDynExt<'b> + 'b) -> Result<(), ()> {
         let typed_bytes = unsafe { self.pointee_typed_bytes_mut() };
-        let item_typed_bytes = unsafe { item.into_pointing_typed_bytes() };
+        let item_typed_bytes = unsafe { item.pointing_typed_bytes_mut() };
         let ty = typed_bytes.borrow().ty();
         let ty = ty.downcast_ref::<ListType>().unwrap();
 

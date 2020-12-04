@@ -94,8 +94,8 @@ unsafe impl<T> Send for AllocationCell<T> {}
 unsafe impl<T> Sync for AllocationCell<T> {}
 
 pub trait AllocatedType = Any + Send + Sync + 'static;
-// pub trait AllocatedType: std::fmt::Debug + Any + Send + Sync + 'static {}
-// impl<T> AllocatedType for T where T: std::fmt::Debug + Any + Send + Sync + 'static {}
+// pub trait AllocatedType: std::fmt::Debug + Any + Clone + Copy + Send + Sync + 'static {}
+// impl<T> AllocatedType for T where T: std::fmt::Debug + Any + Clone + Copy + Send + Sync + 'static {}
 
 #[derive(Debug)]
 pub(crate) enum AllocationType {
@@ -151,11 +151,10 @@ impl AllocationType {
 pub(crate) struct AllocationInner {
     ty: TypeEnum,
     inner: AllocationType,
-    ptr: AllocationPointer,
 }
 
 impl AllocationInner {
-    pub fn new_object<T: DynTypeTrait>(data: T::DynAlloc, ty: T, ptr: AllocationPointer) -> Self {
+    pub fn new_object<T: DynTypeTrait>(data: T::DynAlloc, ty: T) -> Self {
         assert!(
             TypeId::of::<T::DynAlloc>() != TypeId::of::<[u8]>(),
             "Type `[u8]` may not be allocated as an object. Allocate it as bytes instead."
@@ -164,16 +163,16 @@ impl AllocationInner {
         let data = Box::new(data) as Box<dyn AllocatedType>;
         let inner = AllocationType::Object { ty_name: std::any::type_name::<T::DynAlloc>(), data };
 
-        Self { ty: ty_enum, inner, ptr }
+        Self { ty: ty_enum, inner }
     }
 
-    pub fn new_bytes<T: TypeTrait + SizedTypeExt>(ty: T, ptr: AllocationPointer) -> Self {
+    pub fn new_bytes<T: TypeTrait + SizedTypeExt>(ty: T) -> Self {
         let data: Vec<u8> = std::iter::repeat(0u8).take(ty.value_size()).collect();
         let data: Box<[u8]> = data.into_boxed_slice();
         let inner = AllocationType::Bytes(data);
         let ty_enum: TypeEnum = ty.into();
 
-        Self { ty: ty_enum, inner, ptr }
+        Self { ty: ty_enum, inner }
     }
 
     pub fn as_ref(&self) -> TypedBytes<'_> {
@@ -281,12 +280,7 @@ impl Allocator {
     }
 
     /// Allocates the value with refcount set to 1.
-    fn allocate_value(
-        &self,
-        handle: AllocatorHandle<'_, '_>,
-        get_inner: impl FnOnce(AllocationPointer) -> AllocationInner,
-    ) -> AllocationPointer
-    {
+    fn allocate_value(&self, inner: AllocationInner, handle: AllocatorHandle<'_, '_>) -> AllocationPointer {
         const EXPAND_BY: usize = 64;
 
         let free_index = loop {
@@ -320,7 +314,6 @@ impl Allocator {
         let allocations = self.allocations.read().unwrap();
         let allocation = &allocations.vec[free_index as usize];
         let ptr = AllocationPointer { index: free_index };
-        let inner = (get_inner)(ptr);
 
         unsafe {
             allocation.claim_with(inner);
@@ -343,7 +336,8 @@ impl Allocator {
     {
         let ty = descriptor.get_type();
         let value = T::create_value_from_descriptor(descriptor);
-        self.allocate_value(handle, move |ptr| AllocationInner::new_object(value, ty, ptr))
+        let inner = AllocationInner::new_object(value, ty);
+        self.allocate_value(inner, handle)
     }
 
     pub fn allocate_bytes<T: TypeTrait + SizedTypeExt>(
@@ -352,7 +346,8 @@ impl Allocator {
         handle: AllocatorHandle<'_, '_>,
     ) -> AllocationPointer
     {
-        self.allocate_value(handle, move |ptr| AllocationInner::new_bytes(ty, ptr))
+        let inner = AllocationInner::new_bytes(ty);
+        self.allocate_value(inner, handle)
     }
 
     pub fn deallocate(&self, allocation_ptr: AllocationPointer) {
@@ -501,29 +496,29 @@ impl Allocator {
         }
     }
 
-    /// Safety: Access safety must be ensured externally by the execution graph.
-    ///         Extra caution must be taken to request a correct lifetime 'a.
-    pub unsafe fn ptr_ref<'a>(&self, allocation_ptr: AllocationPointer) -> Option<&'a AllocationPointer> {
-        let allocations = self.allocations.read().unwrap();
-        allocations.vec.get(allocation_ptr.as_usize()).map(|allocation| {
-            let allocation_inner =
-                allocation.inner.as_ref().as_ref().expect("Dereferencing a freed value.").as_ref();
+    // /// Safety: Access safety must be ensured externally by the execution graph.
+    // ///         Extra caution must be taken to request a correct lifetime 'a.
+    // pub unsafe fn ptr_ref<'a>(&self, allocation_ptr: AllocationPointer) -> Option<&'a AllocationPointer> {
+    //     let allocations = self.allocations.read().unwrap();
+    //     allocations.vec.get(allocation_ptr.as_usize()).map(|allocation| {
+    //         let allocation_inner =
+    //             allocation.inner.as_ref().as_ref().expect("Dereferencing a freed value.").as_ref();
 
-            &allocation_inner.ptr
-        })
-    }
+    //         &allocation_inner.ptr
+    //     })
+    // }
 
-    /// Safety: Access safety must be ensured externally by the execution graph.
-    ///         Extra caution must be taken to request a correct lifetime 'a.
-    pub unsafe fn ptr_mut<'a>(&self, allocation_ptr: AllocationPointer) -> Option<&'a mut AllocationPointer> {
-        let allocations = self.allocations.read().unwrap();
-        allocations.vec.get(allocation_ptr.as_usize()).map(|allocation| {
-            let allocation_inner =
-                allocation.inner.as_ref().as_ref().expect("Dereferencing a freed value.").as_mut();
+    // /// Safety: Access safety must be ensured externally by the execution graph.
+    // ///         Extra caution must be taken to request a correct lifetime 'a.
+    // pub unsafe fn ptr_mut<'a>(&self, allocation_ptr: AllocationPointer) -> Option<&'a mut AllocationPointer> {
+    //     let allocations = self.allocations.read().unwrap();
+    //     allocations.vec.get(allocation_ptr.as_usize()).map(|allocation| {
+    //         let allocation_inner =
+    //             allocation.inner.as_ref().as_ref().expect("Dereferencing a freed value.").as_mut();
 
-            &mut allocation_inner.ptr
-        })
-    }
+    //         &mut allocation_inner.ptr
+    //     })
+    // }
 
     /// Safety: Access safety must be ensured externally by the execution graph.
     ///         Extra caution must be taken to request a correct lifetime 'a.
@@ -548,6 +543,18 @@ impl Allocator {
             allocation_inner.as_mut()
         })
     }
+
+    // /// Safety: Access safety must be ensured externally by the execution graph.
+    // ///         Extra caution must be taken to request a correct lifetime 'a.
+    // pub unsafe fn swap<'a>(&self, allocation_ptr_a: AllocationPointer, allocation_ptr_b: AllocationPointer) -> Option<TypedBytesMut<'a>> {
+    //     let allocations = self.allocations.read().unwrap();
+    //     allocations.vec.get(allocation_ptr.as_usize()).map(|allocation| {
+    //         let allocation_inner =
+    //             allocation.inner.as_ref().as_ref().expect("Dereferencing a freed value.").as_mut();
+
+    //         allocation_inner.as_mut()
+    //     })
+    // }
 
     pub unsafe fn map_type<'a>(
         &self,

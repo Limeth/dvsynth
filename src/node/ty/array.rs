@@ -1,6 +1,7 @@
+use std::borrow::Cow;
 use std::fmt::Display;
 
-use super::{DowncastFromTypeEnum, SizedTypeExt, TypeEnum, TypeExt, TypeTrait};
+use super::{Bytes, DowncastFromTypeEnum, SizedTypeExt, TypeEnum, TypeExt, TypeTrait, TypedBytes};
 
 pub mod prelude {}
 
@@ -74,6 +75,16 @@ impl TypeExt for ArrayType {
 
     fn has_safe_binary_representation(&self) -> bool {
         self.item_type.has_safe_binary_representation()
+    }
+
+    unsafe fn children<'a>(&'a self, data: &Bytes<'a>) -> Vec<TypedBytes<'a>> {
+        let value_size = self.item_type.value_size_if_sized().unwrap();
+        let bytes = data.bytes().unwrap();
+
+        bytes
+            .chunks_exact(value_size)
+            .map(|chunk| TypedBytes::from(chunk, Cow::Borrowed(self.item_type.as_ref())))
+            .collect()
     }
 }
 

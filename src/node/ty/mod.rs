@@ -158,6 +158,10 @@ impl<'a> TypedBytes<'a> {
     pub fn ty(self) -> Cow<'a, TypeEnum> {
         self.ty
     }
+
+    pub unsafe fn children(&self) -> Vec<TypedBytes<'_>> {
+        self.ty.as_ref().children(&self.bytes)
+    }
 }
 
 impl<'a> From<TypedBytes<'a>> for (Bytes<'a>, Cow<'a, TypeEnum>) {
@@ -339,6 +343,13 @@ pub trait TypeExt: Into<TypeEnum> + PartialEq + Eq + Send + Sync + 'static {
     ///
     /// Pointers and unsized types are both a typical case which is not safe.
     fn has_safe_binary_representation(&self) -> bool;
+
+    /// Returns true, if this type is an instance of `Unique` or `Shared`.
+    fn is_pointer(&self) -> bool {
+        false
+    }
+
+    unsafe fn children<'a>(&'a self, data: &Bytes<'a>) -> Vec<TypedBytes<'a>>;
 }
 
 pub trait SizedTypeExt: TypeExt {
@@ -374,6 +385,7 @@ where Self: TypeTrait
 
     fn create_value_from_descriptor(descriptor: Self::Descriptor) -> Self::DynAlloc;
     fn is_abi_compatible(&self, other: &Self) -> bool;
+    unsafe fn children<'a>(&'a self, data: &Bytes<'a>) -> Vec<TypedBytes<'a>>;
 }
 
 // pub struct IndirectInnerRef<'a, T: AllocatedType> {
@@ -508,6 +520,10 @@ where T: DynTypeTrait
     fn has_safe_binary_representation(&self) -> bool {
         false
     }
+
+    unsafe fn children<'a>(&'a self, data: &Bytes<'a>) -> Vec<TypedBytes<'a>> {
+        <T as DynTypeTrait>::children(self, data)
+    }
 }
 
 pub trait SizedType: TypeTrait {}
@@ -568,6 +584,15 @@ macro_rules! define_type_enum {
                 match self {
                     $(
                         $variant(inner) => inner.has_safe_binary_representation(),
+                    )*
+                }
+            }
+
+            unsafe fn children_impl<'a>(&'a self, data: &Bytes<'a>) -> Vec<TypedBytes<'a>> {
+                use TypeEnum::*;
+                match self {
+                    $(
+                        $variant(inner) => TypeExt::children(inner, data),
                     )*
                 }
             }
@@ -640,6 +665,10 @@ impl TypeExt for TypeEnum {
 
     fn has_safe_binary_representation(&self) -> bool {
         self.has_safe_binary_representation_impl()
+    }
+
+    unsafe fn children<'a>(&'a self, data: &Bytes<'a>) -> Vec<TypedBytes<'a>> {
+        self.children_impl(data)
     }
 }
 
@@ -733,120 +762,46 @@ where R: RefDynExt<'a>
     }
 }
 
-/*
-
-pub trait SizedRefMutExt<'a> {
-    fn bytes_mut(&mut self) -> Option<&mut [u8]>;
+pub trait AssignRefMutExt {
+    fn swap<'b>(&mut self, from: &mut impl RefMutDynExt<'b>) -> Result<(), ()>;
+    fn assign<'b>(&mut self, from: impl RefMutDynExt<'b>) -> Result<(), ()>;
 }
 
-impl<'a, T> SizedRefMutExt<'a> for RefMut<'a, T>
-where T: TypeTrait + SizedTypeExt
-{
-    fn bytes_mut(&mut self) -> Option<&mut [u8]> {
-        let typed_bytes = unsafe { self.typed_bytes_mut() };
-
-        if typed_bytes.borrow().ty().has_safe_binary_representation() {
-            Some(typed_bytes.bytes_mut().bytes_mut().unwrap())
-        } else {
-            None
-        }
-    }
-}
-
-impl<'a, T> SizedRefMutExt<'a> for OwnedRefMut<'a, T> {
-    fn bytes_mut(&mut self) -> Option<&mut [u8]> {
-        let typed_bytes = unsafe { self.typed_bytes_mut() };
-
-        if typed_bytes.borrow().ty().has_safe_binary_representation() {
-            Some(typed_bytes.bytes_mut().bytes_mut().unwrap())
-        } else {
-            None
-        }
-    }
-}
-
-pub trait SizedRefExt<'a>: RefDynExt<'a> {
-    fn value_size(&self) -> usize;
-    fn bytes(&self) -> Option<&[u8]>;
-}
-
-impl<'a, T> SizedRefExt<'a> for Ref<'a, T>
-where T: TypeTrait + SizedTypeExt
-{
-    fn value_size(&self) -> usize {
-        let typed_bytes = unsafe { self.typed_bytes() };
-        typed_bytes.ty().value_size_if_sized().unwrap()
-    }
-
-    fn bytes(&self) -> Option<&[u8]> {
-        let typed_bytes = unsafe { self.typed_bytes() };
-
-        if typed_bytes.ty().has_safe_binary_representation() {
-            Some(typed_bytes.bytes().bytes().unwrap())
-        } else {
-            None
-        }
-    }
-}
-
-impl<'a, T> SizedRefExt<'a> for OwnedRef<'a, T> {
-    fn value_size(&self) -> usize {
-        let typed_bytes = unsafe { self.typed_bytes() };
-        typed_bytes.ty().value_size_if_sized().unwrap()
-    }
-
-    fn bytes(&self) -> Option<&[u8]> {
-        let typed_bytes = unsafe { self.typed_bytes() };
-
-        if typed_bytes.ty().has_safe_binary_representation() {
-            Some(typed_bytes.bytes().bytes().unwrap())
-        } else {
-            None
-        }
-    }
-}
-
-pub trait SizeRefMutExt<'a> {
-    fn bytes_mut_if_sized(&mut self) -> Option<&mut [u8]>;
-}
-
-impl<'a, R> SizeRefMutExt<'a> for R
+impl<'a, R> AssignRefMutExt for R
 where R: RefMutDynExt<'a>
 {
-    fn bytes_mut_if_sized(&mut self) -> Option<&mut [u8]> {
-        let typed_bytes = unsafe { self.typed_bytes_mut() };
-        let ty = typed_bytes.borrow().ty();
+    fn swap<'b>(&mut self, from: &mut impl RefMutDynExt<'b>) -> Result<(), ()> {
+        let mut typed_bytes_a = unsafe { self.pointing_typed_bytes_mut() };
+        let mut typed_bytes_b = unsafe { from.pointing_typed_bytes_mut() };
 
-        if ty.value_size_if_sized().is_some() && ty.has_safe_binary_representation() {
-            Some(typed_bytes.bytes_mut().bytes_mut().unwrap())
+        // Swapped types must be compatible
+        if !typed_bytes_a.borrow().ty().as_ref().is_abi_compatible(typed_bytes_b.borrow().ty().as_ref()) {
+            return Err(());
+        }
+
+        // Ensure types are sized
+        if typed_bytes_a.borrow().ty().value_size_if_sized().is_none()
+            || typed_bytes_b.borrow().ty().value_size_if_sized().is_none()
+        {
+            return Err(());
+        }
+
+        // Swap values
+        if let (Some(a), Some(b)) = (
+            typed_bytes_a.borrow_mut().bytes_mut().bytes_mut(),
+            typed_bytes_b.borrow_mut().bytes_mut().bytes_mut(),
+        ) {
+            assert_eq!(a.len(), b.len());
+            a.iter_mut().zip(b.iter_mut()).for_each(|(a, b)| {
+                std::mem::swap(a, b);
+            });
+            return Ok(());
         } else {
-            None
+            unreachable!()
         }
     }
-}
 
-pub trait SizeRefExt<'a> {
-    fn value_size_if_sized(&self) -> Option<usize>;
-    fn bytes_if_sized(&self) -> Option<&[u8]>;
-}
-
-impl<'a, R> SizeRefExt<'a> for R
-where R: RefDynExt<'a>
-{
-    fn value_size_if_sized(&self) -> Option<usize> {
-        let typed_bytes = unsafe { self.typed_bytes() };
-        typed_bytes.ty().value_size_if_sized()
-    }
-
-    fn bytes_if_sized(&self) -> Option<&[u8]> {
-        let typed_bytes = unsafe { self.typed_bytes() };
-        let ty = typed_bytes.ty();
-
-        if ty.value_size_if_sized().is_some() && ty.has_safe_binary_representation() {
-            Some(typed_bytes.bytes().bytes().unwrap())
-        } else {
-            None
-        }
+    fn assign<'b>(&mut self, mut from: impl RefMutDynExt<'b>) -> Result<(), ()> {
+        self.swap(&mut from)
     }
 }
-*/
