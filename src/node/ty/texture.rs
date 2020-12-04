@@ -10,6 +10,12 @@ pub struct TextureType {
     // TODO texture format, size?
 }
 
+impl TextureType {
+    pub fn new() -> Self {
+        Self {}
+    }
+}
+
 impl Display for TextureType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("Texture")
@@ -38,6 +44,10 @@ impl DynTypeTrait for TextureType {
     type DynAlloc = TextureAllocation;
 
     fn create_value_from_descriptor(descriptor: Self::Descriptor) -> Self::DynAlloc {
+        todo!()
+    }
+
+    fn is_abi_compatible(&self, other: &Self) -> bool {
         todo!()
     }
 }

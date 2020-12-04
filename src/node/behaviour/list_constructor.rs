@@ -133,20 +133,38 @@ impl NodeBehaviour for ListConstructorNodeBehaviour {
     fn create_executor(&self) -> Self::FnExecutor {
         let ty = self.ty;
         Box::new(move |context: ExecutionContext<'_, '_, ()>| {
-            let mut list: OwnedRefMut<ListType> = context
-                .allocator_handle
-                .allocate_object::<ListType>(ListDescriptor::new_if_sized(ty).unwrap());
-            list.push_item_bytes_with(|bytes| {
-                bytes.iter_mut().enumerate().for_each(|(i, byte)| *byte = i as u8);
-            })
-            .unwrap();
-            list.push_item_bytes_with(|bytes| {
-                bytes.iter_mut().enumerate().for_each(|(i, byte)| *byte = 2 * i as u8);
-            })
-            .unwrap();
-            dbg!(list.get(0).unwrap().bytes_if_sized());
-            dbg!(list.get(1).unwrap().bytes_if_sized());
-            dbg!(list.len());
+            {
+                let mut list: OwnedRefMut<ListType> = context
+                    .allocator_handle
+                    .allocate_object::<ListType>(ListDescriptor::new_if_sized(ty).unwrap());
+                list.push_item_bytes_with(|bytes| {
+                    bytes.iter_mut().enumerate().for_each(|(i, byte)| *byte = i as u8);
+                })
+                .unwrap();
+                list.push_item_bytes_with(|bytes| {
+                    bytes.iter_mut().enumerate().for_each(|(i, byte)| *byte = 2 * i as u8);
+                })
+                .unwrap();
+                dbg!(list.get(0).unwrap().bytes_if_sized());
+                dbg!(list.get(1).unwrap().bytes_if_sized());
+                dbg!(list.len());
+            }
+            {
+                let mut list: OwnedRefMut<ListType> = context.allocator_handle.allocate_object::<ListType>(
+                    ListDescriptor::new(Unique::new(ListType::new(PrimitiveType::U8))),
+                );
+                let mut inner_list_1: OwnedRefMut<ListType> = context
+                    .allocator_handle
+                    .allocate_object::<ListType>(ListDescriptor::new(PrimitiveType::U8));
+                list.push(inner_list_1).unwrap();
+                let mut inner_list_2: OwnedRefMut<ListType> = context
+                    .allocator_handle
+                    .allocate_object::<ListType>(ListDescriptor::new(PrimitiveType::U8));
+                list.push(inner_list_2).unwrap();
+                dbg!(list.get(0).unwrap().bytes_if_sized());
+                dbg!(list.get(1).unwrap().bytes_if_sized());
+                dbg!(list.len());
+            }
             let mut cursor = Cursor::new(context.outputs[0].as_mut());
 
             for input in context.inputs.values.iter() {

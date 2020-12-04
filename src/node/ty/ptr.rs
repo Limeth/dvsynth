@@ -53,6 +53,8 @@ impl TypeExt for Unique {
     }
 
     fn is_abi_compatible(&self, other: &Self) -> bool {
+        dbg!(&self.child_ty);
+        dbg!(&other.child_ty);
         self.child_ty.is_abi_compatible(&other.child_ty)
     }
 
@@ -101,7 +103,7 @@ impl<'a, T> UniqueRefMutExt<'a> for T
 where T: RefMutExt<'a, Unique> + 'a
 {
     fn deref_mut(&mut self) -> RefMutAny<'_> {
-        let typed_bytes = unsafe { self.typed_bytes() };
+        let typed_bytes = unsafe { self.pointee_typed_bytes() };
         let bytes = typed_bytes.bytes().bytes().unwrap();
 
         assert_eq!(bytes.len(), std::mem::size_of::<AllocationPointer>());
@@ -126,7 +128,7 @@ pub trait IntoShared<'a>: RefMutDynExt<'a> {
 }
 
 unsafe fn change_type_to_shared<'a>(reference: &(impl RefMutDynExt<'a> + IntoShared<'a>)) {
-    let ptr = bytes_to_ptr(reference.typed_bytes());
+    let ptr = bytes_to_ptr(reference.pointee_typed_bytes());
     Allocator::get()
         .map_type(ptr, |ty| {
             let unique_ty = ty.downcast_ref::<Unique>().unwrap();
@@ -139,10 +141,10 @@ unsafe fn change_type_to_shared<'a>(reference: &(impl RefMutDynExt<'a> + IntoSha
 impl<'a> IntoShared<'a> for RefMut<'a, Unique> {
     type Target<T: TypeTrait> = RefMut<'a, T>;
 
-    fn into_shared(self, handle: AllocatorHandle<'a, '_>) -> Self::Target<Shared> {
+    fn into_shared(self, _handle: AllocatorHandle<'a, '_>) -> Self::Target<Shared> {
         unsafe {
             change_type_to_shared(&self);
-            RefMut::from(self.into_typed_bytes_mut()).downcast_mut(handle).unwrap()
+            RefMut::from(self.into_pointee_typed_bytes()).downcast_mut().unwrap()
         }
     }
 }
@@ -150,10 +152,10 @@ impl<'a> IntoShared<'a> for RefMut<'a, Unique> {
 impl<'a> IntoShared<'a> for OwnedRefMut<'a, Unique> {
     type Target<T: TypeTrait> = OwnedRefMut<'a, T>;
 
-    fn into_shared(self, handle: AllocatorHandle<'a, '_>) -> Self::Target<Shared> {
+    fn into_shared(self, _handle: AllocatorHandle<'a, '_>) -> Self::Target<Shared> {
         unsafe {
             change_type_to_shared(&self);
-            self.into_mut_any().downcast_mut(handle).unwrap()
+            self.into_mut_any().downcast_mut().unwrap()
         }
     }
 }
@@ -162,7 +164,7 @@ impl<'a, T> UniqueRefExt<'a> for T
 where T: RefExt<'a, Unique>
 {
     fn deref(&self) -> RefAny<'_> {
-        let typed_bytes = unsafe { self.typed_bytes() };
+        let typed_bytes = unsafe { self.pointee_typed_bytes() };
         let bytes = typed_bytes.bytes().bytes().unwrap();
 
         assert_eq!(bytes.len(), std::mem::size_of::<AllocationPointer>());
@@ -253,7 +255,7 @@ impl<'a, T> SharedRefExt<'a> for T
 where T: RefExt<'a, Shared>
 {
     fn deref(&self) -> RefAny<'_> {
-        let typed_bytes = unsafe { self.typed_bytes() };
+        let typed_bytes = unsafe { self.pointee_typed_bytes() };
         let bytes = typed_bytes.bytes().bytes().unwrap();
 
         assert_eq!(bytes.len(), std::mem::size_of::<AllocationPointer>());

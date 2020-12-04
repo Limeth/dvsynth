@@ -3,6 +3,7 @@ use std::borrow::Cow;
 use std::fmt::{Debug, Display};
 use std::io::{Cursor, Read, Write};
 use std::marker::PhantomData;
+use std::mem::Discriminant;
 
 use byteorder::{ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
 
@@ -84,6 +85,14 @@ pub enum Bytes<'a> {
 }
 
 impl<'a> Bytes<'a> {
+    pub fn borrow(&self) -> Bytes<'_> {
+        use self::Bytes::*;
+        match self {
+            Bytes(ref inner) => Bytes(&**inner),
+            Object { ty_name, ref data } => Object { ty_name, data: &**data },
+        }
+    }
+
     pub fn bytes(self) -> Option<&'a [u8]> {
         if let Bytes::Bytes(inner) = self {
             Some(inner)
@@ -100,26 +109,17 @@ impl<'a> Bytes<'a> {
         }
     }
 
-    pub fn downcast_ref_unwrap<T: Any>(self) -> &'a T {
-        if TypeId::of::<T>() == TypeId::of::<[u8]>() {
-            match self {
-                Bytes::Bytes(inner) => unsafe { &*(inner as *const _ as *const T) },
-                Bytes::Object { ty_name, .. } => {
-                    panic!("Attempt to downcast type `{}` to `{}`.", ty_name, std::any::type_name::<T>())
-                }
-            }
+    pub fn downcast_ref_unwrap<T: AllocatedType>(self) -> &'a T {
+        if let Bytes::Object { ty_name, data } = self {
+            data.downcast_ref::<T>().unwrap_or_else(|| {
+                panic!("Attempt to downcast type `{}` to `{}`.", ty_name, std::any::type_name::<T>())
+            })
         } else {
-            if let Bytes::Object { ty_name, data } = self {
-                data.downcast_ref::<T>().unwrap_or_else(|| {
-                    panic!("Attempt to downcast type `{}` to `{}`.", ty_name, std::any::type_name::<T>())
-                })
-            } else {
-                panic!(
-                    "Attempt to downcast type `{}` to `{}`.",
-                    std::any::type_name::<[u8]>(),
-                    std::any::type_name::<T>()
-                )
-            }
+            panic!(
+                "Attempt to downcast type `{}` to `{}`.",
+                std::any::type_name::<[u8]>(),
+                std::any::type_name::<T>()
+            )
         }
     }
 }
@@ -130,10 +130,10 @@ impl<'a> From<&'a [u8]> for Bytes<'a> {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct TypedBytes<'a> {
     bytes: Bytes<'a>,
-    ty: &'a TypeEnum,
+    ty: Cow<'a, TypeEnum>,
 }
 
 impl<'a> From<&'a AllocationInner> for TypedBytes<'a> {
@@ -143,16 +143,26 @@ impl<'a> From<&'a AllocationInner> for TypedBytes<'a> {
 }
 
 impl<'a> TypedBytes<'a> {
-    pub fn from(bytes: impl Into<Bytes<'a>>, ty: &'a TypeEnum) -> Self {
-        Self { bytes: bytes.into(), ty }
+    pub fn from(bytes: impl Into<Bytes<'a>>, ty: impl Into<Cow<'a, TypeEnum>>) -> Self {
+        Self { bytes: bytes.into(), ty: ty.into() }
+    }
+
+    pub fn borrow(&self) -> TypedBytes<'_> {
+        TypedBytes { bytes: self.bytes.borrow(), ty: Cow::Borrowed(&*self.ty.as_ref()) }
     }
 
     pub fn bytes(self) -> Bytes<'a> {
         self.bytes
     }
 
-    pub fn ty(self) -> &'a TypeEnum {
+    pub fn ty(self) -> Cow<'a, TypeEnum> {
         self.ty
+    }
+}
+
+impl<'a> From<TypedBytes<'a>> for (Bytes<'a>, Cow<'a, TypeEnum>) {
+    fn from(bytes: TypedBytes<'a>) -> Self {
+        (bytes.bytes, bytes.ty)
     }
 }
 
@@ -172,27 +182,18 @@ impl<'a> BytesMut<'a> {
         }
     }
 
-    pub fn borrow<'b>(&'b self) -> Bytes<'b>
-    where 'a: 'b {
-        unsafe {
-            match self {
-                &BytesMut::Bytes(ref inner) => Bytes::Bytes(&*(*inner as *const _)),
-                &BytesMut::Object { ty_name, ref data } => {
-                    Bytes::Object { ty_name, data: &*(*data as *const _) }
-                }
-            }
+    pub fn borrow_mut(&mut self) -> BytesMut<'_> {
+        use self::BytesMut::*;
+        match self {
+            Bytes(ref mut inner) => Bytes(&mut **inner),
+            Object { ty_name, ref mut data } => Object { ty_name, data: &mut **data },
         }
     }
 
-    pub fn borrow_mut<'b>(&'b mut self) -> BytesMut<'b>
-    where 'a: 'b {
-        unsafe {
-            match self {
-                &mut BytesMut::Bytes(ref mut inner) => BytesMut::Bytes(&mut *(*inner as *mut _)),
-                &mut BytesMut::Object { ty_name, ref mut data } => {
-                    BytesMut::Object { ty_name, data: &mut *(*data as *mut _) }
-                }
-            }
+    pub fn borrow(&self) -> Bytes<'_> {
+        match self {
+            BytesMut::Bytes(ref inner) => Bytes::Bytes(&**inner),
+            BytesMut::Object { ty_name, ref data } => Bytes::Object { ty_name, data: &**data },
         }
     }
 
@@ -228,49 +229,31 @@ impl<'a> BytesMut<'a> {
         }
     }
 
-    pub fn downcast_ref_unwrap<T: Any>(self) -> &'a T {
-        if TypeId::of::<T>() == TypeId::of::<[u8]>() {
-            match self {
-                BytesMut::Bytes(inner) => unsafe { &*(inner as *const _ as *const T) },
-                BytesMut::Object { ty_name, .. } => {
-                    panic!("Attempt to downcast type `{}` to `{}`.", ty_name, std::any::type_name::<T>())
-                }
-            }
+    pub fn downcast_ref_unwrap<T: AllocatedType>(self) -> &'a T {
+        if let BytesMut::Object { ty_name, data } = self {
+            data.downcast_ref::<T>().unwrap_or_else(|| {
+                panic!("Attempt to downcast type `{}` to `{}`.", ty_name, std::any::type_name::<T>())
+            })
         } else {
-            if let BytesMut::Object { ty_name, data } = self {
-                data.downcast_ref::<T>().unwrap_or_else(|| {
-                    panic!("Attempt to downcast type `{}` to `{}`.", ty_name, std::any::type_name::<T>())
-                })
-            } else {
-                panic!(
-                    "Attempt to downcast type `{}` to `{}`.",
-                    std::any::type_name::<[u8]>(),
-                    std::any::type_name::<T>()
-                )
-            }
+            panic!(
+                "Attempt to downcast type `{}` to `{}`.",
+                std::any::type_name::<[u8]>(),
+                std::any::type_name::<T>()
+            )
         }
     }
 
-    pub fn downcast_mut_unwrap<T: Any>(self) -> &'a mut T {
-        if TypeId::of::<T>() == TypeId::of::<[u8]>() {
-            match self {
-                BytesMut::Bytes(inner) => unsafe { &mut *(inner as *mut _ as *mut T) },
-                BytesMut::Object { ty_name, .. } => {
-                    panic!("Attempt to downcast type `{}` to `{}`.", ty_name, std::any::type_name::<T>())
-                }
-            }
+    pub fn downcast_mut_unwrap<T: AllocatedType>(self) -> &'a mut T {
+        if let BytesMut::Object { ty_name, data } = self {
+            data.downcast_mut::<T>().unwrap_or_else(|| {
+                panic!("Attempt to downcast type `{}` to `{}`.", ty_name, std::any::type_name::<T>())
+            })
         } else {
-            if let BytesMut::Object { ty_name, data } = self {
-                data.downcast_mut::<T>().unwrap_or_else(|| {
-                    panic!("Attempt to downcast type `{}` to `{}`.", ty_name, std::any::type_name::<T>())
-                })
-            } else {
-                panic!(
-                    "Attempt to downcast type `{}` to `{}`.",
-                    std::any::type_name::<[u8]>(),
-                    std::any::type_name::<T>()
-                )
-            }
+            panic!(
+                "Attempt to downcast type `{}` to `{}`.",
+                std::any::type_name::<[u8]>(),
+                std::any::type_name::<T>()
+            )
         }
     }
 }
@@ -284,7 +267,7 @@ impl<'a> From<&'a mut [u8]> for BytesMut<'a> {
 #[derive(Debug)]
 pub struct TypedBytesMut<'a> {
     bytes: BytesMut<'a>,
-    ty: &'a TypeEnum,
+    ty: Cow<'a, TypeEnum>,
 }
 
 impl<'a> From<&'a mut AllocationInner> for TypedBytesMut<'a> {
@@ -294,8 +277,8 @@ impl<'a> From<&'a mut AllocationInner> for TypedBytesMut<'a> {
 }
 
 impl<'a> TypedBytesMut<'a> {
-    pub fn from(bytes: impl Into<BytesMut<'a>>, ty: &'a TypeEnum) -> Self {
-        Self { bytes: bytes.into(), ty }
+    pub fn from(bytes: impl Into<BytesMut<'a>>, ty: impl Into<Cow<'a, TypeEnum>>) -> Self {
+        Self { bytes: bytes.into(), ty: ty.into() }
     }
 
     pub fn bytes_mut(self) -> BytesMut<'a> {
@@ -306,24 +289,34 @@ impl<'a> TypedBytesMut<'a> {
         self.bytes.downgrade()
     }
 
-    pub fn ty(self) -> &'a TypeEnum {
+    pub fn ty(self) -> Cow<'a, TypeEnum> {
         self.ty
     }
 
     pub fn downgrade(self) -> TypedBytes<'a> {
-        TypedBytes { bytes: self.bytes.downgrade(), ty: self.ty }
+        TypedBytes { bytes: self.bytes.downgrade(), ty: self.ty.clone() }
     }
 
-    pub fn borrow<'b>(&'b self) -> TypedBytes<'b> {
-        TypedBytes { bytes: self.bytes.borrow(), ty: unsafe { &*(self.ty as *const _) } }
+    // pub fn borrow<'b>(&'b self) -> TypedBytes<'b> {
+    //     // TypedBytes { bytes: self.bytes.borrow(), ty: unsafe { &*(self.ty as *const _) } }
+    //     TypedBytes { bytes: self.bytes.borrow(), ty: self.ty.clone() }
+    // }
+
+    // pub fn borrow_mut<'b>(&'b mut self) -> TypedBytesMut<'b> {
+    //     // TypedBytesMut { bytes: self.bytes.borrow_mut(), ty: unsafe { &*(self.ty as *const _) } }
+    //     TypedBytesMut { bytes: self.bytes.borrow_mut(), ty: self.ty.clone() }
+    // }
+
+    pub fn borrow_mut(&mut self) -> TypedBytesMut<'_> {
+        TypedBytesMut { bytes: self.bytes.borrow_mut(), ty: Cow::Borrowed(&*self.ty.as_ref()) }
     }
 
-    pub fn borrow_mut<'b>(&'b mut self) -> TypedBytesMut<'b> {
-        TypedBytesMut { bytes: self.bytes.borrow_mut(), ty: unsafe { &*(self.ty as *const _) } }
+    pub fn borrow(&self) -> TypedBytes<'_> {
+        TypedBytes { bytes: self.bytes.borrow(), ty: Cow::Borrowed(&*self.ty.as_ref()) }
     }
 }
 
-impl<'a> From<TypedBytesMut<'a>> for (BytesMut<'a>, &'a TypeEnum) {
+impl<'a> From<TypedBytesMut<'a>> for (BytesMut<'a>, Cow<'a, TypeEnum>) {
     fn from(bytes: TypedBytesMut<'a>) -> Self {
         (bytes.bytes, bytes.ty)
     }
@@ -380,6 +373,7 @@ where Self: TypeTrait
     type DynAlloc: AllocatedType;
 
     fn create_value_from_descriptor(descriptor: Self::Descriptor) -> Self::DynAlloc;
+    fn is_abi_compatible(&self, other: &Self) -> bool;
 }
 
 // pub struct IndirectInnerRef<'a, T: AllocatedType> {
@@ -508,7 +502,7 @@ where T: DynTypeTrait
     }
 
     fn is_abi_compatible(&self, other: &Self) -> bool {
-        true
+        <T as DynTypeTrait>::is_abi_compatible(self, other)
     }
 
     fn has_safe_binary_representation(&self) -> bool {
@@ -519,8 +513,10 @@ where T: DynTypeTrait
 pub trait SizedType: TypeTrait {}
 
 macro_rules! define_type_enum {
+    (@void $($tt:tt)*) => {};
+
     [
-        $($variant:ident($inner:ident)),*$(,)?
+        $($variant:ident($inner:ident) <- $value_for_discriminant:expr),*$(,)?
     ] => {
         #[derive(Debug, Hash, PartialEq, Eq, Clone)]
         pub enum TypeEnum {
@@ -541,6 +537,23 @@ macro_rules! define_type_enum {
         }
 
         impl TypeEnum {
+            const VARIANT_NAMES: [&'static str; count_tokens!($($variant)*)] = [$(stringify!($variant), )*];
+
+            #[allow(unused_assignments)]
+            fn variant_name_of(d: Discriminant<Self>) -> &'static str {
+                let mut index = 0;
+
+                loop {
+                    $(
+                        if (d == std::mem::discriminant(&TypeEnum::$variant($value_for_discriminant))) { break }
+                        index += 1;
+                    )*
+                    unreachable!()
+                };
+
+                Self::VARIANT_NAMES[index]
+            }
+
             fn value_size_if_sized_impl(&self) -> Option<usize> {
                 use TypeEnum::*;
                 match self {
@@ -563,13 +576,13 @@ macro_rules! define_type_enum {
 }
 
 define_type_enum![
-    Shared(Shared),
-    Unique(Unique),
-    Primitive(PrimitiveType),
+    Shared(Shared) <- Shared::new(PrimitiveType::U8),
+    Unique(Unique) <- Unique::new(PrimitiveType::U8),
+    Primitive(PrimitiveType) <- PrimitiveType::U8,
     // Tuple(Vec<Self>),
-    Array(ArrayType),
-    List(ListType),
-    Texture(TextureType),
+    Array(ArrayType) <- ArrayType::single(PrimitiveType::U8),
+    List(ListType) <- ListType::new(PrimitiveType::U8),
+    Texture(TextureType) <- TextureType::new(),
 ];
 
 impl TypeEnum {
@@ -590,30 +603,39 @@ impl TypeExt for TypeEnum {
     fn is_abi_compatible(&self, other: &Self) -> bool {
         use TypeEnum::*;
         match (self, other) {
-            (Primitive(a), Primitive(b)) => return a.is_abi_compatible(b),
-            (Texture(a), Texture(b)) => return a.is_abi_compatible(b),
-            _ => (),
-        }
-        if matches!(self, Array { .. }) || matches!(other, Array { .. }) {
-            if self.value_size_if_sized().is_none() || other.value_size_if_sized().is_none() {
-                return false;
+            (Array { .. }, _) | (_, Array { .. }) => {
+                if self.value_size_if_sized().is_none() || other.value_size_if_sized().is_none() {
+                    return false;
+                }
+
+                let a = if let Array(array) = self {
+                    Cow::Borrowed(array)
+                } else {
+                    Cow::Owned(ArrayType::single_if_sized(self.clone()).unwrap())
+                };
+                let b = if let Array(array) = other {
+                    Cow::Borrowed(array)
+                } else {
+                    Cow::Owned(ArrayType::single_if_sized(other.clone()).unwrap())
+                };
+
+                return TypeExt::is_abi_compatible(a.as_ref(), b.as_ref());
             }
-
-            let a = if let Array(array) = self {
-                Cow::Borrowed(array)
-            } else {
-                Cow::Owned(ArrayType::single_if_sized(self.clone()).unwrap())
-            };
-            let b = if let Array(array) = other {
-                Cow::Borrowed(array)
-            } else {
-                Cow::Owned(ArrayType::single_if_sized(other.clone()).unwrap())
-            };
-
-            return a.is_abi_compatible(&b);
+            (Unique(a), Unique(b)) => return TypeExt::is_abi_compatible(a, b),
+            (Shared(a), Shared(b)) => return TypeExt::is_abi_compatible(a, b),
+            (Primitive(a), Primitive(b)) => return TypeExt::is_abi_compatible(a, b),
+            (List(a), List(b)) => return TypeExt::is_abi_compatible(a, b),
+            (Texture(a), Texture(b)) => return TypeExt::is_abi_compatible(a, b),
+            (a, b) => {
+                debug_assert_ne!(
+                    std::mem::discriminant(a),
+                    std::mem::discriminant(b),
+                    "Missing an implementation of `is_abi_compatible` in `TypeEnum` for the type `{}`.",
+                    Self::variant_name_of(std::mem::discriminant(a)),
+                );
+                false
+            }
         }
-
-        false
     }
 
     fn has_safe_binary_representation(&self) -> bool {
@@ -631,7 +653,7 @@ where
     T: TypeTrait + SizedTypeExt,
 {
     fn bytes_mut(&mut self) -> Option<&mut [u8]> {
-        let typed_bytes = unsafe { self.typed_bytes_mut() };
+        let typed_bytes = unsafe { self.pointee_typed_bytes_mut() };
 
         if typed_bytes.borrow().ty().has_safe_binary_representation() {
             Some(typed_bytes.bytes_mut().bytes_mut().unwrap())
@@ -651,6 +673,123 @@ where
     R: RefExt<'a, T>,
     T: TypeTrait + SizedTypeExt,
 {
+    fn value_size(&self) -> usize {
+        let typed_bytes = unsafe { self.pointee_typed_bytes() };
+        typed_bytes.ty().value_size_if_sized().unwrap()
+    }
+
+    fn bytes(&self) -> Option<&[u8]> {
+        let typed_bytes = unsafe { self.pointee_typed_bytes() };
+
+        if typed_bytes.borrow().ty().has_safe_binary_representation() {
+            Some(typed_bytes.bytes().bytes().unwrap())
+        } else {
+            None
+        }
+    }
+}
+
+pub trait SizeRefMutExt<'a> {
+    fn bytes_mut_if_sized(&mut self) -> Option<&mut [u8]>;
+}
+
+impl<'a, R> SizeRefMutExt<'a> for R
+where R: RefMutDynExt<'a>
+{
+    fn bytes_mut_if_sized(&mut self) -> Option<&mut [u8]> {
+        let typed_bytes = unsafe { self.pointee_typed_bytes_mut() };
+        let ty = typed_bytes.borrow().ty();
+
+        if ty.value_size_if_sized().is_some() && ty.has_safe_binary_representation() {
+            Some(typed_bytes.bytes_mut().bytes_mut().unwrap())
+        } else {
+            None
+        }
+    }
+}
+
+pub trait SizeRefExt<'a> {
+    fn value_size_if_sized(&self) -> Option<usize>;
+    fn bytes_if_sized(&self) -> Option<&[u8]>;
+}
+
+impl<'a, R> SizeRefExt<'a> for R
+where R: RefDynExt<'a>
+{
+    fn value_size_if_sized(&self) -> Option<usize> {
+        let typed_bytes = unsafe { self.pointee_typed_bytes() };
+        typed_bytes.ty().value_size_if_sized()
+    }
+
+    fn bytes_if_sized(&self) -> Option<&[u8]> {
+        let typed_bytes = unsafe { self.pointee_typed_bytes() };
+        let ty = typed_bytes.borrow().ty();
+
+        if ty.value_size_if_sized().is_some() && ty.has_safe_binary_representation() {
+            Some(typed_bytes.bytes().bytes().as_ref().unwrap())
+        } else {
+            None
+        }
+    }
+}
+
+/*
+
+pub trait SizedRefMutExt<'a> {
+    fn bytes_mut(&mut self) -> Option<&mut [u8]>;
+}
+
+impl<'a, T> SizedRefMutExt<'a> for RefMut<'a, T>
+where T: TypeTrait + SizedTypeExt
+{
+    fn bytes_mut(&mut self) -> Option<&mut [u8]> {
+        let typed_bytes = unsafe { self.typed_bytes_mut() };
+
+        if typed_bytes.borrow().ty().has_safe_binary_representation() {
+            Some(typed_bytes.bytes_mut().bytes_mut().unwrap())
+        } else {
+            None
+        }
+    }
+}
+
+impl<'a, T> SizedRefMutExt<'a> for OwnedRefMut<'a, T> {
+    fn bytes_mut(&mut self) -> Option<&mut [u8]> {
+        let typed_bytes = unsafe { self.typed_bytes_mut() };
+
+        if typed_bytes.borrow().ty().has_safe_binary_representation() {
+            Some(typed_bytes.bytes_mut().bytes_mut().unwrap())
+        } else {
+            None
+        }
+    }
+}
+
+pub trait SizedRefExt<'a>: RefDynExt<'a> {
+    fn value_size(&self) -> usize;
+    fn bytes(&self) -> Option<&[u8]>;
+}
+
+impl<'a, T> SizedRefExt<'a> for Ref<'a, T>
+where T: TypeTrait + SizedTypeExt
+{
+    fn value_size(&self) -> usize {
+        let typed_bytes = unsafe { self.typed_bytes() };
+        typed_bytes.ty().value_size_if_sized().unwrap()
+    }
+
+    fn bytes(&self) -> Option<&[u8]> {
+        let typed_bytes = unsafe { self.typed_bytes() };
+
+        if typed_bytes.ty().has_safe_binary_representation() {
+            Some(typed_bytes.bytes().bytes().unwrap())
+        } else {
+            None
+        }
+    }
+}
+
+impl<'a, T> SizedRefExt<'a> for OwnedRef<'a, T> {
     fn value_size(&self) -> usize {
         let typed_bytes = unsafe { self.typed_bytes() };
         typed_bytes.ty().value_size_if_sized().unwrap()
@@ -710,3 +849,4 @@ where R: RefDynExt<'a>
         }
     }
 }
+*/

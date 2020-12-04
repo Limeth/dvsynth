@@ -1,10 +1,12 @@
 use std::any::TypeId;
+use std::borrow::Cow;
 use std::fmt::Display;
 use std::ops::{Range, RangeBounds};
 
 use crate::graph::alloc::{AllocatedType, Allocator};
 use crate::graph::ListAllocation;
 use crate::node::behaviour::AllocatorHandle;
+use crate::util::CowMapExt;
 
 use super::{
     DowncastFromTypeEnum, DynTypeDescriptor, DynTypeTrait, RefAny, RefExt, RefMutAny, RefMutDynExt,
@@ -71,6 +73,10 @@ impl DynTypeTrait for ListType {
     fn create_value_from_descriptor(descriptor: Self::Descriptor) -> Self::DynAlloc {
         descriptor.into()
     }
+
+    fn is_abi_compatible(&self, other: &Self) -> bool {
+        self.child_ty.is_abi_compatible(&other.child_ty)
+    }
 }
 
 pub trait ListRefExt<'a> {
@@ -82,23 +88,29 @@ impl<'a, T> ListRefExt<'a> for T
 where T: RefExt<'a, ListType>
 {
     fn len(&self) -> usize {
-        let typed_bytes = unsafe { self.typed_bytes() };
+        let typed_bytes = unsafe { self.pointee_typed_bytes() };
+        let ty = typed_bytes.borrow().ty();
+        let ty = ty.downcast_ref::<ListType>().unwrap();
+        let item_size = ty.child_ty.value_size_if_sized().unwrap();
         let list = typed_bytes.bytes().downcast_ref_unwrap::<ListAllocation>();
-        let ty = typed_bytes.ty().downcast_ref::<ListType>().unwrap();
-        list.data.len() / ty.child_ty.value_size_if_sized().unwrap()
+        list.data.len() / item_size
     }
 
     fn get(&self, index: usize) -> Result<RefAny<'_>, ()> {
-        let typed_bytes = unsafe { self.typed_bytes() };
-        let list = typed_bytes.bytes().downcast_ref_unwrap::<ListAllocation>();
-        let ty = typed_bytes.ty().downcast_ref::<ListType>().unwrap();
-        let item_size = ty.child_ty.value_size_if_sized().unwrap();
+        let typed_bytes = unsafe { self.pointee_typed_bytes() };
+        let (bytes, ty) = typed_bytes.into();
+        let child_ty = ty.map(|ty| {
+            let ty = ty.downcast_ref::<ListType>().unwrap();
+            ty.child_ty.as_ref()
+        });
+        let item_size = child_ty.value_size_if_sized().unwrap();
+        let list = bytes.downcast_ref_unwrap::<ListAllocation>();
 
         if (index + 1) * item_size > list.data.len() {
             Err(())
         } else {
             let bytes = &list.data[(index * item_size)..((index + 1) * item_size)];
-            Ok(unsafe { RefAny::from(TypedBytes::from(bytes, ty.child_ty.as_ref())) })
+            Ok(unsafe { RefAny::from(TypedBytes::from(bytes, child_ty)) })
         }
     }
 }
@@ -120,23 +132,27 @@ impl<'a, T> ListRefMutExt<'a> for T
 where T: RefMutExt<'a, ListType>
 {
     fn get_mut(&mut self, index: usize) -> Result<RefMutAny<'_>, ()> {
-        let typed_bytes = unsafe { self.typed_bytes_mut() };
+        let typed_bytes = unsafe { self.pointee_typed_bytes_mut() };
         let (bytes, ty) = typed_bytes.into();
-        let ty = ty.downcast_ref::<ListType>().unwrap();
-        let item_size = ty.child_ty.value_size_if_sized().unwrap();
+        let child_ty = ty.map(|ty| {
+            let ty = ty.downcast_ref::<ListType>().unwrap();
+            ty.child_ty.as_ref()
+        });
+        let item_size = child_ty.value_size_if_sized().unwrap();
         let list = bytes.downcast_mut_unwrap::<ListAllocation>();
 
         if (index + 1) * item_size > list.data.len() {
             Err(())
         } else {
             let bytes = &mut list.data[(index * item_size)..((index + 1) * item_size)];
-            Ok(unsafe { RefMutAny::from(TypedBytesMut::from(bytes, ty.child_ty.as_ref())) })
+            Ok(unsafe { RefMutAny::from(TypedBytesMut::from(bytes, child_ty)) })
         }
     }
 
     fn remove_range(&mut self, range: Range<usize>) -> Result<(), ()> {
-        let typed_bytes = unsafe { self.typed_bytes_mut() };
-        let ty = typed_bytes.borrow().ty().downcast_ref::<ListType>().unwrap();
+        let typed_bytes = unsafe { self.pointee_typed_bytes_mut() };
+        let ty = typed_bytes.borrow().ty();
+        let ty = ty.downcast_ref::<ListType>().unwrap();
         let item_size = ty.child_ty.value_size_if_sized().unwrap();
         let list = typed_bytes.bytes_mut().downcast_mut_unwrap::<ListAllocation>();
         let mapped_range = Range { start: range.start * item_size, end: range.end * item_size };
@@ -154,15 +170,19 @@ where T: RefMutExt<'a, ListType>
     }
 
     fn push<'b>(&mut self, item: impl RefMutDynExt<'b> + 'b) -> Result<(), ()> {
-        let typed_bytes = unsafe { self.typed_bytes_mut() };
-        let item_typed_bytes = unsafe { item.typed_bytes() };
-        let ty = typed_bytes.ty.downcast_ref::<ListType>().unwrap();
+        let mut typed_bytes = unsafe { self.pointee_typed_bytes_mut() };
+        let item_typed_bytes = unsafe { item.into_pointing_typed_bytes() };
+        let ty = typed_bytes.borrow().ty();
+        let ty = ty.downcast_ref::<ListType>().unwrap();
 
-        if !item_typed_bytes.ty().is_abi_compatible(&ty.child_ty) {
+        println!("{}", item_typed_bytes.borrow().ty());
+        println!("{}", &ty.child_ty);
+
+        if !item_typed_bytes.borrow().ty().is_abi_compatible(&ty.child_ty) {
             return Err(());
         }
 
-        let list = typed_bytes.bytes_mut().downcast_mut_unwrap::<ListAllocation>();
+        let list = typed_bytes.borrow_mut().bytes_mut().downcast_mut_unwrap::<ListAllocation>();
         let bytes = item_typed_bytes
             .bytes()
             .bytes()
@@ -173,7 +193,7 @@ where T: RefMutExt<'a, ListType>
     }
 
     // fn item_range_bytes_mut(&mut self, range: Range<usize>) -> Option<&mut [u8]> {
-    //     let typed_bytes = unsafe { self.typed_bytes_mut() };
+    //     let typed_bytes = unsafe { self.pointee_typed_bytes_mut() };
     //     let ty = typed_bytes.borrow().ty().downcast_ref::<ListType>().unwrap();
 
     //     if !ty.child_ty.has_safe_binary_representation() {
@@ -192,8 +212,9 @@ where T: RefMutExt<'a, ListType>
     // }
 
     fn push_item_bytes_with(&mut self, write_bytes: impl FnOnce(&mut [u8])) -> Result<(), ()> {
-        let typed_bytes = unsafe { self.typed_bytes_mut() };
-        let ty = typed_bytes.borrow().ty().downcast_ref::<ListType>().unwrap();
+        let typed_bytes = unsafe { self.pointee_typed_bytes_mut() };
+        let ty = typed_bytes.borrow().ty();
+        let ty = ty.downcast_ref::<ListType>().unwrap();
 
         if !ty.child_ty.has_safe_binary_representation() {
             return Err(());
@@ -206,15 +227,17 @@ where T: RefMutExt<'a, ListType>
     }
 
     fn insert<'b>(&mut self, index: usize, item: impl RefMutDynExt<'b> + 'b) -> Result<(), ()> {
-        let typed_bytes = unsafe { self.typed_bytes_mut() };
-        let item_typed_bytes = unsafe { item.typed_bytes() };
-        let ty = typed_bytes.ty.downcast_ref::<ListType>().unwrap();
+        let typed_bytes = unsafe { self.pointee_typed_bytes_mut() };
+        let item_typed_bytes = unsafe { item.into_pointing_typed_bytes() };
+        let ty = typed_bytes.borrow().ty();
+        let ty = ty.downcast_ref::<ListType>().unwrap();
 
-        if !item_typed_bytes.ty().is_abi_compatible(&ty.child_ty) {
+        if !item_typed_bytes.borrow().ty().is_abi_compatible(&ty.child_ty) {
             return Err(());
         }
-        let list = typed_bytes.bytes_mut().downcast_mut_unwrap::<ListAllocation>();
+
         let item_size = ty.child_ty.value_size_if_sized().unwrap();
+        let list = typed_bytes.bytes_mut().downcast_mut_unwrap::<ListAllocation>();
         let bytes = item_typed_bytes
             .bytes()
             .bytes()

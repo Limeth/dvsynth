@@ -1,4 +1,5 @@
 use std::any::{Any, TypeId};
+use std::borrow::Cow;
 use std::collections::HashSet;
 use std::collections::{hash_map::Entry, HashMap};
 use std::convert::TryInto;
@@ -44,6 +45,14 @@ impl AllocationPointer {
 
     pub(crate) fn as_usize(&self) -> usize {
         self.index as usize
+    }
+
+    pub(crate) fn as_bytes(&self) -> &[u8] {
+        safe_transmute::transmute_to_bytes(std::slice::from_ref(&self.index))
+    }
+
+    pub(crate) fn as_bytes_mut(&mut self) -> &mut [u8] {
+        safe_transmute::transmute_to_bytes_mut(std::slice::from_mut(&mut self.index))
     }
 }
 
@@ -142,10 +151,11 @@ impl AllocationType {
 pub(crate) struct AllocationInner {
     ty: TypeEnum,
     inner: AllocationType,
+    ptr: AllocationPointer,
 }
 
 impl AllocationInner {
-    pub fn new_object<T: DynTypeTrait>(data: T::DynAlloc, ty: T) -> Self {
+    pub fn new_object<T: DynTypeTrait>(data: T::DynAlloc, ty: T, ptr: AllocationPointer) -> Self {
         assert!(
             TypeId::of::<T::DynAlloc>() != TypeId::of::<[u8]>(),
             "Type `[u8]` may not be allocated as an object. Allocate it as bytes instead."
@@ -154,24 +164,24 @@ impl AllocationInner {
         let data = Box::new(data) as Box<dyn AllocatedType>;
         let inner = AllocationType::Object { ty_name: std::any::type_name::<T::DynAlloc>(), data };
 
-        Self { ty: ty_enum, inner }
+        Self { ty: ty_enum, inner, ptr }
     }
 
-    pub fn new_bytes<T: TypeTrait + SizedTypeExt>(ty: T) -> Self {
+    pub fn new_bytes<T: TypeTrait + SizedTypeExt>(ty: T, ptr: AllocationPointer) -> Self {
         let data: Vec<u8> = std::iter::repeat(0u8).take(ty.value_size()).collect();
         let data: Box<[u8]> = data.into_boxed_slice();
         let inner = AllocationType::Bytes(data);
         let ty_enum: TypeEnum = ty.into();
 
-        Self { ty: ty_enum, inner }
+        Self { ty: ty_enum, inner, ptr }
     }
 
     pub fn as_ref(&self) -> TypedBytes<'_> {
-        TypedBytes::from(self.inner.as_ref(), &self.ty)
+        TypedBytes::from(self.inner.as_ref(), Cow::Borrowed(&self.ty))
     }
 
     pub fn as_mut(&mut self) -> TypedBytesMut<'_> {
-        TypedBytesMut::from(self.inner.as_mut(), &mut self.ty)
+        TypedBytesMut::from(self.inner.as_mut(), Cow::Borrowed(&self.ty))
     }
 
     pub fn ty_mut(&mut self) -> &mut TypeEnum {
@@ -191,28 +201,33 @@ impl AllocationInner {
     }
 }
 
-#[derive(Default)]
 pub(crate) struct Allocation {
-    pub(crate) ptr: AllocationCell<Option<AllocationCell<AllocationInner>>>,
+    pub(crate) inner: AllocationCell<Option<AllocationCell<AllocationInner>>>,
     pub(crate) refcount: AtomicUsize,
     pub(crate) deallocating: AtomicBool,
 }
 
 impl Allocation {
-    unsafe fn claim_with(&self, inner: AllocationInner) {
-        let ptr = self.ptr.as_mut();
+    pub fn new() -> Self {
+        Self { inner: Default::default(), refcount: AtomicUsize::new(0), deallocating: AtomicBool::new(true) }
+    }
+}
 
-        assert!(ptr.is_none(), "Allocation already claimed.");
+impl Allocation {
+    unsafe fn claim_with(&self, new_inner: AllocationInner) {
+        let inner = self.inner.as_mut();
 
-        *ptr = Some(AllocationCell::new(inner));
+        assert!(inner.is_none(), "Allocation already claimed.");
+
+        *inner = Some(AllocationCell::new(new_inner));
         self.refcount.store(0, Ordering::SeqCst);
         self.deallocating.store(false, Ordering::SeqCst);
     }
 
     unsafe fn free(&self) {
-        let ptr = self.ptr.as_mut();
+        let inner = self.inner.as_mut();
 
-        *ptr = None;
+        *inner = None;
         self.refcount.store(0, Ordering::SeqCst);
         self.deallocating.store(true, Ordering::SeqCst);
     }
@@ -266,7 +281,12 @@ impl Allocator {
     }
 
     /// Allocates the value with refcount set to 1.
-    fn allocate_value(&self, inner: AllocationInner, handle: AllocatorHandle<'_, '_>) -> AllocationPointer {
+    fn allocate_value(
+        &self,
+        handle: AllocatorHandle<'_, '_>,
+        get_inner: impl FnOnce(AllocationPointer) -> AllocationInner,
+    ) -> AllocationPointer
+    {
         const EXPAND_BY: usize = 64;
 
         let free_index = loop {
@@ -286,8 +306,9 @@ impl Allocator {
                     for rel_index in 0..EXPAND_BY {
                         let abs_index =
                             allocations.used.checked_add(rel_index).expect("Allocator slots depleted.");
+                        let allocation = Allocation::new();
 
-                        allocations.vec.push(Box::pin(Default::default()));
+                        allocations.vec.push(Box::pin(allocation));
                         self.free_indices.push(abs_index as u64);
                     }
 
@@ -298,12 +319,12 @@ impl Allocator {
 
         let allocations = self.allocations.read().unwrap();
         let allocation = &allocations.vec[free_index as usize];
+        let ptr = AllocationPointer { index: free_index };
+        let inner = (get_inner)(ptr);
 
         unsafe {
             allocation.claim_with(inner);
         }
-
-        let ptr = AllocationPointer { index: free_index };
 
         unsafe {
             self.refcount_owned_increment(ptr, handle.node).unwrap();
@@ -322,8 +343,7 @@ impl Allocator {
     {
         let ty = descriptor.get_type();
         let value = T::create_value_from_descriptor(descriptor);
-        let inner = AllocationInner::new_object(value, ty);
-        self.allocate_value(inner, handle)
+        self.allocate_value(handle, move |ptr| AllocationInner::new_object(value, ty, ptr))
     }
 
     pub fn allocate_bytes<T: TypeTrait + SizedTypeExt>(
@@ -332,8 +352,7 @@ impl Allocator {
         handle: AllocatorHandle<'_, '_>,
     ) -> AllocationPointer
     {
-        let inner = AllocationInner::new_bytes(ty);
-        self.allocate_value(inner, handle)
+        self.allocate_value(handle, move |ptr| AllocationInner::new_bytes(ty, ptr))
     }
 
     pub fn deallocate(&self, allocation_ptr: AllocationPointer) {
@@ -484,11 +503,35 @@ impl Allocator {
 
     /// Safety: Access safety must be ensured externally by the execution graph.
     ///         Extra caution must be taken to request a correct lifetime 'a.
+    pub unsafe fn ptr_ref<'a>(&self, allocation_ptr: AllocationPointer) -> Option<&'a AllocationPointer> {
+        let allocations = self.allocations.read().unwrap();
+        allocations.vec.get(allocation_ptr.as_usize()).map(|allocation| {
+            let allocation_inner =
+                allocation.inner.as_ref().as_ref().expect("Dereferencing a freed value.").as_ref();
+
+            &allocation_inner.ptr
+        })
+    }
+
+    /// Safety: Access safety must be ensured externally by the execution graph.
+    ///         Extra caution must be taken to request a correct lifetime 'a.
+    pub unsafe fn ptr_mut<'a>(&self, allocation_ptr: AllocationPointer) -> Option<&'a mut AllocationPointer> {
+        let allocations = self.allocations.read().unwrap();
+        allocations.vec.get(allocation_ptr.as_usize()).map(|allocation| {
+            let allocation_inner =
+                allocation.inner.as_ref().as_ref().expect("Dereferencing a freed value.").as_mut();
+
+            &mut allocation_inner.ptr
+        })
+    }
+
+    /// Safety: Access safety must be ensured externally by the execution graph.
+    ///         Extra caution must be taken to request a correct lifetime 'a.
     pub unsafe fn deref_ptr<'a>(&self, allocation_ptr: AllocationPointer) -> Option<TypedBytes<'a>> {
         let allocations = self.allocations.read().unwrap();
         allocations.vec.get(allocation_ptr.as_usize()).map(|allocation| {
             let allocation_inner =
-                allocation.ptr.as_ref().as_ref().expect("Dereferencing a freed value.").as_ref();
+                allocation.inner.as_ref().as_ref().expect("Dereferencing a freed value.").as_ref();
 
             allocation_inner.as_ref()
         })
@@ -500,7 +543,7 @@ impl Allocator {
         let allocations = self.allocations.read().unwrap();
         allocations.vec.get(allocation_ptr.as_usize()).map(|allocation| {
             let allocation_inner =
-                allocation.ptr.as_ref().as_ref().expect("Dereferencing a freed value.").as_mut();
+                allocation.inner.as_ref().as_ref().expect("Dereferencing a freed value.").as_mut();
 
             allocation_inner.as_mut()
         })
@@ -518,7 +561,7 @@ impl Allocator {
             .get(allocation_ptr.as_usize())
             .map(|allocation| {
                 let allocation_inner =
-                    allocation.ptr.as_ref().as_ref().expect("Dereferencing a freed value.").as_mut();
+                    allocation.inner.as_ref().as_ref().expect("Dereferencing a freed value.").as_mut();
 
                 (map)(&mut allocation_inner.ty);
             })

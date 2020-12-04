@@ -35,10 +35,13 @@ use petgraph::graph::NodeIndex;
 use style::Themeable;
 use style::*;
 use widgets::*;
+
+#[macro_use]
+pub mod util;
+
 pub mod graph;
 pub mod node;
 pub mod style;
-pub mod util;
 pub mod widgets;
 
 #[derive(Debug, Clone)]

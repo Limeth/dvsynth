@@ -8,6 +8,7 @@ use iced_native::Color;
 use iced_native::{self, Background, Rectangle};
 use lyon_geom::{QuadraticBezierSegment, Scalar, Segment};
 use smallvec::{smallvec, SmallVec};
+use std::borrow::Cow;
 use std::ops::Deref;
 use std::ops::DerefMut;
 use vek::Vec2;
@@ -410,4 +411,25 @@ pub const fn rgb(rgb: u32) -> Color {
         ((rgb >> 8) & 0xFF) as f32 / 0xFF as f32,
         ((rgb >> 0) & 0xFF) as f32 / 0xFF as f32,
     )
+}
+
+pub trait CowMapExt<'a, B>
+where B: 'a + ToOwned<Owned = B>
+{
+    fn map<R: 'a + ToOwned<Owned = R>>(self, map: impl FnOnce(&B) -> &R) -> Cow<'a, R>;
+}
+
+impl<'a, B> CowMapExt<'a, B> for Cow<'a, B>
+where B: 'a + ToOwned<Owned = B>
+{
+    fn map<R: 'a + ToOwned<Owned = R>>(self, map: impl FnOnce(&B) -> &R) -> Cow<'a, R> {
+        match self {
+            Cow::Borrowed(borrowed) => Cow::Borrowed((map)(borrowed)),
+            Cow::Owned(owned) => Cow::Owned((map)(&owned).to_owned()),
+        }
+    }
+}
+macro_rules! count_tokens {
+    () => (0usize);
+    ( $x:tt $($xs:tt)* ) => (1usize + count_tokens!($($xs)*));
 }
