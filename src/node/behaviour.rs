@@ -22,8 +22,8 @@ pub use list_constructor::*;
 pub use window::*;
 
 use super::{
-    AllocationPointer, DowncastFromTypeEnum, OwnedRefMut, RefExt, RefMutExt, SizedTypeExt, TypeEnum,
-    TypeTrait, Unique,
+    AllocationPointer, DowncastFromTypeEnum, OwnedRefMut, Ref, RefMut, SizedTypeExt, TypeEnum, TypeTrait,
+    Unique,
 };
 
 pub struct Input {

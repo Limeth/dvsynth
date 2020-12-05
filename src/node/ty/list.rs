@@ -9,8 +9,9 @@ use crate::node::behaviour::AllocatorHandle;
 use crate::util::CowMapExt;
 
 use super::{
-    Bytes, DowncastFromTypeEnum, DynTypeDescriptor, DynTypeTrait, RefAny, RefExt, RefMutAny, RefMutDynExt,
-    RefMutExt, SizeRefMutExt, SizedTypeExt, TypeEnum, TypeExt, TypeTrait, TypedBytes, TypedBytesMut,
+    BorrowedRefAny, BorrowedRefMutAny, Bytes, DowncastFromTypeEnum, DynTypeDescriptor, DynTypeTrait, Ref,
+    RefAnyExt, RefMut, RefMutAny, RefMutAnyExt, SizeRefMutExt, SizedTypeExt, TypeEnum, TypeExt, TypeTrait,
+    TypedBytes, TypedBytesMut,
 };
 
 pub mod prelude {
@@ -80,9 +81,9 @@ impl DynTypeTrait for ListType {
 
     unsafe fn children<'a>(&'a self, data: &Bytes<'a>) -> Vec<TypedBytes<'a>> {
         let value_size = self.child_ty.value_size_if_sized().unwrap();
-        let bytes = data.bytes().unwrap();
+        let list = data.downcast_ref_unwrap::<ListAllocation>();
 
-        bytes
+        list.data
             .chunks_exact(value_size)
             .map(|chunk| TypedBytes::from(chunk, Cow::Borrowed(self.child_ty.as_ref())))
             .collect()
@@ -91,11 +92,11 @@ impl DynTypeTrait for ListType {
 
 pub trait ListRefExt<'a> {
     fn len(&self) -> usize;
-    fn get(&self, index: usize) -> Result<RefAny<'_>, ()>;
+    fn get(&self, index: usize) -> Result<BorrowedRefAny<'_>, ()>;
 }
 
 impl<'a, T> ListRefExt<'a> for T
-where T: RefExt<'a, ListType>
+where T: Ref<'a, ListType>
 {
     fn len(&self) -> usize {
         let typed_bytes = unsafe { self.pointee_typed_bytes() };
@@ -106,7 +107,7 @@ where T: RefExt<'a, ListType>
         list.data.len() / item_size
     }
 
-    fn get(&self, index: usize) -> Result<RefAny<'_>, ()> {
+    fn get(&self, index: usize) -> Result<BorrowedRefAny<'_>, ()> {
         let typed_bytes = unsafe { self.pointee_typed_bytes() };
         let (bytes, ty) = typed_bytes.into();
         let child_ty = ty.map(|ty| {
@@ -120,7 +121,7 @@ where T: RefExt<'a, ListType>
             Err(())
         } else {
             let bytes = &list.data[(index * item_size)..((index + 1) * item_size)];
-            Ok(unsafe { RefAny::from(TypedBytes::from(bytes, child_ty)) })
+            Ok(unsafe { BorrowedRefAny::from(TypedBytes::from(bytes, child_ty), self.refcounter()) })
         }
     }
 }
@@ -128,9 +129,9 @@ where T: RefExt<'a, ListType>
 pub trait ListRefMutExt<'a> {
     fn remove_range(&mut self, range: Range<usize>) -> Result<(), ()>;
     fn remove(&mut self, index: usize) -> Result<(), ()>;
-    fn push<'b>(&mut self, item: impl RefMutDynExt<'b> + 'b) -> Result<(), ()>;
-    fn insert<'b>(&mut self, index: usize, item: impl RefMutDynExt<'b> + 'b) -> Result<(), ()>;
-    fn get_mut(&mut self, index: usize) -> Result<RefMutAny<'_>, ()>;
+    fn push<'b>(&mut self, item: impl RefMutAny<'b> + 'b) -> Result<(), ()>;
+    fn insert<'b>(&mut self, index: usize, item: impl RefMutAny<'b> + 'b) -> Result<(), ()>;
+    fn get_mut(&mut self, index: usize) -> Result<BorrowedRefMutAny<'_>, ()>;
 
     // API for types with safe binary representation:
     // fn item_range_bytes_mut(&mut self, range: Range<usize>) -> Option<&mut [u8]>;
@@ -139,10 +140,10 @@ pub trait ListRefMutExt<'a> {
 }
 
 impl<'a, T> ListRefMutExt<'a> for T
-where T: RefMutExt<'a, ListType>
+where T: RefMut<'a, ListType>
 {
-    fn get_mut(&mut self, index: usize) -> Result<RefMutAny<'_>, ()> {
-        let typed_bytes = unsafe { self.pointee_typed_bytes_mut() };
+    fn get_mut(&mut self, index: usize) -> Result<BorrowedRefMutAny<'_>, ()> {
+        let (rc, typed_bytes) = unsafe { self.rc_and_pointee_typed_bytes_mut() };
         let (bytes, ty) = typed_bytes.into();
         let child_ty = ty.map(|ty| {
             let ty = ty.downcast_ref::<ListType>().unwrap();
@@ -155,7 +156,7 @@ where T: RefMutExt<'a, ListType>
             Err(())
         } else {
             let bytes = &mut list.data[(index * item_size)..((index + 1) * item_size)];
-            Ok(unsafe { RefMutAny::from(TypedBytesMut::from(bytes, child_ty)) })
+            Ok(unsafe { BorrowedRefMutAny::from(TypedBytesMut::from(bytes, child_ty), rc) })
         }
     }
 
@@ -179,7 +180,7 @@ where T: RefMutExt<'a, ListType>
         self.remove_range(index..(index + 1))
     }
 
-    fn push<'b>(&mut self, mut item: impl RefMutDynExt<'b> + 'b) -> Result<(), ()> {
+    fn push<'b>(&mut self, mut item: impl RefMutAny<'b> + 'b) -> Result<(), ()> {
         let mut typed_bytes = unsafe { self.pointee_typed_bytes_mut() };
         let item_typed_bytes = unsafe { item.pointing_typed_bytes_mut() };
         let ty = typed_bytes.borrow().ty();
@@ -199,6 +200,15 @@ where T: RefMutExt<'a, ListType>
             .expect("Cannot push references to dynamically allocated objects. Use pointers instead.");
 
         list.data.extend(bytes);
+
+        // Apply refcounts
+        unsafe {
+            // Increment refcounts in destination.
+            item.refcount_increment_recursive_for(self.refcounter());
+            // Decrement refcounts in source -- handled by dropping the item.
+            drop(item);
+        }
+
         Ok(())
     }
 
@@ -236,7 +246,7 @@ where T: RefMutExt<'a, ListType>
         self.get_mut(self.len() - 1).map(|mut item| (write_bytes)(item.bytes_mut_if_sized().unwrap()))
     }
 
-    fn insert<'b>(&mut self, index: usize, mut item: impl RefMutDynExt<'b> + 'b) -> Result<(), ()> {
+    fn insert<'b>(&mut self, index: usize, mut item: impl RefMutAny<'b> + 'b) -> Result<(), ()> {
         let typed_bytes = unsafe { self.pointee_typed_bytes_mut() };
         let item_typed_bytes = unsafe { item.pointing_typed_bytes_mut() };
         let ty = typed_bytes.borrow().ty();
@@ -255,6 +265,15 @@ where T: RefMutExt<'a, ListType>
         let tail = list.data.drain((index * item_size)..).collect::<Vec<_>>();
 
         list.data.extend(bytes.into_iter().copied().chain(tail));
+
+        // Apply refcounts
+        unsafe {
+            // Increment refcounts in destination.
+            item.refcount_increment_recursive_for(self.refcounter());
+            // Decrement refcounts in source -- handled by dropping the item.
+            drop(item);
+        }
+
         Ok(())
     }
 }

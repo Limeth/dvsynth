@@ -1,4 +1,4 @@
-use super::{Bytes, DowncastFromTypeEnum, RefExt, SizedTypeExt, TypeEnum, TypeExt, TypeTrait, TypedBytes};
+use super::{Bytes, DowncastFromTypeEnum, Ref, SizedTypeExt, TypeEnum, TypeExt, TypeTrait, TypedBytes};
 use byteorder::{ByteOrder, ReadBytesExt, WriteBytesExt};
 use std::fmt::Display;
 use std::io::{Cursor, Read, Write};

@@ -1,6 +1,6 @@
 use crate::graph::ListAllocation;
+use crate::node::prelude::*;
 use crate::node::ty::TypeExt;
-use crate::node::{prelude::*, RefMut};
 use crate::node::{ListDescriptor, ListType, OwnedRefMut, Unique};
 use crate::{
     node::{

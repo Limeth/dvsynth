@@ -218,13 +218,13 @@ fn main() {
 
         // graph.add_node(NodeData::new(
         //     "My Array Constructor",
-        //     [10.0, 510.0],
+        //     [10.0, 310.0],
         //     Box::new(ArrayConstructorNodeBehaviour::default()),
         // ));
 
         graph.add_node(NodeData::new(
             "My List Constructor",
-            [10.0, 710.0],
+            [10.0, 510.0],
             Box::new(ListConstructorNodeBehaviour::default()),
         ));
 

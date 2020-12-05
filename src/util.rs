@@ -429,7 +429,36 @@ where B: 'a + ToOwned<Owned = B>
         }
     }
 }
+
 macro_rules! count_tokens {
     () => (0usize);
     ( $x:tt $($xs:tt)* ) => (1usize + count_tokens!($($xs)*));
+}
+
+#[allow(unused_macros)]
+#[cfg(not(debug_assertions))]
+macro_rules! debug {
+    ($($tt:tt)*) => {};
+}
+
+#[allow(unused_macros)]
+#[cfg(debug_assertions)]
+macro_rules! debug {
+    ($($tt:tt)*) => {
+        print!($($tt)*)
+    };
+}
+
+#[allow(unused_macros)]
+#[cfg(not(debug_assertions))]
+macro_rules! debugln {
+    ($($tt:tt)*) => {};
+}
+
+#[allow(unused_macros)]
+#[cfg(debug_assertions)]
+macro_rules! debugln {
+    ($($tt:tt)*) => {
+        println!($($tt)*)
+    };
 }

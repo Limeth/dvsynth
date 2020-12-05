@@ -16,8 +16,8 @@ use sharded_slab::{pool::Pool, Clear};
 
 use crate::node::behaviour::AllocatorHandle;
 use crate::node::{
-    AllocationPointer, Bytes, BytesMut, DynTypeDescriptor, Ref, RefExt, RefMut, RefMutExt, SizedType,
-    SizedTypeExt, TypeEnum, TypeTrait, TypedBytes, TypedBytesMut,
+    AllocationPointer, Bytes, BytesMut, DynTypeDescriptor, SizedType, SizedTypeExt, TypeEnum, TypeTrait,
+    TypedBytes, TypedBytesMut,
 };
 
 use super::{DynTypeTrait, NodeIndex, Schedule};
@@ -323,7 +323,7 @@ impl Allocator {
             self.refcount_owned_increment(ptr, handle.node).unwrap();
         }
 
-        println!("Allocated: {:?}", &ptr);
+        debugln!("Allocated: {:?}", &ptr);
 
         ptr
     }
@@ -365,7 +365,7 @@ impl Allocator {
         }
 
         self.free_indices.push(allocation_ptr.as_u64());
-        println!("Deallocated: {:?}", allocation_ptr);
+        debugln!("Deallocated: {:?}", allocation_ptr);
     }
 
     pub unsafe fn apply_owned_and_output_refcounts(
@@ -433,6 +433,14 @@ impl Allocator {
                 entry.insert(delta);
             }
         }
+
+        debugln!(
+            "Owned refcount of pointer {ptr} for node {node:?} changed by {delta}: {result}",
+            ptr = allocation_ptr.as_u64(),
+            node = node,
+            delta = delta,
+            result = task_ref_counter.refcount_deltas.get(&allocation_ptr).unwrap(),
+        );
 
         Ok(())
     }

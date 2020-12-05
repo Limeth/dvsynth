@@ -6,9 +6,9 @@ use crate::graph::alloc::Allocator;
 use crate::node::behaviour::AllocatorHandle;
 
 use super::{
-    AllocationPointer, Bytes, BytesMut, DowncastFromTypeEnum, OwnedRefMut, RefAny, RefDynExt, RefExt, RefMut,
-    RefMutAny, RefMutDynExt, RefMutExt, SizedTypeExt, TypeEnum, TypeExt, TypeTrait, TypedBytes,
-    TypedBytesMut,
+    AllocationPointer, BorrowedRefAny, BorrowedRefMut, BorrowedRefMutAny, Bytes, BytesMut,
+    DowncastFromTypeEnum, OwnedRefMut, Ref, RefAny, RefAnyExt, RefMut, RefMutAny, RefMutAnyExt, SizedTypeExt,
+    TypeEnum, TypeExt, TypeTrait, TypedBytes, TypedBytesMut,
 };
 
 pub mod prelude {
@@ -114,17 +114,17 @@ unsafe impl SharedTrait for Unique {}
 unsafe impl UniqueTrait for Unique {}
 
 pub trait UniqueRefExt<'a> {
-    fn deref(&self) -> RefAny<'_>;
+    fn deref(&self) -> BorrowedRefAny<'_>;
 }
 
 pub trait UniqueRefMutExt<'a> {
-    fn deref_mut(&mut self) -> RefMutAny<'_>;
+    fn deref_mut(&mut self) -> BorrowedRefMutAny<'_>;
 }
 
 impl<'a, T> UniqueRefMutExt<'a> for T
-where T: RefMutExt<'a, Unique> + 'a
+where T: RefMut<'a, Unique> + 'a
 {
-    fn deref_mut(&mut self) -> RefMutAny<'_> {
+    fn deref_mut(&mut self) -> BorrowedRefMutAny<'_> {
         let typed_bytes = unsafe { self.pointee_typed_bytes() };
         let bytes = typed_bytes.bytes().bytes().unwrap();
 
@@ -138,18 +138,18 @@ where T: RefMutExt<'a, Unique> + 'a
         unsafe {
             let typed_bytes = Allocator::get().deref_mut_ptr(ptr).unwrap();
 
-            RefMutAny::from(typed_bytes)
+            BorrowedRefMutAny::from(typed_bytes, self.refcounter_mut())
         }
     }
 }
 
-pub trait IntoShared<'a>: RefMutDynExt<'a> {
+pub trait IntoShared<'a>: RefMutAny<'a> {
     type Target<T: TypeTrait>;
 
     fn into_shared(self, handle: AllocatorHandle<'a, '_>) -> Self::Target<Shared>;
 }
 
-unsafe fn change_type_to_shared<'a>(reference: &(impl RefMutDynExt<'a> + IntoShared<'a>)) {
+unsafe fn change_type_to_shared<'a>(reference: &(impl RefMutAny<'a> + IntoShared<'a>)) {
     let ptr = typed_bytes_to_ptr(reference.pointee_typed_bytes()).unwrap();
     Allocator::get()
         .map_type(ptr, |ty| {
@@ -160,13 +160,13 @@ unsafe fn change_type_to_shared<'a>(reference: &(impl RefMutDynExt<'a> + IntoSha
         .unwrap();
 }
 
-impl<'a> IntoShared<'a> for RefMut<'a, Unique> {
-    type Target<T: TypeTrait> = RefMut<'a, T>;
+impl<'a> IntoShared<'a> for BorrowedRefMut<'a, Unique> {
+    type Target<T: TypeTrait> = BorrowedRefMut<'a, T>;
 
     fn into_shared(self, _handle: AllocatorHandle<'a, '_>) -> Self::Target<Shared> {
         unsafe {
             change_type_to_shared(&self);
-            RefMut::from(self.into_pointee_typed_bytes()).downcast_mut().unwrap()
+            BorrowedRefMut::from(self.typed_bytes, self.rc).downcast_mut().unwrap()
         }
     }
 }
@@ -183,9 +183,9 @@ impl<'a> IntoShared<'a> for OwnedRefMut<'a, Unique> {
 }
 
 impl<'a, T> UniqueRefExt<'a> for T
-where T: RefExt<'a, Unique>
+where T: Ref<'a, Unique>
 {
-    fn deref(&self) -> RefAny<'_> {
+    fn deref(&self) -> BorrowedRefAny<'_> {
         let typed_bytes = unsafe { self.pointee_typed_bytes() };
         let bytes = typed_bytes.bytes().bytes().unwrap();
 
@@ -198,7 +198,7 @@ where T: RefExt<'a, Unique>
 
         unsafe {
             let typed_bytes = Allocator::get().deref_ptr(ptr).unwrap();
-            RefAny::from(typed_bytes)
+            BorrowedRefAny::from(typed_bytes, self.refcounter())
         }
     }
 }
@@ -278,15 +278,15 @@ impl TypeTrait for Shared {}
 unsafe impl SharedTrait for Shared {}
 
 pub trait SharedRefExt<'a> {
-    fn deref(&self) -> RefAny<'_>;
+    fn deref(&self) -> BorrowedRefAny<'_>;
 }
 
 pub trait SharedRefMutExt<'a> {}
 
 impl<'a, T> SharedRefExt<'a> for T
-where T: RefExt<'a, Shared>
+where T: Ref<'a, Shared>
 {
-    fn deref(&self) -> RefAny<'_> {
+    fn deref(&self) -> BorrowedRefAny<'_> {
         let typed_bytes = unsafe { self.pointee_typed_bytes() };
         let bytes = typed_bytes.bytes().bytes().unwrap();
 
@@ -299,9 +299,9 @@ where T: RefExt<'a, Shared>
 
         unsafe {
             let typed_bytes = Allocator::get().deref_ptr(ptr).unwrap();
-            RefAny::from(typed_bytes)
+            BorrowedRefAny::from(typed_bytes, self.refcounter())
         }
     }
 }
 
-impl<'a, T> SharedRefMutExt<'a> for T where T: RefMutExt<'a, Shared> {}
+impl<'a, T> SharedRefMutExt<'a> for T where T: RefMut<'a, Shared> {}

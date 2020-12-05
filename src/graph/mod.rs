@@ -4,8 +4,7 @@ use crate::node::behaviour::{
 };
 use crate::node::ty::TypeExt;
 use crate::node::{
-    AllocationPointer, ChannelDirection, ChannelValueRefs, ChannelValues, DowncastFromTypeEnum, DynTypeTrait,
-    ListDescriptor, ListType, NodeConfiguration, RefExt, RefMutExt, TypeEnum,
+    ChannelDirection, ChannelValueRefs, ChannelValues, DynTypeTrait, ListDescriptor, NodeConfiguration,
 };
 use crate::style::{self, consts, Theme, Themeable};
 use crate::widgets::{
@@ -17,21 +16,14 @@ use crate::Message;
 use crate::NodeMessage;
 use alloc::{AllocatedType, Allocator};
 use arc_swap::ArcSwapOption;
-use downcast_rs::Downcast;
 use iced::{Element, Settings};
 use iced_futures::futures;
 use iced_wgpu::wgpu;
-use lazy_static::lazy_static;
 use petgraph::{stable_graph::StableGraph, visit::EdgeRef, Directed, Direction};
-use sharded_slab::{Clear, Pool};
-use std::any::Any;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
-use std::convert::TryInto;
 use std::fmt::Debug;
 use std::ops::{Deref, DerefMut};
-use std::sync::atomic::AtomicUsize;
-use std::sync::atomic::Ordering;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
 use std::sync::RwLock;

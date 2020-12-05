@@ -596,6 +596,15 @@ macro_rules! define_type_enum {
                     )*
                 }
             }
+
+            fn is_pointer_impl(&self) -> bool {
+                use TypeEnum::*;
+                match self {
+                    $(
+                        $variant(inner) => TypeExt::is_pointer(inner),
+                    )*
+                }
+            }
         }
     }
 }
@@ -670,6 +679,10 @@ impl TypeExt for TypeEnum {
     unsafe fn children<'a>(&'a self, data: &Bytes<'a>) -> Vec<TypedBytes<'a>> {
         self.children_impl(data)
     }
+
+    fn is_pointer(&self) -> bool {
+        self.is_pointer_impl()
+    }
 }
 
 pub trait SizedRefMutExt<'a, T: TypeTrait + SizedTypeExt> {
@@ -678,7 +691,7 @@ pub trait SizedRefMutExt<'a, T: TypeTrait + SizedTypeExt> {
 
 impl<'a, R, T> SizedRefMutExt<'a, T> for R
 where
-    R: RefMutExt<'a, T>,
+    R: RefMut<'a, T>,
     T: TypeTrait + SizedTypeExt,
 {
     fn bytes_mut(&mut self) -> Option<&mut [u8]> {
@@ -699,7 +712,7 @@ pub trait SizedRefExt<'a, T: TypeTrait + SizedTypeExt> {
 
 impl<'a, R, T> SizedRefExt<'a, T> for R
 where
-    R: RefExt<'a, T>,
+    R: Ref<'a, T>,
     T: TypeTrait + SizedTypeExt,
 {
     fn value_size(&self) -> usize {
@@ -723,7 +736,7 @@ pub trait SizeRefMutExt<'a> {
 }
 
 impl<'a, R> SizeRefMutExt<'a> for R
-where R: RefMutDynExt<'a>
+where R: RefMutAny<'a>
 {
     fn bytes_mut_if_sized(&mut self) -> Option<&mut [u8]> {
         let typed_bytes = unsafe { self.pointee_typed_bytes_mut() };
@@ -743,7 +756,7 @@ pub trait SizeRefExt<'a> {
 }
 
 impl<'a, R> SizeRefExt<'a> for R
-where R: RefDynExt<'a>
+where R: RefAny<'a>
 {
     fn value_size_if_sized(&self) -> Option<usize> {
         let typed_bytes = unsafe { self.pointee_typed_bytes() };
@@ -763,28 +776,40 @@ where R: RefDynExt<'a>
 }
 
 pub trait AssignRefMutExt {
-    fn swap<'b>(&mut self, from: &mut impl RefMutDynExt<'b>) -> Result<(), ()>;
-    fn assign<'b>(&mut self, from: impl RefMutDynExt<'b>) -> Result<(), ()>;
+    fn swap<'b>(&mut self, from: &mut impl RefMutAny<'b>) -> Result<(), ()>;
+    fn assign<'b>(&mut self, from: impl RefMutAny<'b>) -> Result<(), ()>;
 }
 
 impl<'a, R> AssignRefMutExt for R
-where R: RefMutDynExt<'a>
+where R: RefMutAny<'a>
 {
-    fn swap<'b>(&mut self, from: &mut impl RefMutDynExt<'b>) -> Result<(), ()> {
+    fn swap<'b>(&mut self, from: &mut impl RefMutAny<'b>) -> Result<(), ()> {
+        {
+            let typed_bytes_a = unsafe { self.pointing_typed_bytes_mut() };
+            let typed_bytes_b = unsafe { from.pointing_typed_bytes_mut() };
+
+            // Swapped types must be compatible
+            if !typed_bytes_a.borrow().ty().as_ref().is_abi_compatible(typed_bytes_b.borrow().ty().as_ref()) {
+                return Err(());
+            }
+
+            // Ensure types are sized
+            if typed_bytes_a.borrow().ty().value_size_if_sized().is_none()
+                || typed_bytes_b.borrow().ty().value_size_if_sized().is_none()
+            {
+                return Err(());
+            }
+        }
+
+        unsafe {
+            self.refcount_increment_recursive_for(from.refcounter());
+            from.refcount_increment_recursive_for(self.refcounter());
+            self.refcount_decrement_recursive();
+            from.refcount_decrement_recursive();
+        }
+
         let mut typed_bytes_a = unsafe { self.pointing_typed_bytes_mut() };
         let mut typed_bytes_b = unsafe { from.pointing_typed_bytes_mut() };
-
-        // Swapped types must be compatible
-        if !typed_bytes_a.borrow().ty().as_ref().is_abi_compatible(typed_bytes_b.borrow().ty().as_ref()) {
-            return Err(());
-        }
-
-        // Ensure types are sized
-        if typed_bytes_a.borrow().ty().value_size_if_sized().is_none()
-            || typed_bytes_b.borrow().ty().value_size_if_sized().is_none()
-        {
-            return Err(());
-        }
 
         // Swap values
         if let (Some(a), Some(b)) = (
@@ -792,16 +817,18 @@ where R: RefMutDynExt<'a>
             typed_bytes_b.borrow_mut().bytes_mut().bytes_mut(),
         ) {
             assert_eq!(a.len(), b.len());
+
             a.iter_mut().zip(b.iter_mut()).for_each(|(a, b)| {
                 std::mem::swap(a, b);
             });
+
             return Ok(());
         } else {
             unreachable!()
         }
     }
 
-    fn assign<'b>(&mut self, mut from: impl RefMutDynExt<'b>) -> Result<(), ()> {
+    fn assign<'b>(&mut self, mut from: impl RefMutAny<'b>) -> Result<(), ()> {
         self.swap(&mut from)
     }
 }
