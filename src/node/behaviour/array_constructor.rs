@@ -131,10 +131,10 @@ impl NodeBehaviour for ArrayConstructorNodeBehaviour {
             self,
             application_context,
             (),
-            move |_behaviour: &Self, _application_context: &ApplicationContext, _transient: &mut ()| {
+            move |_behaviour: &Self, _application_context: &ApplicationContext, _persistent: &mut ()| {
                 // Executed when the node settings have been changed to create the following
                 // executor closure.
-                Box::new(move |context: ExecutionContext<'_, 'state>, _transient: &mut ()| {
+                Box::new(move |context: ExecutionContext<'_, 'state>, _persistent: &mut ()| {
                     // Executed once per graph execution.
                     let mut cursor = Cursor::new(context.outputs[0].as_mut());
 

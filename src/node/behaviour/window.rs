@@ -181,7 +181,7 @@ impl WindowNodeBehaviour {
 
 impl NodeBehaviour for WindowNodeBehaviour {
     type Message = WindowMessage;
-    type State<'state> = NodeExecutorStateClosure<'state, Self, Transient>;
+    type State<'state> = NodeExecutorStateClosure<'state, Self, Persistent>;
 
     fn name(&self) -> &str {
         "Window"
@@ -333,20 +333,22 @@ impl NodeBehaviour for WindowNodeBehaviour {
         NodeExecutorStateClosure::new(
             self,
             application_context,
-            Transient::default(),
-            move |behaviour: &Self, _application_context: &ApplicationContext, _transient: &mut Transient| {
+            Persistent::default(),
+            move |behaviour: &Self,
+                  _application_context: &ApplicationContext,
+                  _persistent: &mut Persistent| {
                 // Executed when the node settings have been changed to create the following
                 // executor closure.
 
                 // Copy the constant value from the GUI settings.
                 let settings = behaviour.settings.clone();
 
-                Box::new(move |context: ExecutionContext<'_, 'state>, transient: &mut Transient| {
-                    if transient.window.is_none() {
-                        if let Some(window_receiver) = transient.window_receiver.as_mut() {
+                Box::new(move |context: ExecutionContext<'_, 'state>, persistent: &mut Persistent| {
+                    if persistent.window.is_none() {
+                        if let Some(window_receiver) = persistent.window_receiver.as_mut() {
                             // The window creation task has been sent, poll the response.
                             if let Ok(window) = window_receiver.try_recv() {
-                                transient.window = Some(WindowSurface::from(window, &context));
+                                persistent.window = Some(WindowSurface::from(window, &context));
                             }
                         } else {
                             // If the window creation task was not sent yet, send it.
@@ -360,14 +362,15 @@ impl NodeBehaviour for WindowNodeBehaviour {
                                     let _result = window_sender.send(window);
                                 });
                             let _result = context.application_context.main_thread_task_sender.send(task);
-                            transient.window_receiver = Some(window_receiver);
+                            persistent.window_receiver = Some(window_receiver);
                         }
                     }
 
-                    if let Some(window) = transient.window.as_mut() {
-                        let recreate_swapchain = transient.current_settings.inner_size != settings.inner_size;
+                    if let Some(window) = persistent.window.as_mut() {
+                        let recreate_swapchain =
+                            persistent.current_settings.inner_size != settings.inner_size;
 
-                        transient.current_settings.apply_difference(&settings, &window.window);
+                        persistent.current_settings.apply_difference(&settings, &window.window);
 
                         if window.swapchain.is_none() || recreate_swapchain {
                             window.swapchain =
@@ -376,8 +379,8 @@ impl NodeBehaviour for WindowNodeBehaviour {
                                     &wgpu::SwapChainDescriptor {
                                         usage: wgpu::TextureUsage::OUTPUT_ATTACHMENT,
                                         format: wgpu::TextureFormat::Bgra8UnormSrgb,
-                                        width: transient.current_settings.inner_size[0],
-                                        height: transient.current_settings.inner_size[1],
+                                        width: persistent.current_settings.inner_size[0],
+                                        height: persistent.current_settings.inner_size[1],
                                         present_mode: wgpu::PresentMode::Mailbox,
                                     },
                                 ));
@@ -390,7 +393,7 @@ impl NodeBehaviour for WindowNodeBehaviour {
                         let frame = swapchain.get_current_frame().unwrap();
                         window.swapchain_frame = Some(frame);
                     }
-                }) as Box<dyn ExecutorClosure<'state, Transient> + 'state>
+                }) as Box<dyn ExecutorClosure<'state, Persistent> + 'state>
             },
         )
     }
@@ -416,7 +419,7 @@ impl WindowSurface {
 }
 
 #[derive(Debug, Default)]
-pub struct Transient {
+pub struct Persistent {
     current_settings: WindowSettings,
     window_receiver: Option<Receiver<Window>>,
     window: Option<WindowSurface>,

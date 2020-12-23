@@ -141,14 +141,14 @@ impl NodeBehaviour for ConstantNodeBehaviour {
             self,
             application_context,
             (),
-            move |behaviour: &Self, _application_context: &ApplicationContext, _transient: &mut ()| {
+            move |behaviour: &Self, _application_context: &ApplicationContext, _persistent: &mut ()| {
                 // Executed when the node settings have been changed to create the following
                 // executor closure.
 
                 // Copy the constant value from the GUI settings.
                 let value = behaviour.value;
 
-                Box::new(move |execution_context: ExecutionContext<'_, 'state>, _transient: &mut ()| {
+                Box::new(move |execution_context: ExecutionContext<'_, 'state>, _persistent: &mut ()| {
                     // Executed once per graph execution.
                     let mut cursor = Cursor::new(execution_context.outputs[0].as_mut());
 

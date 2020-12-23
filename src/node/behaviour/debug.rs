@@ -94,12 +94,12 @@ impl NodeBehaviour for DebugNodeBehaviour {
             self,
             application_context,
             (),
-            move |behaviour: &Self, _application_context: &ApplicationContext, _transient: &mut ()| {
+            move |behaviour: &Self, _application_context: &ApplicationContext, _persistent: &mut ()| {
                 // Executed when the node settings have been changed to create the following
                 // executor closure.
                 let ty = behaviour.ty;
 
-                Box::new(move |context: ExecutionContext<'_, 'state>, _transient: &mut ()| {
+                Box::new(move |context: ExecutionContext<'_, 'state>, _persistent: &mut ()| {
                     // Executed once per graph execution.
                     let value = ty.read::<LittleEndian, _>(&context.inputs[0].as_ref()).unwrap();
                     println!("{:?}", value);

@@ -17,7 +17,7 @@ pub struct CounterNodeBehaviour;
 
 impl NodeBehaviour for CounterNodeBehaviour {
     type Message = ();
-    type State<'state> = NodeExecutorStateClosure<'state, Self, Transient>;
+    type State<'state> = NodeExecutorStateClosure<'state, Self, Persistent>;
 
     fn name(&self) -> &str {
         "Counter"
@@ -41,26 +41,26 @@ impl NodeBehaviour for CounterNodeBehaviour {
         NodeExecutorStateClosure::new(
             self,
             application_context,
-            Transient::default(),
+            Persistent::default(),
             move |_behaviour: &Self,
                   _application_context: &ApplicationContext,
-                  _transient: &mut Transient| {
+                  _persistent: &mut Persistent| {
                 // Executed when the node settings have been changed to create the following
                 // executor closure.
-                Box::new(move |context: ExecutionContext<'_, 'state>, transient: &mut Transient| {
+                Box::new(move |context: ExecutionContext<'_, 'state>, persistent: &mut Persistent| {
                     // Executed once per graph execution.
                     let mut cursor = Cursor::new(context.outputs[0].as_mut());
 
-                    cursor.write_u32::<LittleEndian>(transient.count).unwrap();
+                    cursor.write_u32::<LittleEndian>(persistent.count).unwrap();
 
-                    transient.count += 1;
-                }) as Box<dyn ExecutorClosure<'state, Transient> + 'state>
+                    persistent.count += 1;
+                }) as Box<dyn ExecutorClosure<'state, Persistent> + 'state>
             },
         )
     }
 }
 
 #[derive(Default, Debug, Clone)]
-pub struct Transient {
+pub struct Persistent {
     count: u32,
 }

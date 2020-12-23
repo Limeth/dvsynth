@@ -127,13 +127,13 @@ impl NodeBehaviour for BinaryOpNodeBehaviour {
             self,
             application_context,
             (),
-            move |behaviour: &Self, _application_context: &ApplicationContext, _transient: &mut ()| {
+            move |behaviour: &Self, _application_context: &ApplicationContext, _persistent: &mut ()| {
                 // Executed when the node settings have been changed to create the following
                 // executor closure.
                 let pick_list_ty_value = behaviour.pick_list_ty_value;
                 let op = behaviour.op;
 
-                Box::new(move |context: ExecutionContext<'_, 'state>, _transient: &mut ()| {
+                Box::new(move |context: ExecutionContext<'_, 'state>, _persistent: &mut ()| {
                     // Executed once per graph execution.
                     let lhs =
                         pick_list_ty_value.read::<LittleEndian, _>(&context.inputs[0].as_ref()).unwrap();
