@@ -3,7 +3,7 @@ use crate::{
     node::{
         behaviour::{
             ExecutionContext, ExecutorClosure, ExecutorClosureConstructor, NodeBehaviour, NodeCommand,
-            NodeEvent, NodeExecutorStateClosure,
+            NodeEvent, NodeStateClosure,
         },
         NodeConfiguration,
     },
@@ -181,7 +181,7 @@ impl WindowNodeBehaviour {
 
 impl NodeBehaviour for WindowNodeBehaviour {
     type Message = WindowMessage;
-    type State<'state> = NodeExecutorStateClosure<'state, Self, Persistent>;
+    type State<'state> = NodeStateClosure<'state, Self, Persistent>;
 
     fn name(&self) -> &str {
         "Window"
@@ -330,7 +330,7 @@ impl NodeBehaviour for WindowNodeBehaviour {
     }
 
     fn create_state<'state>(&self, application_context: &ApplicationContext) -> Self::State<'state> {
-        NodeExecutorStateClosure::new(
+        NodeStateClosure::new(
             self,
             application_context,
             Persistent::default(),

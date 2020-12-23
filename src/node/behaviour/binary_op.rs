@@ -3,7 +3,7 @@ use crate::{
     node::{
         behaviour::{
             ApplicationContext, ExecutionContext, ExecutorClosure, NodeBehaviour, NodeCommand, NodeEvent,
-            NodeExecutorStateClosure,
+            NodeStateClosure,
         },
         Channel, NodeConfiguration, PrimitiveType,
     },
@@ -59,7 +59,7 @@ impl BinaryOpNodeBehaviour {
 
 impl NodeBehaviour for BinaryOpNodeBehaviour {
     type Message = BinaryOpMessage;
-    type State<'state> = NodeExecutorStateClosure<'state, Self>;
+    type State<'state> = NodeStateClosure<'state, Self>;
 
     fn name(&self) -> &str {
         "Binary Operation"
@@ -123,7 +123,7 @@ impl NodeBehaviour for BinaryOpNodeBehaviour {
     }
 
     fn create_state<'state>(&self, application_context: &ApplicationContext) -> Self::State<'state> {
-        NodeExecutorStateClosure::new(
+        NodeStateClosure::new(
             self,
             application_context,
             (),

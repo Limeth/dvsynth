@@ -1,6 +1,6 @@
 use crate::node::behaviour::{
     AllocatorHandle, ExecutionContext, MainThreadTask, NodeBehaviourContainer, NodeCommand,
-    NodeEventContainer, NodeExecutor, NodeExecutorState, NodeExecutorStateContainer,
+    NodeEventContainer, NodeExecutor, NodeState, NodeStateContainer,
 };
 use crate::node::ty::TypeExt;
 use crate::node::{
@@ -43,7 +43,7 @@ pub struct PreparedTask {
     pub node_index: NodeIndex,
     /// Set to `None` only during the preparation of the next schedule, for the previous schedule's
     /// tasks.
-    pub state: Option<NodeExecutorStateContainer<'static>>,
+    pub state: Option<NodeStateContainer<'static>>,
     pub output_values: ChannelValues,
 }
 

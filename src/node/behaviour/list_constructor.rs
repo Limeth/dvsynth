@@ -6,7 +6,7 @@ use crate::{
     node::{
         behaviour::{
             ApplicationContext, ExecutionContext, ExecutorClosure, ExecutorClosureConstructor, NodeBehaviour,
-            NodeCommand, NodeEvent, NodeExecutorStateClosure,
+            NodeCommand, NodeEvent, NodeStateClosure,
         },
         Channel, NodeConfiguration, PrimitiveType,
     },
@@ -65,7 +65,7 @@ impl ListConstructorNodeBehaviour {
 
 impl NodeBehaviour for ListConstructorNodeBehaviour {
     type Message = ListConstructorNodeMessage;
-    type State<'state> = NodeExecutorStateClosure<'state, Self>;
+    type State<'state> = NodeStateClosure<'state, Self>;
 
     fn name(&self) -> &str {
         "ListConstructor"
@@ -131,7 +131,7 @@ impl NodeBehaviour for ListConstructorNodeBehaviour {
     }
 
     fn create_state<'state>(&self, application_context: &ApplicationContext) -> Self::State<'state> {
-        NodeExecutorStateClosure::new(
+        NodeStateClosure::new(
             self,
             application_context,
             (),

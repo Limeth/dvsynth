@@ -4,7 +4,7 @@ use crate::{
     node::{
         behaviour::{
             ExecutionContext, ExecutorClosure, ExecutorClosureConstructor, NodeBehaviour, NodeCommand,
-            NodeEvent, NodeExecutorStateClosure,
+            NodeEvent, NodeStateClosure,
         },
         Channel, NodeConfiguration, PrimitiveType,
     },
@@ -71,7 +71,7 @@ impl ConstantNodeBehaviour {
 
 impl NodeBehaviour for ConstantNodeBehaviour {
     type Message = ConstantNodeMessage;
-    type State<'state> = NodeExecutorStateClosure<'state, Self>;
+    type State<'state> = NodeStateClosure<'state, Self>;
 
     fn name(&self) -> &str {
         "Constant"
@@ -137,7 +137,7 @@ impl NodeBehaviour for ConstantNodeBehaviour {
     }
 
     fn create_state<'state>(&self, application_context: &ApplicationContext) -> Self::State<'state> {
-        NodeExecutorStateClosure::new(
+        NodeStateClosure::new(
             self,
             application_context,
             (),

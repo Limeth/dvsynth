@@ -2,7 +2,7 @@ use crate::{
     node::{
         behaviour::{
             ApplicationContext, ExecutionContext, ExecutorClosure, NodeBehaviour, NodeCommand, NodeEvent,
-            NodeExecutorStateClosure,
+            NodeStateClosure,
         },
         Channel, NodeConfiguration, PrimitiveType,
     },
@@ -17,7 +17,7 @@ pub struct CounterNodeBehaviour;
 
 impl NodeBehaviour for CounterNodeBehaviour {
     type Message = ();
-    type State<'state> = NodeExecutorStateClosure<'state, Self, Persistent>;
+    type State<'state> = NodeStateClosure<'state, Self, Persistent>;
 
     fn name(&self) -> &str {
         "Counter"
@@ -38,7 +38,7 @@ impl NodeBehaviour for CounterNodeBehaviour {
     }
 
     fn create_state<'state>(&self, application_context: &ApplicationContext) -> Self::State<'state> {
-        NodeExecutorStateClosure::new(
+        NodeStateClosure::new(
             self,
             application_context,
             Persistent::default(),

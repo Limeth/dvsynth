@@ -2,7 +2,7 @@ use crate::{
     node::{
         behaviour::{
             ApplicationContext, ExecutionContext, ExecutorClosure, NodeBehaviour, NodeCommand, NodeEvent,
-            NodeExecutorStateClosure,
+            NodeStateClosure,
         },
         Channel, NodeConfiguration, PrimitiveType,
     },
@@ -45,7 +45,7 @@ impl DebugNodeBehaviour {
 
 impl NodeBehaviour for DebugNodeBehaviour {
     type Message = DebugNodeMessage;
-    type State<'state> = NodeExecutorStateClosure<'state, Self>;
+    type State<'state> = NodeStateClosure<'state, Self>;
 
     fn name(&self) -> &str {
         "Debug"
@@ -90,7 +90,7 @@ impl NodeBehaviour for DebugNodeBehaviour {
     }
 
     fn create_state<'state>(&self, application_context: &ApplicationContext) -> Self::State<'state> {
-        NodeExecutorStateClosure::new(
+        NodeStateClosure::new(
             self,
             application_context,
             (),

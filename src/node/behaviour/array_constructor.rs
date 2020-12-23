@@ -2,7 +2,7 @@ use crate::{
     node::{
         behaviour::{
             ApplicationContext, ExecutionContext, ExecutorClosure, NodeBehaviour, NodeCommand, NodeEvent,
-            NodeExecutorStateClosure,
+            NodeStateClosure,
         },
         ArrayType, Channel, NodeConfiguration, PrimitiveType,
     },
@@ -62,7 +62,7 @@ impl ArrayConstructorNodeBehaviour {
 
 impl NodeBehaviour for ArrayConstructorNodeBehaviour {
     type Message = ArrayConstructorNodeMessage;
-    type State<'state> = NodeExecutorStateClosure<'state, Self>;
+    type State<'state> = NodeStateClosure<'state, Self>;
 
     fn name(&self) -> &str {
         "ArrayConstructor"
@@ -127,7 +127,7 @@ impl NodeBehaviour for ArrayConstructorNodeBehaviour {
     }
 
     fn create_state<'state>(&self, application_context: &ApplicationContext) -> Self::State<'state> {
-        NodeExecutorStateClosure::new(
+        NodeStateClosure::new(
             self,
             application_context,
             (),

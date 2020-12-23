@@ -86,11 +86,11 @@ impl<M: NodeBehaviourMessage> NodeEvent<M> {
 }
 
 // FIXME: Maybe just store `Box<dyn NodeExecutor<'static>>` instead?
-pub struct NodeExecutorStateContainer<'state> {
+pub struct NodeStateContainer<'state> {
     ptr: Box<dyn NodeExecutor<'state> + 'state>,
 }
 
-impl<'state> NodeExecutorStateContainer<'state> {
+impl<'state> NodeStateContainer<'state> {
     pub fn from<T: NodeBehaviour>(state: T::State<'state>) -> Self {
         Self { ptr: Box::new(state) as Box<dyn NodeExecutor<'state> + 'state> }
     }
@@ -130,7 +130,7 @@ pub trait NodeExecutor<'state>: Debug + Send + Sync {
     where 'state: 'invocation;
 }
 
-pub trait NodeExecutorState<'state>: NodeExecutor<'state> {
+pub trait NodeState<'state>: NodeExecutor<'state> {
     type Behaviour: NodeBehaviour;
 
     fn update<'invocation>(
@@ -153,10 +153,10 @@ pub trait ExecutorClosureConstructor<'state, T, Transient: TransientTrait + 'sta
 pub trait ExecutorClosure<'state, Transient: TransientTrait + 'state = ()> =
     for<'i> FnMut(ExecutionContext<'i, 'state>, &mut Transient) + Send + Sync;
 
-/// A `NodeExecutorState`, such that is created using:
+/// A `NodeState`, such that is created using:
 /// * The `create_closure` executor constructor, which constructs the executor using `&T` and `&ApplicationContext`;
 /// * The `transient` data, which is the state persisted across calls to `create_closure`.
-pub struct NodeExecutorStateClosure<'state, T, Transient = ()>
+pub struct NodeStateClosure<'state, T, Transient = ()>
 where
     T: NodeBehaviour,
     Transient: TransientTrait + 'state,
@@ -166,7 +166,7 @@ where
     transient: Transient,
 }
 
-impl<'state, T, Transient> NodeExecutorStateClosure<'state, T, Transient>
+impl<'state, T, Transient> NodeStateClosure<'state, T, Transient>
 where
     T: NodeBehaviour,
     Transient: TransientTrait + 'state,
@@ -196,17 +196,17 @@ where
     }
 }
 
-impl<'state, T, Transient> Debug for NodeExecutorStateClosure<'state, T, Transient>
+impl<'state, T, Transient> Debug for NodeStateClosure<'state, T, Transient>
 where
     T: NodeBehaviour,
     Transient: TransientTrait + 'state,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("NodeExecutorStateClosure").field("transient", &self.transient).finish()
+        f.debug_struct("NodeStateClosure").field("transient", &self.transient).finish()
     }
 }
 
-impl<'state, T, Transient> NodeExecutorState<'state> for NodeExecutorStateClosure<'state, T, Transient>
+impl<'state, T, Transient> NodeState<'state> for NodeStateClosure<'state, T, Transient>
 where
     T: NodeBehaviour,
     Transient: TransientTrait + 'state,
@@ -224,7 +224,7 @@ where
     }
 }
 
-impl<'state, T, Transient> NodeExecutor<'state> for NodeExecutorStateClosure<'state, T, Transient>
+impl<'state, T, Transient> NodeExecutor<'state> for NodeStateClosure<'state, T, Transient>
 where
     T: NodeBehaviour,
     Transient: TransientTrait + 'state,
@@ -278,19 +278,15 @@ pub trait NodeBehaviourContainer: dyn_clone::DynClone + std::fmt::Debug + Send +
     fn name(&self) -> &str;
     fn update(&mut self, event: NodeEventContainer) -> Vec<NodeCommand>;
     fn view(&mut self, theme: &dyn Theme) -> Option<Element<Box<dyn NodeBehaviourMessage>>>;
-    fn create_state<'state>(&self, context: &ApplicationContext) -> NodeExecutorStateContainer<'state>;
-    fn update_state<'state>(
-        &self,
-        context: &ApplicationContext,
-        state: &mut NodeExecutorStateContainer<'state>,
-    );
+    fn create_state<'state>(&self, context: &ApplicationContext) -> NodeStateContainer<'state>;
+    fn update_state<'state>(&self, context: &ApplicationContext, state: &mut NodeStateContainer<'state>);
 }
 
 dyn_clone::clone_trait_object!(NodeBehaviourContainer);
 
 pub trait NodeBehaviour: std::fmt::Debug + Clone + Send + Sync + 'static {
     type Message: NodeBehaviourMessage;
-    type State<'state>: NodeExecutorState<'state, Behaviour = Self>;
+    type State<'state>: NodeState<'state, Behaviour = Self>;
 
     fn name(&self) -> &str;
     fn update(&mut self, event: NodeEvent<Self::Message>) -> Vec<NodeCommand>;
@@ -312,18 +308,13 @@ impl<T: NodeBehaviour> NodeBehaviourContainer for T {
             .map(|element| element.map(|message| Box::new(message) as Box<dyn NodeBehaviourMessage>))
     }
 
-    fn create_state<'state>(&self, context: &ApplicationContext) -> NodeExecutorStateContainer<'state> {
+    fn create_state<'state>(&self, context: &ApplicationContext) -> NodeStateContainer<'state> {
         let state = <Self as NodeBehaviour>::create_state(self, context);
 
-        NodeExecutorStateContainer::from::<Self>(state)
+        NodeStateContainer::from::<Self>(state)
     }
 
-    fn update_state<'state>(
-        &self,
-        context: &ApplicationContext,
-        state: &mut NodeExecutorStateContainer<'state>,
-    )
-    {
+    fn update_state<'state>(&self, context: &ApplicationContext, state: &mut NodeStateContainer<'state>) {
         state.update::<Self>(context, self)
     }
 }
