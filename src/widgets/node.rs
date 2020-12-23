@@ -853,6 +853,7 @@ impl ConnectionCurve {
         Rectangle::from_min_max(min, max)
     }
 
+    #[allow(dead_code)]
     fn bounds(&self) -> Rectangle {
         Self::bounds_from_curve(&util::get_connection_curve(self.from, self.to))
     }

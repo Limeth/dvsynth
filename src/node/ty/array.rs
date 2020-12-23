@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use std::fmt::Display;
 
-use super::{Bytes, DowncastFromTypeEnum, SizedTypeExt, TypeEnum, TypeExt, TypeTrait, TypedBytes};
+use super::{Bytes, DowncastFromTypeEnum, SizedTypeExt, TypeEnum, TypeExt, TypedBytes};
 
 pub mod prelude {}
 

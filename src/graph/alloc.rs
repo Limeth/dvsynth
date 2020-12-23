@@ -9,15 +9,12 @@ use std::sync::{Mutex, RwLock};
 
 use crossbeam::deque::Injector;
 use crossbeam::deque::Steal;
-use crossbeam::epoch::Collector;
-use downcast_rs::Downcast;
 use lazy_static::lazy_static;
-use sharded_slab::{pool::Pool, Clear};
 
 use crate::node::behaviour::AllocatorHandle;
 use crate::node::{
-    AllocationPointer, Bytes, BytesMut, DynTypeDescriptor, SizedType, SizedTypeExt, TypeEnum, TypeTrait,
-    TypedBytes, TypedBytesMut,
+    AllocationPointer, Bytes, BytesMut, DynTypeDescriptor, SizedTypeExt, TypeEnum, TypeTrait, TypedBytes,
+    TypedBytesMut,
 };
 
 use super::{DynTypeTrait, NodeIndex, Schedule};
@@ -103,6 +100,7 @@ pub(crate) enum AllocationType {
     Object { ty_name: &'static str, data: Box<dyn AllocatedType> },
 }
 
+#[allow(dead_code)]
 impl AllocationType {
     pub fn bytes_mut(&mut self) -> Option<&mut [u8]> {
         match self {
@@ -153,6 +151,7 @@ pub(crate) struct AllocationInner {
     inner: AllocationType,
 }
 
+#[allow(dead_code)]
 impl AllocationInner {
     pub fn new_object<T: DynTypeTrait>(data: T::DynAlloc, ty: T) -> Self {
         assert!(

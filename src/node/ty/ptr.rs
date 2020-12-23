@@ -1,14 +1,13 @@
-use byteorder::{ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
+use byteorder::{LittleEndian, ReadBytesExt};
 use std::fmt::Display;
-use std::io::{Cursor, Read, Write};
+use std::io::Cursor;
 
 use crate::graph::alloc::Allocator;
 use crate::node::behaviour::AllocatorHandle;
 
 use super::{
-    AllocationPointer, BorrowedRefAny, BorrowedRefMut, BorrowedRefMutAny, Bytes, BytesMut,
-    DowncastFromTypeEnum, OwnedRefMut, Ref, RefAny, RefAnyExt, RefMut, RefMutAny, RefMutAnyExt, SizedTypeExt,
-    TypeEnum, TypeExt, TypeTrait, TypedBytes, TypedBytesMut,
+    AllocationPointer, BorrowedRefAny, BorrowedRefMut, BorrowedRefMutAny, Bytes, DowncastFromTypeEnum,
+    OwnedRefMut, Ref, RefAnyExt, RefMut, RefMutAny, SizedTypeExt, TypeEnum, TypeExt, TypeTrait, TypedBytes,
 };
 
 pub mod prelude {

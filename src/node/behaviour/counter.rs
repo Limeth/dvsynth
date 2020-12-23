@@ -16,7 +16,6 @@ use std::io::Cursor;
 pub struct CounterNodeBehaviour;
 
 impl NodeBehaviour for CounterNodeBehaviour {
-    type Message = ();
     type State<'state> = NodeStateClosure<'state, Self, Persistent>;
 
     fn name(&self) -> &str {

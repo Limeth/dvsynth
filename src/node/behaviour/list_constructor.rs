@@ -1,12 +1,10 @@
-use crate::graph::ListAllocation;
 use crate::node::prelude::*;
-use crate::node::ty::TypeExt;
 use crate::node::{ListDescriptor, ListType, OwnedRefMut, Unique};
 use crate::{
     node::{
         behaviour::{
-            ApplicationContext, ExecutionContext, ExecutorClosure, ExecutorClosureConstructor, NodeBehaviour,
-            NodeCommand, NodeEvent, NodeStateClosure,
+            ApplicationContext, ExecutionContext, ExecutorClosure, NodeBehaviour, NodeCommand, NodeEvent,
+            NodeStateClosure,
         },
         Channel, NodeConfiguration, PrimitiveType,
     },
@@ -27,8 +25,6 @@ pub enum ListConstructorNodeMessage {
     AddChannel,
     RemoveChannel,
 }
-
-impl_node_behaviour_message!(ListConstructorNodeMessage);
 
 #[derive(Debug, Clone)]
 pub struct ListConstructorNodeBehaviour {
@@ -65,7 +61,6 @@ impl ListConstructorNodeBehaviour {
 
 impl NodeBehaviour for ListConstructorNodeBehaviour {
     type Message = ListConstructorNodeMessage;
-    type State<'state> = NodeStateClosure<'state, Self>;
 
     fn name(&self) -> &str {
         "ListConstructor"

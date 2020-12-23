@@ -1,4 +1,4 @@
-use super::{Bytes, DowncastFromTypeEnum, Ref, SizedTypeExt, TypeEnum, TypeExt, TypeTrait, TypedBytes};
+use super::{Bytes, DowncastFromTypeEnum, SizedTypeExt, TypeEnum, TypeExt, TypedBytes};
 use byteorder::{ByteOrder, ReadBytesExt, WriteBytesExt};
 use std::fmt::Display;
 use std::io::{Cursor, Read, Write};
@@ -242,7 +242,7 @@ impl TypeExt for PrimitiveType {
         true
     }
 
-    unsafe fn children<'a>(&'a self, data: &Bytes<'a>) -> Vec<TypedBytes<'a>> {
+    unsafe fn children<'a>(&'a self, _data: &Bytes<'a>) -> Vec<TypedBytes<'a>> {
         vec![]
     }
 }

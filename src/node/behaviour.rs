@@ -2,6 +2,7 @@ use crate::graph::{ApplicationContext, NodeIndex};
 use crate::node::{ChannelValueRefs, ChannelValues, DynTypeTrait, NodeConfiguration};
 use crate::style::Theme;
 use downcast_rs::{impl_downcast, Downcast};
+use dyn_clone::DynClone;
 use iced::Element;
 use iced_winit::winit::event_loop::EventLoopWindowTarget;
 use std::fmt::Debug;
@@ -30,29 +31,11 @@ pub enum NodeCommand {
     Configure(NodeConfiguration),
 }
 
-pub trait NodeBehaviourMessage: Downcast + Debug + Send {
-    fn dyn_clone(&self) -> Box<dyn NodeBehaviourMessage>;
-}
+pub trait NodeBehaviourMessage: DynClone + Downcast + Debug + Send {}
+impl<T> NodeBehaviourMessage for T where T: DynClone + Downcast + Debug + Send {}
 
 impl_downcast!(NodeBehaviourMessage);
-
-macro_rules! impl_node_behaviour_message {
-    ($($target_type:tt)*) => {
-        impl crate::node::behaviour::NodeBehaviourMessage for $($target_type)* {
-            fn dyn_clone(&self) -> Box<dyn crate::node::behaviour::NodeBehaviourMessage> {
-                Box::new(self.clone())
-            }
-        }
-    };
-}
-
-impl_node_behaviour_message!(());
-
-impl Clone for Box<dyn NodeBehaviourMessage> {
-    fn clone(&self) -> Self {
-        NodeBehaviourMessage::dyn_clone(self.as_ref())
-    }
-}
+dyn_clone::clone_trait_object!(NodeBehaviourMessage);
 
 #[derive(Debug, Clone)]
 pub enum NodeEvent<M> {
@@ -274,7 +257,7 @@ pub struct ExecutionContext<'invocation, 'state: 'invocation> {
 
 pub type MainThreadTask = dyn Send + FnOnce(&EventLoopWindowTarget<crate::Message>);
 
-pub trait NodeBehaviourContainer: dyn_clone::DynClone + std::fmt::Debug + Send + Sync + 'static {
+pub trait NodeBehaviourContainer: DynClone + std::fmt::Debug + Send + Sync + 'static {
     fn name(&self) -> &str;
     fn update(&mut self, event: NodeEventContainer) -> Vec<NodeCommand>;
     fn view(&mut self, theme: &dyn Theme) -> Option<Element<Box<dyn NodeBehaviourMessage>>>;
@@ -285,8 +268,8 @@ pub trait NodeBehaviourContainer: dyn_clone::DynClone + std::fmt::Debug + Send +
 dyn_clone::clone_trait_object!(NodeBehaviourContainer);
 
 pub trait NodeBehaviour: std::fmt::Debug + Clone + Send + Sync + 'static {
-    type Message: NodeBehaviourMessage;
-    type State<'state>: NodeState<'state, Behaviour = Self>;
+    type Message: NodeBehaviourMessage = ();
+    type State<'state>: NodeState<'state, Behaviour = Self> = NodeStateClosure<'state, Self>;
 
     fn name(&self) -> &str;
     fn update(&mut self, event: NodeEvent<Self::Message>) -> Vec<NodeCommand>;

@@ -1,6 +1,6 @@
 use crate::node::behaviour::{
     AllocatorHandle, ExecutionContext, MainThreadTask, NodeBehaviourContainer, NodeCommand,
-    NodeEventContainer, NodeExecutor, NodeState, NodeStateContainer,
+    NodeEventContainer, NodeStateContainer,
 };
 use crate::node::ty::TypeExt;
 use crate::node::{
@@ -14,7 +14,7 @@ use crate::widgets::{
 use crate::ApplicationFlags;
 use crate::Message;
 use crate::NodeMessage;
-use alloc::{AllocatedType, Allocator};
+use alloc::Allocator;
 use arc_swap::ArcSwapOption;
 use iced::{Element, Settings};
 use iced_futures::futures;
@@ -25,7 +25,7 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::ops::{Deref, DerefMut};
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, RwLock};
 use std::thread;
 use vek::Vec2;
 

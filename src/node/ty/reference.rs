@@ -1,16 +1,14 @@
 use super::{
-    AllocationPointer, Shared, SharedTrait, SizedTypeExt, TypeEnum, TypeTrait, TypedBytes, TypedBytesMut,
-    Unique, UniqueTrait,
+    AllocationPointer, SharedTrait, SizedTypeExt, TypeTrait, TypedBytes, TypedBytesMut, Unique, UniqueTrait,
 };
-use crate::graph::alloc::{AllocatedType, AllocationInner, Allocator};
+use crate::graph::alloc::Allocator;
 use crate::graph::NodeIndex;
 use crate::node::behaviour::AllocatorHandle;
 use crate::node::ty::DynTypeTrait;
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use byteorder::{LittleEndian, ReadBytesExt};
 use std::borrow::Cow;
-use std::io::{Cursor, Read, Write};
+use std::io::Cursor;
 use std::marker::PhantomData;
-use std::ops::{Deref, DerefMut};
 
 pub mod prelude {
     pub use super::{Ref, RefAny, RefAnyExt, RefMut, RefMutAny, RefMutAnyExt};
@@ -236,7 +234,7 @@ where T: TypeTrait
 {
     pub fn to_owned_ref<'invocation>(
         self,
-        handle: AllocatorHandle<'invocation, 'state>,
+        _handle: AllocatorHandle<'invocation, 'state>,
     ) -> OwnedRef<'state, T>
     where
         'state: 'invocation,

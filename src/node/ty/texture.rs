@@ -43,16 +43,16 @@ impl DynTypeTrait for TextureType {
     type Descriptor = TextureDescriptor;
     type DynAlloc = TextureAllocation;
 
-    fn create_value_from_descriptor(descriptor: Self::Descriptor) -> Self::DynAlloc {
+    fn create_value_from_descriptor(_descriptor: Self::Descriptor) -> Self::DynAlloc {
         todo!()
     }
 
-    fn is_abi_compatible(&self, other: &Self) -> bool {
+    fn is_abi_compatible(&self, _other: &Self) -> bool {
         todo!()
     }
 
-    unsafe fn children<'a>(&'a self, data: &Bytes<'a>) -> Vec<TypedBytes<'a>> {
-        vec![]
+    unsafe fn children<'a>(&'a self, _data: &Bytes<'a>) -> Vec<TypedBytes<'a>> {
+        todo!()
     }
 }
 

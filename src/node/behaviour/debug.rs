@@ -20,8 +20,6 @@ pub enum DebugNodeMessage {
     UpdateType(PrimitiveType),
 }
 
-impl_node_behaviour_message!(DebugNodeMessage);
-
 #[derive(Debug, Clone)]
 pub struct DebugNodeBehaviour {
     ty: PrimitiveType,
@@ -45,7 +43,6 @@ impl DebugNodeBehaviour {
 
 impl NodeBehaviour for DebugNodeBehaviour {
     type Message = DebugNodeMessage;
-    type State<'state> = NodeStateClosure<'state, Self>;
 
     fn name(&self) -> &str {
         "Debug"

@@ -3,8 +3,7 @@ use crate::{
     graph::ApplicationContext,
     node::{
         behaviour::{
-            ExecutionContext, ExecutorClosure, ExecutorClosureConstructor, NodeBehaviour, NodeCommand,
-            NodeEvent, NodeStateClosure,
+            ExecutionContext, ExecutorClosure, NodeBehaviour, NodeCommand, NodeEvent, NodeStateClosure,
         },
         Channel, NodeConfiguration, PrimitiveType,
     },
@@ -24,8 +23,6 @@ pub enum ConstantNodeMessage {
     UpdateType(PrimitiveType),
     UpdateValue(String),
 }
-
-impl_node_behaviour_message!(ConstantNodeMessage);
 
 #[derive(Clone, Debug)]
 pub struct ConstantNodeBehaviour {
@@ -71,7 +68,6 @@ impl ConstantNodeBehaviour {
 
 impl NodeBehaviour for ConstantNodeBehaviour {
     type Message = ConstantNodeMessage;
-    type State<'state> = NodeStateClosure<'state, Self>;
 
     fn name(&self) -> &str {
         "Constant"

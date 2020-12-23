@@ -1,13 +1,8 @@
-use std::any::{Any, TypeId};
+use crate::graph::alloc::{AllocatedType, AllocationInner};
 use std::borrow::Cow;
 use std::fmt::{Debug, Display};
-use std::io::{Cursor, Read, Write};
 use std::marker::PhantomData;
 use std::mem::Discriminant;
-
-use byteorder::{ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
-
-use downcast_rs::Downcast;
 
 pub use array::*;
 pub use list::*;
@@ -15,10 +10,6 @@ pub use primitive::*;
 pub use ptr::*;
 pub use reference::*;
 pub use texture::*;
-
-use crate::graph::alloc::{AllocatedType, AllocationInner, Allocator};
-
-use super::behaviour::AllocatorHandle;
 
 pub mod array;
 pub mod list;
@@ -42,41 +33,6 @@ pub mod prelude {
 pub struct AllocationPointer {
     pub(crate) index: u64,
 }
-
-// pub trait InnerRef<'a>: Sized + Clone + Copy {
-//     type OutputData: ?Sized;
-//     type OutputType: TypeTrait;
-
-//     unsafe fn from_raw_bytes(
-//         bytes: &'a [u8],
-//         ty: &'a Self::OutputType,
-//         handle: AllocatorHandle<'a>,
-//     ) -> Result<Self, ()>;
-
-//     unsafe fn raw_bytes(&self) -> &[u8];
-//     unsafe fn deref_ref(self) -> Result<(&'a Self::OutputData, &'a Self::OutputType), ()>;
-// }
-
-// pub trait InnerRefMut<'a>: Sized {
-//     type OutputData: ?Sized;
-//     type OutputType: TypeTrait;
-//     type InnerRef: self::InnerRef<'a>;
-
-//     unsafe fn from_raw_bytes(
-//         bytes: &'a mut [u8],
-//         ty: &'a Self::OutputType,
-//         handle: AllocatorHandle<'a>,
-//     ) -> Result<Self, ()>;
-
-//     unsafe fn deref_ref_mut(self) -> Result<(&'a mut Self::OutputData, &'a Self::OutputType), ()>;
-// }
-
-// pub trait InnerRefTypes<T: TypeTrait> {
-//     type InnerRef<'a>: self::InnerRef<'a, OutputType = T>;
-//     type InnerRefMut<'a>: self::InnerRefMut<'a, OutputType = T>;
-
-//     fn downgrade<'a>(from: Self::InnerRefMut<'a>) -> Self::InnerRef<'a>;
-// }
 
 #[derive(Debug, Clone, Copy)]
 pub enum Bytes<'a> {
@@ -368,7 +324,7 @@ pub trait InitializeWith<T>: Default {
 }
 
 impl InitializeWith<()> for () {
-    fn initialize_with(&mut self, descriptor: ()) {}
+    fn initialize_with(&mut self, _descriptor: ()) {}
 }
 
 pub trait DynTypeDescriptor<T: DynTypeTrait<Descriptor = Self>>: Send + Sync + 'static {
@@ -387,122 +343,6 @@ where Self: TypeTrait
     fn is_abi_compatible(&self, other: &Self) -> bool;
     unsafe fn children<'a>(&'a self, data: &Bytes<'a>) -> Vec<TypedBytes<'a>>;
 }
-
-// pub struct IndirectInnerRef<'a, T: AllocatedType> {
-//     pub(crate) ptr: AllocationPointer,
-//     pub(crate) ty: &'a T,
-//     __marker: PhantomData<T>,
-// }
-
-// impl<'a, T: DynTypeTrait> IndirectInnerRef<'a, T> {
-//     pub fn new(ptr: AllocationPointer) -> Self {
-//         let (_, ty) = unsafe { Allocator::get().deref_ptr(ptr).unwrap() };
-//         let ty = ty.downcast_ref().unwrap();
-//         Self { ptr, ty, __marker: Default::default() }
-//     }
-// }
-
-// impl<'a, T: DynTypeTrait> Clone for IndirectInnerRef<'a, T> {
-//     fn clone(&self) -> Self {
-//         Self { ptr: self.ptr, ty: self.ty, __marker: Default::default() }
-//     }
-// }
-
-// impl<'a, T: DynTypeTrait> Copy for IndirectInnerRef<'a, T> {}
-
-// impl<'a, T: DynTypeTrait> InnerRef<'a> for IndirectInnerRef<'a, T> {
-//     type OutputData = T::DynAlloc;
-//     type OutputType = T;
-
-//     unsafe fn from_raw_bytes(
-//         bytes: &'a [u8],
-//         ty: &'a Self::OutputType,
-//         _handle: AllocatorHandle<'a>,
-//     ) -> Result<Self, ()>
-//     {
-//         if bytes.len() != std::mem::size_of::<AllocationPointer>() {
-//             return Err(());
-//         }
-//         let mut read = Cursor::new(bytes);
-//         let ptr = AllocationPointer::new(read.read_u64::<LittleEndian>().unwrap());
-//         Ok(Self { ptr, ty, __marker: Default::default() })
-//     }
-
-//     unsafe fn raw_bytes(&self) -> &[u8] {
-//         safe_transmute::transmute_to_bytes(&[self.ptr.as_u64()])
-//     }
-
-//     unsafe fn deref_ref(self) -> Result<(&'a Self::OutputData, &'a Self::OutputType), ()> {
-//         let (data, ty) = Allocator::get().deref_ptr(self.ptr).unwrap();
-//         let ty = ty.downcast_ref().ok_or(())?;
-
-//         if ty != self.ty {
-//             return Err(());
-//         }
-
-//         Ok((data.downcast_ref().ok_or(())?, ty))
-//     }
-// }
-
-// pub struct IndirectInnerRefMut<'a, T: AllocatedType> {
-//     pub(crate) ptr: AllocationPointer,
-//     pub(crate) ty: &'a T,
-//     __marker: PhantomData<T>,
-// }
-
-// impl<'a, T: DynTypeTrait> IndirectInnerRefMut<'a, T> {
-//     pub fn new(ptr: AllocationPointer) -> Self {
-//         let (_, ty) = unsafe { Allocator::get().deref_ptr(ptr).unwrap() };
-//         let ty = ty.downcast_ref().unwrap();
-//         Self { ptr, ty, __marker: Default::default() }
-//     }
-// }
-
-// impl<'a, T> InnerRefMut<'a> for IndirectInnerRefMut<'a, T>
-// where T: DynTypeTrait
-// {
-//     type OutputData = T::DynAlloc;
-//     type OutputType = T;
-//     type InnerRef = IndirectInnerRef<'a, T>;
-
-//     unsafe fn from_raw_bytes(
-//         bytes: &'a mut [u8],
-//         ty: &'a Self::OutputType,
-//         _handle: AllocatorHandle<'a>,
-//     ) -> Result<Self, ()>
-//     {
-//         if bytes.len() != std::mem::size_of::<AllocationPointer>() {
-//             return Err(());
-//         }
-//         let mut read = Cursor::new(bytes);
-//         let ptr = AllocationPointer::new(read.read_u64::<LittleEndian>().unwrap());
-//         Ok(Self { ptr, ty, __marker: Default::default() })
-//     }
-
-//     unsafe fn deref_ref_mut(self) -> Result<(&'a mut Self::OutputData, &'a Self::OutputType), ()> {
-//         let (data, ty) = Allocator::get().deref_mut_ptr(self.ptr).unwrap();
-//         let ty = ty.downcast_ref().ok_or(())?;
-
-//         if ty != self.ty {
-//             return Err(());
-//         }
-
-//         Ok((data.downcast_mut().ok_or(())?, ty))
-//     }
-// }
-
-// pub struct IndirectInnerRefTypes<T> {
-//     __marker: PhantomData<T>,
-// }
-
-// impl<T: DynTypeTrait> InnerRefTypes<T> for IndirectInnerRefTypes<T> {
-//     type InnerRef<'a> = IndirectInnerRef<'a, T>;
-//     type InnerRefMut<'a> = IndirectInnerRefMut<'a, T>;
-
-//     fn downgrade<'a>(from: Self::InnerRefMut<'a>) -> Self::InnerRef<'a> {
-//         IndirectInnerRef { ptr: from.ptr, ty: from.ty, __marker: Default::default() }
-//     }
-// }
 
 impl<T> TypeTrait for T where T: DynTypeTrait {}
 

@@ -24,8 +24,6 @@ pub enum BinaryOpMessage {
     UpdateOp(BinaryOp),
 }
 
-impl_node_behaviour_message!(BinaryOpMessage);
-
 #[derive(Clone, Debug)]
 pub struct BinaryOpNodeBehaviour {
     pub pick_list_ty_state: pick_list::State<PrimitiveType>,
@@ -59,7 +57,6 @@ impl BinaryOpNodeBehaviour {
 
 impl NodeBehaviour for BinaryOpNodeBehaviour {
     type Message = BinaryOpMessage;
-    type State<'state> = NodeStateClosure<'state, Self>;
 
     fn name(&self) -> &str {
         "Binary Operation"

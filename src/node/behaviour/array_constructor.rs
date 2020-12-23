@@ -25,8 +25,6 @@ pub enum ArrayConstructorNodeMessage {
     RemoveChannel,
 }
 
-impl_node_behaviour_message!(ArrayConstructorNodeMessage);
-
 #[derive(Clone, Debug)]
 pub struct ArrayConstructorNodeBehaviour {
     ty: PrimitiveType,
@@ -62,7 +60,6 @@ impl ArrayConstructorNodeBehaviour {
 
 impl NodeBehaviour for ArrayConstructorNodeBehaviour {
     type Message = ArrayConstructorNodeMessage;
-    type State<'state> = NodeStateClosure<'state, Self>;
 
     fn name(&self) -> &str {
         "ArrayConstructor"

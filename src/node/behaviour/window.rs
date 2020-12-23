@@ -2,8 +2,7 @@ use crate::graph::ApplicationContext;
 use crate::{
     node::{
         behaviour::{
-            ExecutionContext, ExecutorClosure, ExecutorClosureConstructor, NodeBehaviour, NodeCommand,
-            NodeEvent, NodeStateClosure,
+            ExecutionContext, ExecutorClosure, NodeBehaviour, NodeCommand, NodeEvent, NodeStateClosure,
         },
         NodeConfiguration,
     },
@@ -36,8 +35,6 @@ impl Debug for WindowMessage {
         }
     }
 }
-
-impl_node_behaviour_message!(WindowMessage);
 
 #[derive(Debug, Clone)]
 pub struct WindowSettings {
