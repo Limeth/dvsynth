@@ -141,14 +141,17 @@ pub trait NodeExecutorState<'state>: NodeExecutor<'state> {
         'state: 'invocation;
 }
 
-pub trait TransientTrait = Send + Sync;
-pub trait ExecutorClosureConstructor<'state, T, Transient = ()> = Fn(&T, &ApplicationContext, &mut Transient) -> Box<dyn ExecutorClosure<'state, Transient> + 'state>
+pub trait TransientTrait: Debug + Send + Sync {}
+impl<T> TransientTrait for T where T: Debug + Send + Sync {}
+
+/// Constructs an executor. Invoked every time the execution graph is recreated.
+pub trait ExecutorClosureConstructor<'state, T, Transient: TransientTrait + 'state = ()> = Fn(&T, &ApplicationContext, &mut Transient) -> Box<dyn ExecutorClosure<'state, Transient> + 'state>
     + Send
-    + Sync
-where Transient: TransientTrait + 'state;
-pub trait ExecutorClosure<'state, Transient = ()> =
-    for<'i> FnMut(ExecutionContext<'i, 'state>, &mut Transient) + Send + Sync
-    where Transient: TransientTrait + 'state;
+    + Sync;
+
+/// Invoked once per node per graph execution.
+pub trait ExecutorClosure<'state, Transient: TransientTrait + 'state = ()> =
+    for<'i> FnMut(ExecutionContext<'i, 'state>, &mut Transient) + Send + Sync;
 
 /// A `NodeExecutorState`, such that is created using:
 /// * The `create_closure` executor constructor, which constructs the executor using `&T` and `&ApplicationContext`;
@@ -199,7 +202,7 @@ where
     Transient: TransientTrait + 'state,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("NodeExecutorStateClosure")
+        f.debug_struct("NodeExecutorStateClosure").field("transient", &self.transient).finish()
     }
 }
 
@@ -275,8 +278,6 @@ pub trait NodeBehaviourContainer: dyn_clone::DynClone + std::fmt::Debug + Send +
     fn name(&self) -> &str;
     fn update(&mut self, event: NodeEventContainer) -> Vec<NodeCommand>;
     fn view(&mut self, theme: &dyn Theme) -> Option<Element<Box<dyn NodeBehaviourMessage>>>;
-    // fn create_executor(&self) -> Arc<NodeExecutorContainer>;
-    // fn create_state_initializer(&self) -> Option<Arc<dyn NodeStateInitializerContainer>>;
     fn create_state<'state>(&self, context: &ApplicationContext) -> NodeExecutorStateContainer<'state>;
     fn update_state<'state>(
         &self,
