@@ -7,7 +7,7 @@ use iced_native::layout::Layout;
 use iced_native::Color;
 use iced_native::{self, Background, Rectangle};
 use lyon_geom::{QuadraticBezierSegment, Scalar, Segment};
-use smallvec::{smallvec, SmallVec};
+use smallvec::{smallvec, Array, SmallVec};
 use std::borrow::Cow;
 use std::ops::Deref;
 use std::ops::DerefMut;
@@ -461,4 +461,35 @@ macro_rules! debugln {
     ($($tt:tt)*) => {
         println!($($tt)*)
     };
+}
+
+/// Like `SmallVec`, but with immutable length.
+pub struct SmallBoxedSlice<A: Array>(SmallVec<A>);
+
+impl<A: Array, V: Into<SmallVec<A>>> From<V> for SmallBoxedSlice<A> {
+    fn from(vec: V) -> Self {
+        Self(vec.into())
+    }
+}
+
+impl<A: Array> Deref for SmallBoxedSlice<A> {
+    type Target = [A::Item];
+
+    fn deref(&self) -> &Self::Target {
+        self.0.as_slice()
+    }
+}
+
+impl<A: Array> DerefMut for SmallBoxedSlice<A> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.0.as_mut_slice()
+    }
+}
+
+impl<A: Array> Clone for SmallBoxedSlice<A>
+where A::Item: Clone
+{
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
 }

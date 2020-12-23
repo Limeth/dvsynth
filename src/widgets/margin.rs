@@ -70,8 +70,7 @@ impl<'a, M: 'a, R: WidgetRenderer + 'a> Widget<M, R> for Margin<'a, M, R> {
         layout: Layout<'_>,
         cursor_position: Point,
         viewport: &Rectangle,
-    ) -> R::Output
-    {
+    ) -> R::Output {
         self.child.draw(renderer, defaults, layout, cursor_position, viewport)
     }
 
@@ -87,8 +86,7 @@ impl<'a, M: 'a, R: WidgetRenderer + 'a> Widget<M, R> for Margin<'a, M, R> {
         messages: &mut Vec<M>,
         renderer: &R,
         clipboard: Option<&dyn Clipboard>,
-    ) -> Status
-    {
+    ) -> Status {
         self.child.on_event(event, layout, cursor_position, messages, renderer, clipboard)
     }
 

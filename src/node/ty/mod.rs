@@ -6,13 +6,46 @@ use std::mem::Discriminant;
 
 pub use array::*;
 pub use list::*;
+pub use option::*;
 pub use primitive::*;
 pub use ptr::*;
 pub use reference::*;
 pub use texture::*;
 
+macro_rules! impl_downcast_from_type_enum {
+    ($variant:ident($ty:ident)) => {
+        impl DowncastFromTypeEnum for $ty {
+            fn downcast_from(from: TypeEnum) -> Option<Self>
+            where Self: Sized {
+                if let TypeEnum::$variant(inner) = from {
+                    Some(inner)
+                } else {
+                    None
+                }
+            }
+
+            fn downcast_from_ref(from: &TypeEnum) -> Option<&Self> {
+                if let TypeEnum::$variant(inner) = from {
+                    Some(inner)
+                } else {
+                    None
+                }
+            }
+
+            fn downcast_from_mut(from: &mut TypeEnum) -> Option<&mut Self> {
+                if let TypeEnum::$variant(inner) = from {
+                    Some(inner)
+                } else {
+                    None
+                }
+            }
+        }
+    };
+}
+
 pub mod array;
 pub mod list;
+pub mod option;
 pub mod primitive;
 pub mod ptr;
 pub mod reference;
@@ -21,11 +54,15 @@ pub mod texture;
 pub mod prelude {
     pub use super::array::prelude::*;
     pub use super::list::prelude::*;
+    pub use super::option::prelude::*;
     pub use super::primitive::prelude::*;
     pub use super::ptr::prelude::*;
     pub use super::reference::prelude::*;
     pub use super::texture::prelude::*;
-    pub use super::{SizeRefExt, SizeRefMutExt, SizedRefExt, SizedRefMutExt, SizedTypeExt, TypeExt};
+    pub use super::{
+        CloneTypeExt, CloneableTypeExt, SafeBinaryRepresentationTypeExt, SizeRefExt, SizeRefMutExt,
+        SizeTypeExt, SizedRefExt, SizedRefMutExt, SizedTypeExt, TypeExt,
+    };
 }
 
 #[derive(Eq, PartialEq, Debug, Clone, Copy, Hash)]
@@ -116,7 +153,7 @@ impl<'a> TypedBytes<'a> {
     }
 
     pub unsafe fn children(&self) -> Vec<TypedBytes<'_>> {
-        self.ty.as_ref().children(&self.bytes)
+        self.ty.as_ref().children(self.bytes.borrow())
     }
 }
 
@@ -286,35 +323,115 @@ pub struct DirectInnerRefTypes<T> {
     __marker: PhantomData<T>,
 }
 
-pub trait TypeExt: Into<TypeEnum> + PartialEq + Eq + Send + Sync + 'static {
-    /// Returns the size of the associated value, in bytes.
-    fn value_size_if_sized(&self) -> Option<usize>;
-
+pub unsafe trait TypeExt: Into<TypeEnum> + PartialEq + Eq + Send + Sync + 'static {
     /// Returns `true`, if the type can be safely cast/reinterpreted as another.
     /// Otherwise returns `false`.
     fn is_abi_compatible(&self, other: &Self) -> bool;
+
+    unsafe fn children<'a>(&'a self, data: Bytes<'a>) -> Vec<TypedBytes<'a>>;
+
+    // Type properties.
+
+    /// Returns the size of the associated value, in bytes, or `None`, if unsized.
+    fn value_size_if_sized(&self) -> Option<usize> {
+        None
+    }
+
+    /// Returns `true` of the type is cloneable, otherwise `false`.
+    fn is_cloneable(&self) -> bool {
+        false
+    }
 
     /// Returns `true`, whether it is possible to let the user read the underlying
     /// binary representation of the associated value. Otherwise returns `false`.
     ///
     /// Pointers and unsized types are both a typical case which is not safe.
-    fn has_safe_binary_representation(&self) -> bool;
-
-    /// Returns true, if this type is an instance of `Unique` or `Shared`.
-    fn is_pointer(&self) -> bool {
+    ///
+    /// Safety: **safe binary representation implies sized**, or in other words, a type may only
+    /// have a safe binary representation if it also is sized. It must not occur that a type has a
+    /// safe binary representation but is unsized, that would be an implementation error.
+    fn has_safe_binary_representation(&self) -> bool {
         false
     }
-
-    unsafe fn children<'a>(&'a self, data: &Bytes<'a>) -> Vec<TypedBytes<'a>>;
 }
 
-pub trait SizedTypeExt: TypeExt {
-    fn value_size(&self) -> usize;
+pub trait SizeTypeExt: TypeExt {
+    fn is_sized(&self) -> bool;
 }
 
+impl<T> SizeTypeExt for T
+where T: TypeExt
+{
+    fn is_sized(&self) -> bool {
+        self.value_size_if_sized().is_some()
+    }
+}
+
+pub trait CloneTypeExt: TypeExt {
+    fn clone_if_cloneable(&self, bytes: Bytes<'_>) -> Option<AllocationInner>;
+}
+
+impl<T> CloneTypeExt for T
+where T: TypeExt
+{
+    fn clone_if_cloneable(&self, bytes: Bytes<'_>) -> Option<AllocationInner> {
+        if self.is_cloneable() {
+            // TODO
+            todo!()
+        } else {
+            None
+        }
+    }
+}
+
+/// Helper traits to implement `TypeExt` properties.
+/// These exist to couple conditional logic with type safety by implementing the `TypeExt`
+/// properties automatically.
+///
+/// Implementors of types should either implement these traits (enabling the features)
+/// or implement the property trait (usually without having to override the default function
+/// implementations).
+///
+/// For example, say we are declaring a new type `Foo` and we want it to be a sized type, then we
+/// would implement `SizedTypeExt` for `Foo`.
+/// If, on the other hand, we were declaring a new type `Bar` and we wanted that type to be unsized,
+/// then we would implement `SizeType`, leaving the implementation body empty.
+// TODO: Add recursive type information using generics with a wildcard.
+// For example, `Option<T = Wildcard>` could be used as `Option` or `Option<PrimitiveType>`.
+// Then implement helper traits on those types whose child types also implement those traits.
+// E.g. if `PrimitiveType: CloneableTypeExt`, then `Option<PrimitiveType>: CloneableTypeExt`.
+mod ty_traits {
+    use super::*;
+
+    /// A type that implements this trait is guaranteed to be sized.
+    /// See [`TypeExt::value_size_if_sized`].
+    pub unsafe trait SizedTypeExt: TypeExt {
+        fn value_size(&self) -> usize;
+    }
+
+    /// A type that implements this trait is guaranteed to be cloneable.
+    /// See [`TypeExt::is_cloneable`].
+    pub unsafe trait CloneableTypeExt: TypeExt {
+        fn clone(&self, bytes: Bytes<'_>) -> AllocationInner {
+            self.clone_if_cloneable(bytes).unwrap_or_else(|| {
+                panic!("The type `{}` is guaranteed to be cloneable because it implements `CloneableTypeExt`, but its `TypeExt::clone_if_cloneable` returns `None`. This is an implementation error.", std::any::type_name::<Self>());
+            })
+        }
+    }
+
+    /// A type that implements this trait is guaranteed to have a safe binary representation.
+    /// See [`TypeExt::has_safe_binary_representation`].
+    pub unsafe trait SafeBinaryRepresentationTypeExt: TypeExt + SizedTypeExt {}
+}
+
+pub use ty_traits::{CloneableTypeExt, SafeBinaryRepresentationTypeExt, SizedTypeExt};
+
+/// Implementors of this trait represent concrete channel types which can be referred to.
 pub trait TypeTrait: TypeExt + DowncastFromTypeEnum {}
 
 pub trait DowncastFromTypeEnum {
+    fn downcast_from(from: TypeEnum) -> Option<Self>
+    where Self: Sized;
     fn downcast_from_ref(from: &TypeEnum) -> Option<&Self>;
     fn downcast_from_mut(from: &mut TypeEnum) -> Option<&mut Self>;
 }
@@ -341,32 +458,22 @@ where Self: TypeTrait
 
     fn create_value_from_descriptor(descriptor: Self::Descriptor) -> Self::DynAlloc;
     fn is_abi_compatible(&self, other: &Self) -> bool;
-    unsafe fn children<'a>(&'a self, data: &Bytes<'a>) -> Vec<TypedBytes<'a>>;
+    unsafe fn children<'a>(&'a self, data: Bytes<'a>) -> Vec<TypedBytes<'a>>;
 }
 
 impl<T> TypeTrait for T where T: DynTypeTrait {}
 
-impl<T> TypeExt for T
+unsafe impl<T> TypeExt for T
 where T: DynTypeTrait
 {
-    fn value_size_if_sized(&self) -> Option<usize> {
-        None
-    }
-
     fn is_abi_compatible(&self, other: &Self) -> bool {
         <T as DynTypeTrait>::is_abi_compatible(self, other)
     }
 
-    fn has_safe_binary_representation(&self) -> bool {
-        false
-    }
-
-    unsafe fn children<'a>(&'a self, data: &Bytes<'a>) -> Vec<TypedBytes<'a>> {
+    unsafe fn children<'a>(&'a self, data: Bytes<'a>) -> Vec<TypedBytes<'a>> {
         <T as DynTypeTrait>::children(self, data)
     }
 }
-
-pub trait SizedType: TypeTrait {}
 
 macro_rules! define_type_enum {
     (@void $($tt:tt)*) => {};
@@ -428,7 +535,7 @@ macro_rules! define_type_enum {
                 }
             }
 
-            unsafe fn children_impl<'a>(&'a self, data: &Bytes<'a>) -> Vec<TypedBytes<'a>> {
+            unsafe fn children_impl<'a>(&'a self, data: Bytes<'a>) -> Vec<TypedBytes<'a>> {
                 use TypeEnum::*;
                 match self {
                     $(
@@ -437,11 +544,11 @@ macro_rules! define_type_enum {
                 }
             }
 
-            fn is_pointer_impl(&self) -> bool {
+            fn is_cloneable_impl(&self) -> bool {
                 use TypeEnum::*;
                 match self {
                     $(
-                        $variant(inner) => TypeExt::is_pointer(inner),
+                        $variant(inner) => TypeExt::is_cloneable(inner),
                     )*
                 }
             }
@@ -453,6 +560,7 @@ define_type_enum![
     Shared(Shared) <- Shared::new(PrimitiveType::U8),
     Unique(Unique) <- Unique::new(PrimitiveType::U8),
     Primitive(PrimitiveType) <- PrimitiveType::U8,
+    Option(OptionType) <- OptionType::new(PrimitiveType::U8),
     // Tuple(Vec<Self>),
     Array(ArrayType) <- ArrayType::single(PrimitiveType::U8),
     List(ListType) <- ListType::new(PrimitiveType::U8),
@@ -460,6 +568,10 @@ define_type_enum![
 ];
 
 impl TypeEnum {
+    pub fn downcast<T: DowncastFromTypeEnum + Sized>(self) -> Option<T> {
+        T::downcast_from(self)
+    }
+
     pub fn downcast_ref<T: DowncastFromTypeEnum>(&self) -> Option<&T> {
         T::downcast_from_ref(self)
     }
@@ -469,11 +581,7 @@ impl TypeEnum {
     }
 }
 
-impl TypeExt for TypeEnum {
-    fn value_size_if_sized(&self) -> Option<usize> {
-        self.value_size_if_sized_impl()
-    }
-
+unsafe impl TypeExt for TypeEnum {
     fn is_abi_compatible(&self, other: &Self) -> bool {
         use TypeEnum::*;
         match (self, other) {
@@ -512,16 +620,20 @@ impl TypeExt for TypeEnum {
         }
     }
 
-    fn has_safe_binary_representation(&self) -> bool {
-        self.has_safe_binary_representation_impl()
-    }
-
-    unsafe fn children<'a>(&'a self, data: &Bytes<'a>) -> Vec<TypedBytes<'a>> {
+    unsafe fn children<'a>(&'a self, data: Bytes<'a>) -> Vec<TypedBytes<'a>> {
         self.children_impl(data)
     }
 
-    fn is_pointer(&self) -> bool {
-        self.is_pointer_impl()
+    fn value_size_if_sized(&self) -> Option<usize> {
+        self.value_size_if_sized_impl()
+    }
+
+    fn is_cloneable(&self) -> bool {
+        self.is_cloneable_impl()
+    }
+
+    fn has_safe_binary_representation(&self) -> bool {
+        self.has_safe_binary_representation_impl()
     }
 }
 
@@ -535,7 +647,7 @@ where
     T: TypeTrait + SizedTypeExt,
 {
     fn bytes_mut(&mut self) -> Option<&mut [u8]> {
-        let typed_bytes = unsafe { self.pointee_typed_bytes_mut() };
+        let typed_bytes = unsafe { self.typed_bytes_mut() };
 
         if typed_bytes.borrow().ty().has_safe_binary_representation() {
             Some(typed_bytes.bytes_mut().bytes_mut().unwrap())
@@ -556,12 +668,12 @@ where
     T: TypeTrait + SizedTypeExt,
 {
     fn value_size(&self) -> usize {
-        let typed_bytes = unsafe { self.pointee_typed_bytes() };
+        let typed_bytes = unsafe { self.typed_bytes() };
         typed_bytes.ty().value_size_if_sized().unwrap()
     }
 
     fn bytes(&self) -> Option<&[u8]> {
-        let typed_bytes = unsafe { self.pointee_typed_bytes() };
+        let typed_bytes = unsafe { self.typed_bytes() };
 
         if typed_bytes.borrow().ty().has_safe_binary_representation() {
             Some(typed_bytes.bytes().bytes().unwrap())
@@ -579,7 +691,7 @@ impl<'a, R> SizeRefMutExt<'a> for R
 where R: RefMutAny<'a>
 {
     fn bytes_mut_if_sized(&mut self) -> Option<&mut [u8]> {
-        let typed_bytes = unsafe { self.pointee_typed_bytes_mut() };
+        let typed_bytes = unsafe { self.typed_bytes_mut() };
         let ty = typed_bytes.borrow().ty();
 
         if ty.value_size_if_sized().is_some() && ty.has_safe_binary_representation() {
@@ -599,12 +711,12 @@ impl<'a, R> SizeRefExt<'a> for R
 where R: RefAny<'a>
 {
     fn value_size_if_sized(&self) -> Option<usize> {
-        let typed_bytes = unsafe { self.pointee_typed_bytes() };
+        let typed_bytes = unsafe { self.typed_bytes() };
         typed_bytes.ty().value_size_if_sized()
     }
 
     fn bytes_if_sized(&self) -> Option<&[u8]> {
-        let typed_bytes = unsafe { self.pointee_typed_bytes() };
+        let typed_bytes = unsafe { self.typed_bytes() };
         let ty = typed_bytes.borrow().ty();
 
         if ty.value_size_if_sized().is_some() && ty.has_safe_binary_representation() {
@@ -625,8 +737,8 @@ where R: RefMutAny<'a>
 {
     fn swap<'b>(&mut self, from: &mut impl RefMutAny<'b>) -> Result<(), ()> {
         {
-            let typed_bytes_a = unsafe { self.pointing_typed_bytes_mut() };
-            let typed_bytes_b = unsafe { from.pointing_typed_bytes_mut() };
+            let typed_bytes_a = unsafe { self.typed_bytes_mut() };
+            let typed_bytes_b = unsafe { from.typed_bytes_mut() };
 
             // Swapped types must be compatible
             if !typed_bytes_a.borrow().ty().as_ref().is_abi_compatible(typed_bytes_b.borrow().ty().as_ref()) {
@@ -648,8 +760,8 @@ where R: RefMutAny<'a>
             from.refcount_decrement_recursive();
         }
 
-        let mut typed_bytes_a = unsafe { self.pointing_typed_bytes_mut() };
-        let mut typed_bytes_b = unsafe { from.pointing_typed_bytes_mut() };
+        let mut typed_bytes_a = unsafe { self.typed_bytes_mut() };
+        let mut typed_bytes_b = unsafe { from.typed_bytes_mut() };
 
         // Swap values
         if let (Some(a), Some(b)) = (

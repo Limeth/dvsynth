@@ -36,17 +36,13 @@ impl Display for ArrayType {
     }
 }
 
-impl SizedTypeExt for ArrayType {
+unsafe impl SizedTypeExt for ArrayType {
     fn value_size(&self) -> usize {
         self.len * self.item_type.value_size_if_sized().unwrap()
     }
 }
 
-impl TypeExt for ArrayType {
-    fn value_size_if_sized(&self) -> Option<usize> {
-        Some(self.value_size())
-    }
-
+unsafe impl TypeExt for ArrayType {
     fn is_abi_compatible(&self, other: &Self) -> bool {
         if self.value_size() != other.value_size() {
             return false;
@@ -73,11 +69,7 @@ impl TypeExt for ArrayType {
         }
     }
 
-    fn has_safe_binary_representation(&self) -> bool {
-        self.item_type.has_safe_binary_representation()
-    }
-
-    unsafe fn children<'a>(&'a self, data: &Bytes<'a>) -> Vec<TypedBytes<'a>> {
+    unsafe fn children<'a>(&'a self, data: Bytes<'a>) -> Vec<TypedBytes<'a>> {
         let value_size = self.item_type.value_size_if_sized().unwrap();
         let bytes = data.bytes().unwrap();
 
@@ -85,6 +77,18 @@ impl TypeExt for ArrayType {
             .chunks_exact(value_size)
             .map(|chunk| TypedBytes::from(chunk, Cow::Borrowed(self.item_type.as_ref())))
             .collect()
+    }
+
+    fn value_size_if_sized(&self) -> Option<usize> {
+        Some(self.value_size())
+    }
+
+    fn has_safe_binary_representation(&self) -> bool {
+        self.item_type.has_safe_binary_representation()
+    }
+
+    fn is_cloneable(&self) -> bool {
+        self.item_type.is_cloneable()
     }
 }
 
@@ -94,20 +98,4 @@ impl From<ArrayType> for TypeEnum {
     }
 }
 
-impl DowncastFromTypeEnum for ArrayType {
-    fn downcast_from_ref(from: &TypeEnum) -> Option<&Self> {
-        if let TypeEnum::Array(inner) = from {
-            Some(inner)
-        } else {
-            None
-        }
-    }
-
-    fn downcast_from_mut(from: &mut TypeEnum) -> Option<&mut Self> {
-        if let TypeEnum::Array(inner) = from {
-            Some(inner)
-        } else {
-            None
-        }
-    }
-}
+impl_downcast_from_type_enum!(Array(ArrayType));

@@ -51,25 +51,9 @@ impl DynTypeTrait for TextureType {
         todo!()
     }
 
-    unsafe fn children<'a>(&'a self, _data: &Bytes<'a>) -> Vec<TypedBytes<'a>> {
+    unsafe fn children<'a>(&'a self, _data: Bytes<'a>) -> Vec<TypedBytes<'a>> {
         todo!()
     }
 }
 
-impl DowncastFromTypeEnum for TextureType {
-    fn downcast_from_ref(from: &TypeEnum) -> Option<&Self> {
-        if let TypeEnum::Texture(inner) = from {
-            Some(inner)
-        } else {
-            None
-        }
-    }
-
-    fn downcast_from_mut(from: &mut TypeEnum) -> Option<&mut Self> {
-        if let TypeEnum::Texture(inner) = from {
-            Some(inner)
-        } else {
-            None
-        }
-    }
-}
+impl_downcast_from_type_enum!(Texture(TextureType));

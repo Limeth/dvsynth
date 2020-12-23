@@ -475,16 +475,14 @@ impl GraphExecutor {
     pub fn new(
         application_context: ApplicationContext,
         active_schedule: Arc<ArcSwapOption<Schedule>>,
-    ) -> Self
-    {
+    ) -> Self {
         Self { active_schedule, application_context }
     }
 
     pub fn spawn(
         application_context: ApplicationContext,
         active_schedule: Arc<ArcSwapOption<Schedule>>,
-    ) -> std::thread::JoinHandle<()>
-    {
+    ) -> std::thread::JoinHandle<()> {
         thread::spawn(move || Self::new(application_context, active_schedule).run())
     }
 
@@ -532,8 +530,7 @@ impl NodeData {
         title: impl ToString,
         position: impl Into<Vec2<f32>>,
         behaviour: Box<dyn NodeBehaviourContainer>,
-    ) -> Self
-    {
+    ) -> Self {
         let mut result = Self {
             title: title.to_string(),
             element_state: Default::default(),
@@ -566,8 +563,7 @@ impl NodeData {
         &mut self,
         index: NodeIndex,
         theme: &dyn Theme,
-    ) -> FloatingPane<'_, Message, iced_wgpu::Renderer, FloatingPanesBehaviour<Message>>
-    {
+    ) -> FloatingPane<'_, Message, iced_wgpu::Renderer, FloatingPanesBehaviour<Message>> {
         let mut builder = NodeElement::builder(index, &mut self.element_state).node_behaviour_element(
             self.behaviour.view(theme).map(Element::from).map(move |element| {
                 element.map(move |message| Message::NodeMessage {

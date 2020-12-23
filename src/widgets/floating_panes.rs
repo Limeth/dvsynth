@@ -79,8 +79,7 @@ impl<'a, M: 'a, B: 'a + Backend + iced_graphics::backend::Text>
         layout: FloatingPanesLayout<'_>,
         cursor_position: Point,
         viewport: &Rectangle,
-    ) -> ContentDrawResult<iced_graphics::Renderer<B>>
-    {
+    ) -> ContentDrawResult<iced_graphics::Renderer<B>> {
         let mut mouse_interaction = mouse::Interaction::default();
 
         ContentDrawResult {
@@ -123,8 +122,7 @@ impl<'a, M: 'a, B: 'a + Backend + iced_graphics::backend::Text>
         _messages: &mut Vec<M>,
         _renderer: &iced_graphics::Renderer<B>,
         _clipboard: Option<&dyn Clipboard>,
-    ) -> Status
-    {
+    ) -> Status {
         Status::Ignored
     }
 
@@ -181,8 +179,7 @@ impl<'a, M: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a, M, R>
         state: &'a mut FloatingPaneState,
         behaviour_state: &'a mut C::FloatingPaneBehaviourState,
         behaviour_data: C::FloatingPaneBehaviourData,
-    ) -> Self
-    {
+    ) -> Self {
         Self {
             content: content.into(),
             state,
@@ -338,8 +335,7 @@ impl<'a, M: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a, M, R>
         state: &'a mut FloatingPaneState,
         behaviour_state: &'a mut C::FloatingPaneBehaviourState,
         behaviour_data: C::FloatingPaneBehaviourData,
-    ) -> FloatingPaneBuilder<'a, M, R, C>
-    {
+    ) -> FloatingPaneBuilder<'a, M, R, C> {
         FloatingPaneBuilder::new(content, state, behaviour_state, behaviour_data)
     }
 
@@ -347,8 +343,7 @@ impl<'a, M: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a, M, R>
         &self,
         pane_layout: FloatingPaneLayout,
         cursor_position: Vec2<f32>,
-    ) -> PaneResizeDirections
-    {
+    ) -> PaneResizeDirections {
         const RESIZE_BOUND_OUTER_SIZE: f32 = 8.0;
         const RESIZE_BOUND_OVERLAP_SIZE: f32 = 12.0;
 
@@ -573,8 +568,7 @@ impl<'a, M: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a, M, R>
         behaviour_state: &'a mut C::FloatingPanesBehaviourState,
         behaviour: C,
         on_layout_change: Box<dyn Fn() -> M>,
-    ) -> Self
-    {
+    ) -> Self {
         Self {
             state,
             behaviour_state,
@@ -702,8 +696,7 @@ impl<'a, M: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a, M, R>
         layout: Layout<'_>,
         cursor_position: Point,
         viewport: &Rectangle,
-    ) -> <R as iced_native::Renderer>::Output
-    {
+    ) -> <R as iced_native::Renderer>::Output {
         <R as WidgetRenderer>::draw(renderer, self, defaults, layout.into(), cursor_position, viewport)
     }
 
@@ -732,8 +725,7 @@ impl<'a, M: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a, M, R>
         messages: &mut Vec<M>,
         renderer: &R,
         clipboard: Option<&dyn Clipboard>,
-    ) -> Status
-    {
+    ) -> Status {
         let layout: FloatingPanesLayout = layout.into();
 
         if C::on_event(self, event.clone(), layout, cursor_position, messages, renderer, clipboard)
@@ -944,8 +936,7 @@ where B: Backend + iced_graphics::backend::Text
         layout: FloatingPanesLayout<'_>,
         cursor_position: Point,
         viewport: &Rectangle,
-    ) -> Self::Output
-    {
+    ) -> Self::Output {
         let mut mouse_interaction = element
             .state
             .gesture

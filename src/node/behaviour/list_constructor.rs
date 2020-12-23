@@ -138,9 +138,10 @@ impl NodeBehaviour for ListConstructorNodeBehaviour {
                 Box::new(move |context: ExecutionContext<'_, 'state>, _persistent: &mut ()| {
                     // Executed once per graph execution.
                     {
-                        let mut list: OwnedRefMut<ListType> = context
+                        let mut list: OwnedRefMut<Unique> = context
                             .allocator_handle
                             .allocate_object::<ListType>(ListDescriptor::new_if_sized(ty).unwrap());
+                        let mut list = list.deref_mut().downcast_mut::<ListType>().unwrap();
                         list.push_item_bytes_with(|bytes| {
                             bytes.iter_mut().enumerate().for_each(|(i, byte)| *byte = i as u8);
                         })
@@ -154,15 +155,16 @@ impl NodeBehaviour for ListConstructorNodeBehaviour {
                         dbg!(list.len());
                     }
                     {
-                        let mut list: OwnedRefMut<ListType> =
+                        let mut list: OwnedRefMut<Unique> =
                             context.allocator_handle.allocate_object::<ListType>(ListDescriptor::new(
                                 Unique::new(ListType::new(PrimitiveType::U8)),
                             ));
-                        let mut inner_list_1: OwnedRefMut<ListType> = context
+                        let mut list = list.deref_mut().downcast_mut::<ListType>().unwrap();
+                        let mut inner_list_1: OwnedRefMut<Unique> = context
                             .allocator_handle
                             .allocate_object::<ListType>(ListDescriptor::new(PrimitiveType::U8));
                         list.push(inner_list_1).unwrap();
-                        let mut inner_list_2: OwnedRefMut<ListType> = context
+                        let mut inner_list_2: OwnedRefMut<Unique> = context
                             .allocator_handle
                             .allocate_object::<ListType>(ListDescriptor::new(PrimitiveType::U8));
                         list.push(inner_list_2).unwrap();

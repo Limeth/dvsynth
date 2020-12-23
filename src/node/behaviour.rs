@@ -16,7 +16,7 @@ pub use debug::*;
 pub use list_constructor::*;
 pub use window::*;
 
-use super::{OwnedRefMut, SizedTypeExt, TypeEnum, TypeTrait};
+use super::{OwnedRefMut, SizedTypeExt, TypeEnum, TypeTrait, Unique};
 
 pub struct Input {
     pub data: Box<[u8]>,
@@ -128,9 +128,10 @@ pub trait TransientTrait: Debug + Send + Sync {}
 impl<T> TransientTrait for T where T: Debug + Send + Sync {}
 
 /// Constructs an executor. Invoked every time the execution graph is recreated.
-pub trait ExecutorClosureConstructor<'state, T, Transient: TransientTrait + 'state = ()> = Fn(&T, &ApplicationContext, &mut Transient) -> Box<dyn ExecutorClosure<'state, Transient> + 'state>
-    + Send
-    + Sync;
+pub trait ExecutorClosureConstructor<'state, T, Transient: TransientTrait + 'state = ()> =
+    Fn(&T, &ApplicationContext, &mut Transient) -> Box<dyn ExecutorClosure<'state, Transient> + 'state>
+        + Send
+        + Sync;
 
 /// Invoked once per node per graph execution.
 pub trait ExecutorClosure<'state, Transient: TransientTrait + 'state = ()> =
@@ -239,13 +240,13 @@ impl !Send for AllocatorHandle<'_, '_> {}
 impl !Sync for AllocatorHandle<'_, '_> {}
 
 impl<'invocation, 'state: 'invocation> AllocatorHandle<'invocation, 'state> {
-    pub fn allocate_object<T: DynTypeTrait>(self, descriptor: T::Descriptor) -> OwnedRefMut<'state, T> {
-        OwnedRefMut::allocate_object(descriptor, self)
+    pub fn allocate_object<T: DynTypeTrait>(self, descriptor: T::Descriptor) -> OwnedRefMut<'state, Unique> {
+        OwnedRefMut::allocate_object::<T>(descriptor, self)
     }
 
-    pub fn allocate_bytes<T: TypeTrait + SizedTypeExt>(self, ty: T) -> OwnedRefMut<'state, T> {
-        OwnedRefMut::allocate_bytes(ty, self)
-    }
+    // pub fn allocate_bytes<T: TypeTrait + SizedTypeExt>(self, ty: T) -> OwnedRefMut<'state, T> {
+    //     OwnedRefMut::allocate_bytes(ty, self)
+    // }
 }
 
 pub struct ExecutionContext<'invocation, 'state: 'invocation> {

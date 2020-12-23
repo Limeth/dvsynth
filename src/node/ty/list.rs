@@ -74,7 +74,7 @@ impl DynTypeTrait for ListType {
         self.child_ty.is_abi_compatible(&other.child_ty)
     }
 
-    unsafe fn children<'a>(&'a self, data: &Bytes<'a>) -> Vec<TypedBytes<'a>> {
+    unsafe fn children<'a>(&'a self, data: Bytes<'a>) -> Vec<TypedBytes<'a>> {
         let value_size = self.child_ty.value_size_if_sized().unwrap();
         let list = data.downcast_ref_unwrap::<ListAllocation>();
 
@@ -94,7 +94,7 @@ impl<'a, T> ListRefExt<'a> for T
 where T: Ref<'a, ListType>
 {
     fn len(&self) -> usize {
-        let typed_bytes = unsafe { self.pointee_typed_bytes() };
+        let typed_bytes = unsafe { self.typed_bytes() };
         let ty = typed_bytes.borrow().ty();
         let ty = ty.downcast_ref::<ListType>().unwrap();
         let item_size = ty.child_ty.value_size_if_sized().unwrap();
@@ -103,7 +103,7 @@ where T: Ref<'a, ListType>
     }
 
     fn get(&self, index: usize) -> Result<BorrowedRefAny<'_>, ()> {
-        let typed_bytes = unsafe { self.pointee_typed_bytes() };
+        let typed_bytes = unsafe { self.typed_bytes() };
         let (bytes, ty) = typed_bytes.into();
         let child_ty = ty.map(|ty| {
             let ty = ty.downcast_ref::<ListType>().unwrap();
@@ -138,7 +138,7 @@ impl<'a, T> ListRefMutExt<'a> for T
 where T: RefMut<'a, ListType>
 {
     fn get_mut(&mut self, index: usize) -> Result<BorrowedRefMutAny<'_>, ()> {
-        let (rc, typed_bytes) = unsafe { self.rc_and_pointee_typed_bytes_mut() };
+        let (rc, typed_bytes) = unsafe { self.rc_and_typed_bytes_mut() };
         let (bytes, ty) = typed_bytes.into();
         let child_ty = ty.map(|ty| {
             let ty = ty.downcast_ref::<ListType>().unwrap();
@@ -156,7 +156,7 @@ where T: RefMut<'a, ListType>
     }
 
     fn remove_range(&mut self, range: Range<usize>) -> Result<(), ()> {
-        let typed_bytes = unsafe { self.pointee_typed_bytes_mut() };
+        let typed_bytes = unsafe { self.typed_bytes_mut() };
         let ty = typed_bytes.borrow().ty();
         let ty = ty.downcast_ref::<ListType>().unwrap();
         let item_size = ty.child_ty.value_size_if_sized().unwrap();
@@ -176,8 +176,8 @@ where T: RefMut<'a, ListType>
     }
 
     fn push<'b>(&mut self, mut item: impl RefMutAny<'b> + 'b) -> Result<(), ()> {
-        let mut typed_bytes = unsafe { self.pointee_typed_bytes_mut() };
-        let item_typed_bytes = unsafe { item.pointing_typed_bytes_mut() };
+        let mut typed_bytes = unsafe { self.typed_bytes_mut() };
+        let item_typed_bytes = unsafe { item.typed_bytes_mut() };
         let ty = typed_bytes.borrow().ty();
         let ty = ty.downcast_ref::<ListType>().unwrap();
 
@@ -227,7 +227,7 @@ where T: RefMut<'a, ListType>
     // }
 
     fn push_item_bytes_with(&mut self, write_bytes: impl FnOnce(&mut [u8])) -> Result<(), ()> {
-        let typed_bytes = unsafe { self.pointee_typed_bytes_mut() };
+        let typed_bytes = unsafe { self.typed_bytes_mut() };
         let ty = typed_bytes.borrow().ty();
         let ty = ty.downcast_ref::<ListType>().unwrap();
 
@@ -242,8 +242,8 @@ where T: RefMut<'a, ListType>
     }
 
     fn insert<'b>(&mut self, index: usize, mut item: impl RefMutAny<'b> + 'b) -> Result<(), ()> {
-        let typed_bytes = unsafe { self.pointee_typed_bytes_mut() };
-        let item_typed_bytes = unsafe { item.pointing_typed_bytes_mut() };
+        let typed_bytes = unsafe { self.typed_bytes_mut() };
+        let item_typed_bytes = unsafe { item.typed_bytes_mut() };
         let ty = typed_bytes.borrow().ty();
         let ty = ty.downcast_ref::<ListType>().unwrap();
 
@@ -279,20 +279,4 @@ impl From<ListType> for TypeEnum {
     }
 }
 
-impl DowncastFromTypeEnum for ListType {
-    fn downcast_from_ref(from: &TypeEnum) -> Option<&Self> {
-        if let TypeEnum::List(inner) = from {
-            Some(inner)
-        } else {
-            None
-        }
-    }
-
-    fn downcast_from_mut(from: &mut TypeEnum) -> Option<&mut Self> {
-        if let TypeEnum::List(inner) = from {
-            Some(inner)
-        } else {
-            None
-        }
-    }
-}
+impl_downcast_from_type_enum!(List(ListType));

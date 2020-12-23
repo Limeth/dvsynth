@@ -67,8 +67,7 @@ impl<'a, M: 'a + Clone, R: 'a + WidgetRenderer> NodeElementBuilder<'a, M, R> {
     pub fn node_behaviour_element(
         mut self,
         node_behaviour_element: impl Into<Option<Element<'a, M, R>>>,
-    ) -> Self
-    {
+    ) -> Self {
         self.node_behaviour_element = node_behaviour_element.into();
         self
     }
@@ -179,8 +178,7 @@ impl<'a, M: 'a + Clone, R: 'a + WidgetRenderer> NodeElement<'a, M, R> {
         channel_layout: ChannelLayout,
         channel_direction: ChannelDirection,
         cursor_position: Vec2<f32>,
-    ) -> bool
-    {
+    ) -> bool {
         const GRAB_RADIUS: f32 = 6.0;
 
         let mut bounds = channel_layout.bounds();
@@ -212,8 +210,7 @@ impl<'a, M: 'a + Clone, R: 'a + WidgetRenderer> NodeElement<'a, M, R> {
     pub fn get_layout_index_from_channel(
         panes: &FloatingPanes<'a, M, R, FloatingPanesBehaviour<M>>,
         channel: ChannelIdentifier,
-    ) -> Option<usize>
-    {
+    ) -> Option<usize> {
         panes.get_layout_index_from_pane_index(&channel.node_index)
     }
 }
@@ -243,8 +240,7 @@ impl<'a, M: 'a + Clone, R: 'a + WidgetRenderer> Widget<M, R> for NodeElement<'a,
         layout: Layout<'_>,
         cursor_position: Point,
         viewport: &Rectangle,
-    ) -> <R as iced_native::Renderer>::Output
-    {
+    ) -> <R as iced_native::Renderer>::Output {
         self.element_tree.draw(renderer, defaults, layout, cursor_position, viewport)
     }
 
@@ -263,8 +259,7 @@ impl<'a, M: 'a + Clone, R: 'a + WidgetRenderer> Widget<M, R> for NodeElement<'a,
         messages: &mut Vec<M>,
         renderer: &R,
         clipboard: Option<&dyn Clipboard>,
-    ) -> Status
-    {
+    ) -> Status {
         self.element_tree.on_event(event, layout, cursor_position, messages, renderer, clipboard)
     }
 
@@ -291,8 +286,7 @@ impl<M: Clone> FloatingPanesBehaviour<M> {
         panes: &FloatingPanes<'a, M, R, Self>,
         from: ChannelIdentifier,
         to: ChannelIdentifier,
-    ) -> bool
-    {
+    ) -> bool {
         // TODO: Add borrow checking and type checking
         from.node_index != to.node_index && from.channel_direction != to.channel_direction && {
             let pane_from = panes.children.get(&from.node_index).unwrap();
@@ -330,8 +324,7 @@ impl<'a, M: Clone + 'a, R: 'a + WidgetRenderer> floating_panes::FloatingPanesBeh
         layout: FloatingPanesLayout<'_>,
         cursor_position: Point,
         viewport: &Rectangle,
-    ) -> ContentDrawResult<R>
-    {
+    ) -> ContentDrawResult<R> {
         <R as WidgetRenderer>::draw_panes(renderer, panes, defaults, layout, cursor_position, viewport)
     }
 
@@ -348,8 +341,7 @@ impl<'a, M: Clone + 'a, R: 'a + WidgetRenderer> floating_panes::FloatingPanesBeh
         messages: &mut Vec<M>,
         renderer: &R,
         clipboard: Option<&dyn Clipboard>,
-    ) -> Status
-    {
+    ) -> Status {
         match event {
             Event::Mouse(MouseEvent::CursorMoved { x, y }) => {
                 let cursor_position = Vec2::new(x, y);
@@ -596,8 +588,7 @@ where B: Backend + iced_graphics::backend::Text
         layout: FloatingPanesLayout<'_>,
         cursor_position: Point,
         viewport: &Rectangle,
-    ) -> ContentDrawResult<Self>
-    {
+    ) -> ContentDrawResult<Self> {
         let mut mouse_interaction = mouse::Interaction::default();
         let mut primitives = Vec::new();
 
@@ -800,8 +791,7 @@ impl ConnectionCurve {
     fn from_channel_layouts<M: Clone, R: WidgetRenderer>(
         output: ChannelLayout,
         input: ChannelLayout,
-    ) -> Self
-    {
+    ) -> Self {
         let from = NodeElement::<M, R>::get_connection_point(output, ChannelDirection::Out);
         let to = NodeElement::<M, R>::get_connection_point(input, ChannelDirection::In);
         Self { from, to }

@@ -1,4 +1,7 @@
-use super::{Bytes, DowncastFromTypeEnum, SizedTypeExt, TypeEnum, TypeExt, TypedBytes};
+use super::{
+    Bytes, CloneableTypeExt, DowncastFromTypeEnum, SafeBinaryRepresentationTypeExt, SizedTypeExt, TypeEnum,
+    TypeExt, TypedBytes,
+};
 use byteorder::{ByteOrder, ReadBytesExt, WriteBytesExt};
 use std::fmt::Display;
 use std::io::{Cursor, Read, Write};
@@ -216,7 +219,7 @@ impl Display for PrimitiveType {
     }
 }
 
-impl SizedTypeExt for PrimitiveType {
+unsafe impl SizedTypeExt for PrimitiveType {
     fn value_size(&self) -> usize {
         use PrimitiveType::*;
         match self {
@@ -229,21 +232,29 @@ impl SizedTypeExt for PrimitiveType {
     }
 }
 
-impl TypeExt for PrimitiveType {
-    fn value_size_if_sized(&self) -> Option<usize> {
-        Some(self.value_size())
-    }
+unsafe impl SafeBinaryRepresentationTypeExt for PrimitiveType {}
 
+unsafe impl CloneableTypeExt for PrimitiveType {}
+
+unsafe impl TypeExt for PrimitiveType {
     fn is_abi_compatible(&self, other: &Self) -> bool {
         self.kind().is_abi_compatible(&other.kind()) && self.value_size() == other.value_size()
+    }
+
+    unsafe fn children<'a>(&'a self, _data: Bytes<'a>) -> Vec<TypedBytes<'a>> {
+        vec![]
+    }
+
+    fn value_size_if_sized(&self) -> Option<usize> {
+        Some(self.value_size())
     }
 
     fn has_safe_binary_representation(&self) -> bool {
         true
     }
 
-    unsafe fn children<'a>(&'a self, _data: &Bytes<'a>) -> Vec<TypedBytes<'a>> {
-        vec![]
+    fn is_cloneable(&self) -> bool {
+        true
     }
 }
 
@@ -259,20 +270,4 @@ impl From<PrimitiveType> for TypeEnum {
     }
 }
 
-impl DowncastFromTypeEnum for PrimitiveType {
-    fn downcast_from_ref(from: &TypeEnum) -> Option<&Self> {
-        if let TypeEnum::Primitive(inner) = from {
-            Some(inner)
-        } else {
-            None
-        }
-    }
-
-    fn downcast_from_mut(from: &mut TypeEnum) -> Option<&mut Self> {
-        if let TypeEnum::Primitive(inner) = from {
-            Some(inner)
-        } else {
-            None
-        }
-    }
-}
+impl_downcast_from_type_enum!(Primitive(PrimitiveType));

@@ -13,8 +13,8 @@ use lazy_static::lazy_static;
 
 use crate::node::behaviour::AllocatorHandle;
 use crate::node::{
-    AllocationPointer, Bytes, BytesMut, DynTypeDescriptor, SizedTypeExt, TypeEnum, TypeTrait, TypedBytes,
-    TypedBytesMut,
+    AllocationPointer, Bytes, BytesMut, DynTypeDescriptor, SizedTypeExt, TypeEnum, TypeExt, TypeTrait,
+    TypedBytes, TypedBytesMut,
 };
 
 use super::{DynTypeTrait, NodeIndex, Schedule};
@@ -95,11 +95,12 @@ pub trait AllocatedType = Any + Send + Sync + 'static;
 // impl<T> AllocatedType for T where T: std::fmt::Debug + Any + Clone + Copy + Send + Sync + 'static {}
 
 #[derive(Debug)]
-pub(crate) enum AllocationType {
+pub enum AllocationType {
     Bytes(Box<[u8]>),
     Object { ty_name: &'static str, data: Box<dyn AllocatedType> },
 }
 
+/// FIXME: An owned equivalent to `Bytes` and `BytesMut`. Come up with better naming.
 #[allow(dead_code)]
 impl AllocationType {
     pub fn bytes_mut(&mut self) -> Option<&mut [u8]> {
@@ -145,8 +146,9 @@ impl AllocationType {
     }
 }
 
+/// FIXME: An owned equivalent to `TypedBytes` and `TypedBytesMut`. Come up with better naming.
 #[derive(Debug)]
-pub(crate) struct AllocationInner {
+pub struct AllocationInner {
     ty: TypeEnum,
     inner: AllocationType,
 }
@@ -196,6 +198,28 @@ impl AllocationInner {
 
     pub fn inner(&self) -> &AllocationType {
         &self.inner
+    }
+
+    pub fn clone_if_cloneable(&self) -> Option<Self> {
+        if self.ty.is_cloneable() {
+            match &self.inner {
+                AllocationType::Bytes(bytes) => {
+                    Some(Self { ty: self.ty.clone(), inner: AllocationType::Bytes(bytes.clone()) })
+                }
+                AllocationType::Object { .. } => {
+                    // TODO: Make it possible to clone opaque objects.
+                    todo!("Cloning of opaque objects is not yet implemented.");
+                }
+            }
+        } else {
+            None
+        }
+    }
+}
+
+impl From<AllocationInner> for (AllocationType, TypeEnum) {
+    fn from(inner: AllocationInner) -> Self {
+        (inner.inner, inner.ty)
     }
 }
 
@@ -331,8 +355,7 @@ impl Allocator {
         &self,
         descriptor: T::Descriptor,
         handle: AllocatorHandle<'_, '_>,
-    ) -> AllocationPointer
-    {
+    ) -> AllocationPointer {
         let ty = descriptor.get_type();
         let value = T::create_value_from_descriptor(descriptor);
         let inner = AllocationInner::new_object(value, ty);
@@ -343,8 +366,7 @@ impl Allocator {
         &self,
         ty: T,
         handle: AllocatorHandle<'_, '_>,
-    ) -> AllocationPointer
-    {
+    ) -> AllocationPointer {
         let inner = AllocationInner::new_bytes(ty);
         self.allocate_value(inner, handle)
     }
@@ -371,8 +393,7 @@ impl Allocator {
         &self,
         node: NodeIndex,
         output_delta: (),
-    ) -> Result<(), ()>
-    {
+    ) -> Result<(), ()> {
         let task_ref_counters = self.task_ref_counters.counters.write().map_err(|_| ())?;
 
         {
@@ -398,8 +419,7 @@ impl Allocator {
         &self,
         allocation_ptr: AllocationPointer,
         node: NodeIndex,
-    ) -> Result<(), ()>
-    {
+    ) -> Result<(), ()> {
         self.refcount_owned_add(allocation_ptr, node, 1)
     }
 
@@ -408,8 +428,7 @@ impl Allocator {
         &self,
         allocation_ptr: AllocationPointer,
         node: NodeIndex,
-    ) -> Result<(), ()>
-    {
+    ) -> Result<(), ()> {
         self.refcount_owned_add(allocation_ptr, node, -1)
     }
 
@@ -419,8 +438,7 @@ impl Allocator {
         allocation_ptr: AllocationPointer,
         node: NodeIndex,
         delta: isize,
-    ) -> Result<(), ()>
-    {
+    ) -> Result<(), ()> {
         let task_ref_counters = self.task_ref_counters.counters.read().map_err(|_| ())?;
         let mut task_ref_counter = task_ref_counters[&node].lock().map_err(|_| ())?;
 
@@ -448,8 +466,7 @@ impl Allocator {
         &self,
         allocation_ptr: AllocationPointer,
         delta: usize,
-    ) -> Result<(), ()>
-    {
+    ) -> Result<(), ()> {
         if let Ok(delta) = delta.try_into() {
             self.refcount_global_add(allocation_ptr, delta).map(|_| ())
         } else {
@@ -465,8 +482,7 @@ impl Allocator {
         &self,
         allocation_ptr: AllocationPointer,
         delta: isize,
-    ) -> Result<bool, ()>
-    {
+    ) -> Result<bool, ()> {
         let allocations = self.allocations.read().unwrap();
         if let Some(allocation) = allocations.vec.get(allocation_ptr.as_usize()) {
             let refcount = &allocation.refcount;
@@ -567,8 +583,7 @@ impl Allocator {
         &self,
         allocation_ptr: AllocationPointer,
         map: impl FnOnce(&mut TypeEnum),
-    ) -> Result<(), ()>
-    {
+    ) -> Result<(), ()> {
         let allocations = self.allocations.read().unwrap();
         allocations
             .vec
