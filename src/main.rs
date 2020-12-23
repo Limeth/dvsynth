@@ -1,3 +1,4 @@
+#![feature(raw)]
 #![feature(generic_associated_types)]
 #![feature(negative_impls)]
 #![feature(const_fn_floating_point_arithmetic)]
@@ -204,17 +205,17 @@ fn main() {
             Box::new(ConstantNodeBehaviour::new(84.0_f32)),
         ));
 
-        // graph.add_node(NodeData::new(
-        //     "My Bin Op #1",
-        //     [410.0, 10.0],
-        //     Box::new(BinaryOpNodeBehaviour::default()),
-        // ));
+        graph.add_node(NodeData::new(
+            "My Bin Op #1",
+            [410.0, 10.0],
+            Box::new(BinaryOpNodeBehaviour::default()),
+        ));
 
-        // graph.add_node(NodeData::new(
-        //     "My Window #1",
-        //     [610.0, 10.0],
-        //     Box::new(WindowNodeBehaviour::default()),
-        // ));
+        graph.add_node(NodeData::new(
+            "My Window #1",
+            [610.0, 10.0],
+            Box::new(WindowNodeBehaviour::default()),
+        ));
 
         // graph.add_node(NodeData::new(
         //     "My Array Constructor",

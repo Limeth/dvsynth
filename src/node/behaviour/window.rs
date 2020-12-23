@@ -1,7 +1,10 @@
 use crate::graph::ApplicationContext;
 use crate::{
     node::{
-        behaviour::{ExecutionContext, NodeBehaviour, NodeCommand, NodeEvent},
+        behaviour::{
+            ExecutionContext, ExecutorClosure, ExecutorClosureConstructor, NodeBehaviour, NodeCommand,
+            NodeEvent, NodeExecutorStateClosure,
+        },
         NodeConfiguration,
     },
     style::{Theme, Themeable},
@@ -135,6 +138,7 @@ impl WindowSettings {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct UiState {
     title_state: text_input::State,
     width_state: text_input::State,
@@ -143,6 +147,7 @@ pub struct UiState {
     height_string: String,
 }
 
+#[derive(Clone, Debug)]
 pub struct WindowNodeBehaviour {
     settings: WindowSettings,
     ui_state: UiState,
@@ -176,7 +181,7 @@ impl WindowNodeBehaviour {
 
 impl NodeBehaviour for WindowNodeBehaviour {
     type Message = WindowMessage;
-    type State = State;
+    type State<'state> = NodeExecutorStateClosure<'state, Self, Transient>;
 
     fn name(&self) -> &str {
         "Window"
@@ -324,62 +329,70 @@ impl NodeBehaviour for WindowNodeBehaviour {
         )
     }
 
-    fn create_state_initializer(&self) -> Option<Self::FnStateInitializer> {
-        Some(Box::new(|_context: &ApplicationContext| State::default()))
-    }
+    fn create_state<'state>(&self, application_context: &ApplicationContext) -> Self::State<'state> {
+        NodeExecutorStateClosure::new(
+            self,
+            application_context,
+            Transient::default(),
+            move |behaviour: &Self, _application_context: &ApplicationContext, _transient: &mut Transient| {
+                // Executed when the node settings have been changed to create the following
+                // executor closure.
 
-    fn create_executor(&self) -> Self::FnExecutor {
-        let settings = self.settings.clone();
-        Box::new(move |mut context: ExecutionContext<'_, '_, State>| {
-            let state = context.state.take().unwrap();
+                // Copy the constant value from the GUI settings.
+                let settings = behaviour.settings.clone();
 
-            if state.window.is_none() {
-                if let Some(window_receiver) = state.window_receiver.as_mut() {
-                    // The window creation task has been sent, poll the response.
-                    if let Ok(window) = window_receiver.try_recv() {
-                        state.window = Some(WindowSurface::from(window, &context));
+                Box::new(move |context: ExecutionContext<'_, 'state>, transient: &mut Transient| {
+                    if transient.window.is_none() {
+                        if let Some(window_receiver) = transient.window_receiver.as_mut() {
+                            // The window creation task has been sent, poll the response.
+                            if let Ok(window) = window_receiver.try_recv() {
+                                transient.window = Some(WindowSurface::from(window, &context));
+                            }
+                        } else {
+                            // If the window creation task was not sent yet, send it.
+                            let window_attributes = settings.get_builder().window;
+                            let (window_sender, window_receiver) = flume::unbounded();
+                            let task =
+                                Box::new(move |window_target: &EventLoopWindowTarget<crate::Message>| {
+                                    let mut builder = WindowBuilder::new();
+                                    builder.window = window_attributes;
+                                    let window = builder.build(window_target).unwrap();
+                                    let _result = window_sender.send(window);
+                                });
+                            let _result = context.application_context.main_thread_task_sender.send(task);
+                            transient.window_receiver = Some(window_receiver);
+                        }
                     }
-                } else {
-                    // If the window creation task was not sent yet, send it.
-                    let window_attributes = settings.get_builder().window;
-                    let (window_sender, window_receiver) = flume::unbounded();
-                    let task = Box::new(move |window_target: &EventLoopWindowTarget<crate::Message>| {
-                        let mut builder = WindowBuilder::new();
-                        builder.window = window_attributes;
-                        let window = builder.build(window_target).unwrap();
-                        let _result = window_sender.send(window);
-                    });
-                    let _result = context.application_context.main_thread_task_sender.send(task);
-                    state.window_receiver = Some(window_receiver);
-                }
-            }
 
-            if let Some(window) = state.window.as_mut() {
-                let recreate_swapchain = state.current_settings.inner_size != settings.inner_size;
+                    if let Some(window) = transient.window.as_mut() {
+                        let recreate_swapchain = transient.current_settings.inner_size != settings.inner_size;
 
-                state.current_settings.apply_difference(&settings, &window.window);
+                        transient.current_settings.apply_difference(&settings, &window.window);
 
-                if window.swapchain.is_none() || recreate_swapchain {
-                    window.swapchain = Some(context.application_context.renderer.device.create_swap_chain(
-                        &window.surface,
-                        &wgpu::SwapChainDescriptor {
-                            usage: wgpu::TextureUsage::OUTPUT_ATTACHMENT,
-                            format: wgpu::TextureFormat::Bgra8UnormSrgb,
-                            width: state.current_settings.inner_size[0],
-                            height: state.current_settings.inner_size[1],
-                            present_mode: wgpu::PresentMode::Mailbox,
-                        },
-                    ));
-                }
+                        if window.swapchain.is_none() || recreate_swapchain {
+                            window.swapchain =
+                                Some(context.application_context.renderer.device.create_swap_chain(
+                                    &window.surface,
+                                    &wgpu::SwapChainDescriptor {
+                                        usage: wgpu::TextureUsage::OUTPUT_ATTACHMENT,
+                                        format: wgpu::TextureFormat::Bgra8UnormSrgb,
+                                        width: transient.current_settings.inner_size[0],
+                                        height: transient.current_settings.inner_size[1],
+                                        present_mode: wgpu::PresentMode::Mailbox,
+                                    },
+                                ));
+                        }
 
-                // Drop the previous swapchain frame, presenting it.
-                window.swapchain_frame = None;
-                let swapchain = window.swapchain.as_mut().unwrap();
-                // Unwrap safe, because we made sure to drop the previous frame.
-                let frame = swapchain.get_current_frame().unwrap();
-                window.swapchain_frame = Some(frame);
-            }
-        })
+                        // Drop the previous swapchain frame, presenting it.
+                        window.swapchain_frame = None;
+                        let swapchain = window.swapchain.as_mut().unwrap();
+                        // Unwrap safe, because we made sure to drop the previous frame.
+                        let frame = swapchain.get_current_frame().unwrap();
+                        window.swapchain_frame = Some(frame);
+                    }
+                }) as Box<dyn ExecutorClosure<'state, Transient> + 'state>
+            },
+        )
     }
 }
 
@@ -392,7 +405,7 @@ pub struct WindowSurface {
 }
 
 impl WindowSurface {
-    pub fn from(window: Window, context: &ExecutionContext<'_, '_, State>) -> Self {
+    pub fn from(window: Window, context: &ExecutionContext<'_, '_>) -> Self {
         Self {
             surface: unsafe { context.application_context.renderer.instance.create_surface(&window) },
             window,
@@ -403,7 +416,7 @@ impl WindowSurface {
 }
 
 #[derive(Debug, Default)]
-pub struct State {
+pub struct Transient {
     current_settings: WindowSettings,
     window_receiver: Option<Receiver<Window>>,
     window: Option<WindowSurface>,

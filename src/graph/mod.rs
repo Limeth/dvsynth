@@ -1,6 +1,6 @@
 use crate::node::behaviour::{
     AllocatorHandle, ExecutionContext, MainThreadTask, NodeBehaviourContainer, NodeCommand,
-    NodeEventContainer, NodeExecutorContainer, NodeExecutorState, NodeStateInitializerContainer,
+    NodeEventContainer, NodeExecutor, NodeExecutorState, NodeExecutorStateContainer,
 };
 use crate::node::ty::TypeExt;
 use crate::node::{
@@ -25,8 +25,7 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::ops::{Deref, DerefMut};
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::Arc;
-use std::sync::RwLock;
+use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 use vek::Vec2;
 
@@ -42,7 +41,9 @@ pub type Graph = StableGraph<
 
 pub struct PreparedTask {
     pub node_index: NodeIndex,
-    pub state: Option<Box<dyn NodeExecutorState>>,
+    /// Set to `None` only during the preparation of the next schedule, for the previous schedule's
+    /// tasks.
+    pub state: Option<NodeExecutorStateContainer<'static>>,
     pub output_values: ChannelValues,
 }
 
@@ -77,21 +78,23 @@ impl PreparedExecution {
                     let state = previous_node_index_map
                         .as_ref()
                         .and_then(|previous_node_index_map| previous_node_index_map.get(&task.node_index))
-                        .and_then(|task_index| {
+                        .map(|task_index| {
                             let previous_task =
                                 &mut previous.as_mut().unwrap().tasks[*task_index].write().unwrap();
+                            let mut state = previous_task
+                                .state
+                                .take()
+                                .expect("Attempt to duplicate reused state during schedule preparation.");
 
-                            previous_task.state.take()
+                            task.behaviour.update_state(context, &mut state);
+
+                            state
                         })
-                        .or_else(|| {
-                            task.state_initializer
-                                .as_ref()
-                                .map(|state_initializer| (state_initializer)(&context))
-                        });
+                        .unwrap_or_else(|| task.behaviour.create_state(context));
 
                     RwLock::new(PreparedTask {
                         node_index: task.node_index,
-                        state,
+                        state: Some(state),
                         output_values: ChannelValues::zeroed(&task.configuration.channels_output),
                     })
                 })
@@ -123,7 +126,6 @@ impl PreparedExecution {
                     .into_boxed_slice(),
             };
             let current_task: &mut PreparedTask = &mut tasks_following[0].write().unwrap();
-            let task_state = current_task.state.as_mut().map(|state| state.as_mut());
             // let ref_guards = HashMap::new();
             let allocator_handle = unsafe { AllocatorHandle::with_node_index(task.node_index) };
 
@@ -131,13 +133,13 @@ impl PreparedExecution {
                 let execution_context = ExecutionContext {
                     application_context: &context,
                     allocator_handle,
-                    state: task_state,
                     inputs: &input_values,
                     outputs: &mut current_task.output_values,
                 };
 
                 // Execute task
-                (task.executor)(execution_context);
+                current_task.state.as_mut().unwrap().execute(execution_context);
+                // (task.executor)(execution_context);
             }
 
             // Free allocations that are no longer needed.
@@ -152,37 +154,24 @@ pub struct TaskInput {
     pub source_channel_index: usize,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Task {
     pub node_index: NodeIndex,
     pub configuration: NodeConfiguration,
-    pub state_initializer: Option<Arc<NodeStateInitializerContainer>>,
     pub inputs: Box<[TaskInput]>,
-    pub executor: Arc<NodeExecutorContainer>,
+    pub behaviour: Box<dyn NodeBehaviourContainer>,
 }
 
-// impl Clone for Task {
-//     fn clone(&self) -> Self {
-//         Self {
-//             node_index: self.node_index.clone(),
-//             configuration: self.configuration.clone(),
-//             init_state: self.init_state.as_ref().map(|state| dyn_clone::clone_box(&**state)),
-//             inputs: self.inputs.clone(),
-//             executor: self.executor.clone(),
-//         }
+// impl Debug for Task {
+//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//         f.debug_struct("Task")
+//             .field("node_index", &self.node_index)
+//             .field("configuration", &self.configuration)
+//             .field("inputs", &self.inputs)
+//             // FIXME: Add behaviour
+//             .finish()
 //     }
 // }
-
-impl Debug for Task {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Task")
-            .field("node_index", &self.node_index)
-            .field("configuration", &self.configuration)
-            .field("state_initializer.is_some()", &self.state_initializer.is_some())
-            .field("inputs", &self.inputs)
-            .finish()
-    }
-}
 
 #[derive(Clone, Debug)]
 pub struct Schedule {
@@ -283,9 +272,8 @@ impl ExecutionGraph {
                 Task {
                     node_index,
                     configuration: node.configuration.clone(),
-                    state_initializer: node.behaviour.create_state_initializer(),
+                    behaviour: node.behaviour.clone(),
                     inputs,
-                    executor: node.behaviour.create_executor(),
                 }
             })
             .collect::<Vec<_>>()

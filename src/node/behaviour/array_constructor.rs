@@ -1,6 +1,9 @@
 use crate::{
     node::{
-        behaviour::{ExecutionContext, NodeBehaviour, NodeCommand, NodeEvent},
+        behaviour::{
+            ApplicationContext, ExecutionContext, ExecutorClosure, NodeBehaviour, NodeCommand, NodeEvent,
+            NodeExecutorStateClosure,
+        },
         ArrayType, Channel, NodeConfiguration, PrimitiveType,
     },
     style::{self, Themeable},
@@ -24,6 +27,7 @@ pub enum ArrayConstructorNodeMessage {
 
 impl_node_behaviour_message!(ArrayConstructorNodeMessage);
 
+#[derive(Clone, Debug)]
 pub struct ArrayConstructorNodeBehaviour {
     ty: PrimitiveType,
     channel_count: NonZeroUsize,
@@ -58,7 +62,7 @@ impl ArrayConstructorNodeBehaviour {
 
 impl NodeBehaviour for ArrayConstructorNodeBehaviour {
     type Message = ArrayConstructorNodeMessage;
-    type State = ();
+    type State<'state> = NodeExecutorStateClosure<'state, Self>;
 
     fn name(&self) -> &str {
         "ArrayConstructor"
@@ -122,17 +126,23 @@ impl NodeBehaviour for ArrayConstructorNodeBehaviour {
         )
     }
 
-    fn create_state_initializer(&self) -> Option<Self::FnStateInitializer> {
-        None
-    }
+    fn create_state<'state>(&self, application_context: &ApplicationContext) -> Self::State<'state> {
+        NodeExecutorStateClosure::new(
+            self,
+            application_context,
+            (),
+            move |_behaviour: &Self, _application_context: &ApplicationContext, _transient: &mut ()| {
+                // Executed when the node settings have been changed to create the following
+                // executor closure.
+                Box::new(move |context: ExecutionContext<'_, 'state>, _transient: &mut ()| {
+                    // Executed once per graph execution.
+                    let mut cursor = Cursor::new(context.outputs[0].as_mut());
 
-    fn create_executor(&self) -> Self::FnExecutor {
-        Box::new(move |context: ExecutionContext<'_, '_, Self::State>| {
-            let mut cursor = Cursor::new(context.outputs[0].as_mut());
-
-            for input in context.inputs.values.iter() {
-                cursor.write(input).unwrap();
-            }
-        })
+                    for input in context.inputs.values.iter() {
+                        cursor.write(input).unwrap();
+                    }
+                }) as Box<dyn ExecutorClosure<'state> + 'state>
+            },
+        )
     }
 }

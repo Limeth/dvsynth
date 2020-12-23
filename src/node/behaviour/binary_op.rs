@@ -1,7 +1,10 @@
 use crate::node::PrimitiveChannelValue;
 use crate::{
     node::{
-        behaviour::{ExecutionContext, NodeBehaviour, NodeCommand, NodeEvent},
+        behaviour::{
+            ApplicationContext, ExecutionContext, ExecutorClosure, NodeBehaviour, NodeCommand, NodeEvent,
+            NodeExecutorStateClosure,
+        },
         Channel, NodeConfiguration, PrimitiveType,
     },
     style::{Theme, Themeable},
@@ -23,6 +26,7 @@ pub enum BinaryOpMessage {
 
 impl_node_behaviour_message!(BinaryOpMessage);
 
+#[derive(Clone, Debug)]
 pub struct BinaryOpNodeBehaviour {
     pub pick_list_ty_state: pick_list::State<PrimitiveType>,
     pub pick_list_ty_value: PrimitiveType,
@@ -55,7 +59,7 @@ impl BinaryOpNodeBehaviour {
 
 impl NodeBehaviour for BinaryOpNodeBehaviour {
     type Message = BinaryOpMessage;
-    type State = ();
+    type State<'state> = NodeExecutorStateClosure<'state, Self>;
 
     fn name(&self) -> &str {
         "Binary Operation"
@@ -118,23 +122,32 @@ impl NodeBehaviour for BinaryOpNodeBehaviour {
         )
     }
 
-    fn create_state_initializer(&self) -> Option<Self::FnStateInitializer> {
-        None
-    }
+    fn create_state<'state>(&self, application_context: &ApplicationContext) -> Self::State<'state> {
+        NodeExecutorStateClosure::new(
+            self,
+            application_context,
+            (),
+            move |behaviour: &Self, _application_context: &ApplicationContext, _transient: &mut ()| {
+                // Executed when the node settings have been changed to create the following
+                // executor closure.
+                let pick_list_ty_value = behaviour.pick_list_ty_value;
+                let op = behaviour.op;
 
-    fn create_executor(&self) -> Self::FnExecutor {
-        let pick_list_ty_value = self.pick_list_ty_value;
-        let op = self.op;
-        Box::new(move |context: ExecutionContext<'_, '_, Self::State>| {
-            let lhs = pick_list_ty_value.read::<LittleEndian, _>(&context.inputs[0].as_ref()).unwrap();
-            let rhs = pick_list_ty_value.read::<LittleEndian, _>(&context.inputs[1].as_ref()).unwrap();
-            let result = op.apply_dyn(lhs, rhs);
-            let mut output_cursor = Cursor::new(context.outputs[0].as_mut());
+                Box::new(move |context: ExecutionContext<'_, 'state>, _transient: &mut ()| {
+                    // Executed once per graph execution.
+                    let lhs =
+                        pick_list_ty_value.read::<LittleEndian, _>(&context.inputs[0].as_ref()).unwrap();
+                    let rhs =
+                        pick_list_ty_value.read::<LittleEndian, _>(&context.inputs[1].as_ref()).unwrap();
+                    let result = op.apply_dyn(lhs, rhs);
+                    let mut output_cursor = Cursor::new(context.outputs[0].as_mut());
 
-            // dbg!(result);
+                    // dbg!(result);
 
-            result.write::<LittleEndian>(&mut output_cursor).unwrap();
-        })
+                    result.write::<LittleEndian>(&mut output_cursor).unwrap();
+                }) as Box<dyn ExecutorClosure<'state> + 'state>
+            },
+        )
     }
 }
 

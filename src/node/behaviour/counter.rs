@@ -1,7 +1,9 @@
-use crate::graph::ApplicationContext;
 use crate::{
     node::{
-        behaviour::{ExecutionContext, NodeBehaviour, NodeCommand, NodeEvent},
+        behaviour::{
+            ApplicationContext, ExecutionContext, ExecutorClosure, NodeBehaviour, NodeCommand, NodeEvent,
+            NodeExecutorStateClosure,
+        },
         Channel, NodeConfiguration, PrimitiveType,
     },
     style::Theme,
@@ -10,12 +12,12 @@ use byteorder::{LittleEndian, WriteBytesExt};
 use iced::Element;
 use std::io::Cursor;
 
-#[derive(Default)]
+#[derive(Clone, Debug, Default)]
 pub struct CounterNodeBehaviour;
 
 impl NodeBehaviour for CounterNodeBehaviour {
     type Message = ();
-    type State = State;
+    type State<'state> = NodeExecutorStateClosure<'state, Self, Transient>;
 
     fn name(&self) -> &str {
         "Counter"
@@ -35,23 +37,30 @@ impl NodeBehaviour for CounterNodeBehaviour {
         None
     }
 
-    fn create_state_initializer(&self) -> Option<Self::FnStateInitializer> {
-        Some(Box::new(|_context: &ApplicationContext| State::default()))
-    }
+    fn create_state<'state>(&self, application_context: &ApplicationContext) -> Self::State<'state> {
+        NodeExecutorStateClosure::new(
+            self,
+            application_context,
+            Transient::default(),
+            move |_behaviour: &Self,
+                  _application_context: &ApplicationContext,
+                  _transient: &mut Transient| {
+                // Executed when the node settings have been changed to create the following
+                // executor closure.
+                Box::new(move |context: ExecutionContext<'_, 'state>, transient: &mut Transient| {
+                    // Executed once per graph execution.
+                    let mut cursor = Cursor::new(context.outputs[0].as_mut());
 
-    fn create_executor(&self) -> Self::FnExecutor {
-        Box::new(|mut context: ExecutionContext<'_, '_, State>| {
-            let state = context.state.take().unwrap();
-            let mut cursor = Cursor::new(context.outputs[0].as_mut());
+                    cursor.write_u32::<LittleEndian>(transient.count).unwrap();
 
-            cursor.write_u32::<LittleEndian>(state.count).unwrap();
-
-            state.count += 1;
-        })
+                    transient.count += 1;
+                }) as Box<dyn ExecutorClosure<'state, Transient> + 'state>
+            },
+        )
     }
 }
 
 #[derive(Default, Debug, Clone)]
-pub struct State {
+pub struct Transient {
     count: u32,
 }

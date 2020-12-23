@@ -1,7 +1,11 @@
 use crate::node::PrimitiveChannelValue;
 use crate::{
+    graph::ApplicationContext,
     node::{
-        behaviour::{ExecutionContext, NodeBehaviour, NodeCommand, NodeEvent},
+        behaviour::{
+            ExecutionContext, ExecutorClosure, ExecutorClosureConstructor, NodeBehaviour, NodeCommand,
+            NodeEvent, NodeExecutorStateClosure,
+        },
         Channel, NodeConfiguration, PrimitiveType,
     },
     style::{Theme, Themeable},
@@ -23,6 +27,7 @@ pub enum ConstantNodeMessage {
 
 impl_node_behaviour_message!(ConstantNodeMessage);
 
+#[derive(Clone, Debug)]
 pub struct ConstantNodeBehaviour {
     value: PrimitiveChannelValue,
     pick_list_state: pick_list::State<PrimitiveType>,
@@ -66,7 +71,7 @@ impl ConstantNodeBehaviour {
 
 impl NodeBehaviour for ConstantNodeBehaviour {
     type Message = ConstantNodeMessage;
-    type State = ();
+    type State<'state> = NodeExecutorStateClosure<'state, Self>;
 
     fn name(&self) -> &str {
         "Constant"
@@ -131,16 +136,26 @@ impl NodeBehaviour for ConstantNodeBehaviour {
         )
     }
 
-    fn create_state_initializer(&self) -> Option<Self::FnStateInitializer> {
-        None
-    }
+    fn create_state<'state>(&self, application_context: &ApplicationContext) -> Self::State<'state> {
+        NodeExecutorStateClosure::new(
+            self,
+            application_context,
+            (),
+            move |behaviour: &Self, _application_context: &ApplicationContext, _transient: &mut ()| {
+                // Executed when the node settings have been changed to create the following
+                // executor closure.
 
-    fn create_executor(&self) -> Self::FnExecutor {
-        let value = self.value;
-        Box::new(move |context: ExecutionContext<'_, '_, Self::State>| {
-            let mut cursor = Cursor::new(context.outputs[0].as_mut());
+                // Copy the constant value from the GUI settings.
+                let value = behaviour.value;
 
-            value.write::<LittleEndian>(&mut cursor).unwrap();
-        })
+                Box::new(move |execution_context: ExecutionContext<'_, 'state>, _transient: &mut ()| {
+                    // Executed once per graph execution.
+                    let mut cursor = Cursor::new(execution_context.outputs[0].as_mut());
+
+                    value.write::<LittleEndian>(&mut cursor).unwrap();
+                    dbg!(value);
+                }) as Box<dyn ExecutorClosure<'state> + 'state>
+            },
+        )
     }
 }

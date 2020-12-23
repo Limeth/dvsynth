@@ -1,6 +1,9 @@
 use crate::{
     node::{
-        behaviour::{ExecutionContext, NodeBehaviour, NodeCommand, NodeEvent},
+        behaviour::{
+            ApplicationContext, ExecutionContext, ExecutorClosure, NodeBehaviour, NodeCommand, NodeEvent,
+            NodeExecutorStateClosure,
+        },
         Channel, NodeConfiguration, PrimitiveType,
     },
     style::{Theme, Themeable},
@@ -19,6 +22,7 @@ pub enum DebugNodeMessage {
 
 impl_node_behaviour_message!(DebugNodeMessage);
 
+#[derive(Debug, Clone)]
 pub struct DebugNodeBehaviour {
     ty: PrimitiveType,
     pick_list_state: pick_list::State<PrimitiveType>,
@@ -41,7 +45,7 @@ impl DebugNodeBehaviour {
 
 impl NodeBehaviour for DebugNodeBehaviour {
     type Message = DebugNodeMessage;
-    type State = ();
+    type State<'state> = NodeExecutorStateClosure<'state, Self>;
 
     fn name(&self) -> &str {
         "Debug"
@@ -85,15 +89,22 @@ impl NodeBehaviour for DebugNodeBehaviour {
         )
     }
 
-    fn create_state_initializer(&self) -> Option<Self::FnStateInitializer> {
-        None
-    }
+    fn create_state<'state>(&self, application_context: &ApplicationContext) -> Self::State<'state> {
+        NodeExecutorStateClosure::new(
+            self,
+            application_context,
+            (),
+            move |behaviour: &Self, _application_context: &ApplicationContext, _transient: &mut ()| {
+                // Executed when the node settings have been changed to create the following
+                // executor closure.
+                let ty = behaviour.ty;
 
-    fn create_executor(&self) -> Self::FnExecutor {
-        let ty = self.ty;
-        Box::new(move |context: ExecutionContext<'_, '_, ()>| {
-            let value = ty.read::<LittleEndian, _>(&context.inputs[0].as_ref()).unwrap();
-            println!("{:?}", value);
-        })
+                Box::new(move |context: ExecutionContext<'_, 'state>, _transient: &mut ()| {
+                    // Executed once per graph execution.
+                    let value = ty.read::<LittleEndian, _>(&context.inputs[0].as_ref()).unwrap();
+                    println!("{:?}", value);
+                }) as Box<dyn ExecutorClosure<'state> + 'state>
+            },
+        )
     }
 }

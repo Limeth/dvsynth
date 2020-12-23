@@ -148,7 +148,6 @@ pub trait RefMutAnyExt<'a>: RefMutAny<'a> {
 impl<'a, R> RefMutAnyExt<'a> for R where R: RefMutAny<'a> {}
 
 // TODO: Consider allowing the lifetime to be a sub-lifetime of 'state?
-// FIXME: Alter refcount recursively
 /// A refcounted mutable reference to `T`.
 pub struct OwnedRefMut<'state, T> {
     ptr: AllocationPointer,
@@ -343,7 +342,6 @@ impl<'a, T> Drop for OwnedRefMut<'a, T> {
 }
 
 // TODO: Consider allowing the lifetime to be a sub-lifetime of 'state?
-// FIXME: Alter refcount recursively
 /// A refcounted shared reference to `T`.
 #[derive(Clone)]
 pub struct OwnedRef<'state, T> {

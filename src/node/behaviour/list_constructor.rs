@@ -4,7 +4,10 @@ use crate::node::ty::TypeExt;
 use crate::node::{ListDescriptor, ListType, OwnedRefMut, Unique};
 use crate::{
     node::{
-        behaviour::{ExecutionContext, NodeBehaviour, NodeCommand, NodeEvent},
+        behaviour::{
+            ApplicationContext, ExecutionContext, ExecutorClosure, ExecutorClosureConstructor, NodeBehaviour,
+            NodeCommand, NodeEvent, NodeExecutorStateClosure,
+        },
         Channel, NodeConfiguration, PrimitiveType,
     },
     style::{Theme, Themeable},
@@ -27,6 +30,7 @@ pub enum ListConstructorNodeMessage {
 
 impl_node_behaviour_message!(ListConstructorNodeMessage);
 
+#[derive(Debug, Clone)]
 pub struct ListConstructorNodeBehaviour {
     ty: PrimitiveType,
     channel_count: NonZeroUsize,
@@ -61,7 +65,7 @@ impl ListConstructorNodeBehaviour {
 
 impl NodeBehaviour for ListConstructorNodeBehaviour {
     type Message = ListConstructorNodeMessage;
-    type State = ();
+    type State<'state> = NodeExecutorStateClosure<'state, Self>;
 
     fn name(&self) -> &str {
         "ListConstructor"
@@ -126,50 +130,58 @@ impl NodeBehaviour for ListConstructorNodeBehaviour {
         )
     }
 
-    fn create_state_initializer(&self) -> Option<Self::FnStateInitializer> {
-        None
-    }
+    fn create_state<'state>(&self, application_context: &ApplicationContext) -> Self::State<'state> {
+        NodeExecutorStateClosure::new(
+            self,
+            application_context,
+            (),
+            move |behaviour: &Self, _application_context: &ApplicationContext, _transient: &mut ()| {
+                // Executed when the node settings have been changed to create the following
+                // executor closure:
+                let ty = behaviour.ty;
 
-    fn create_executor(&self) -> Self::FnExecutor {
-        let ty = self.ty;
-        Box::new(move |context: ExecutionContext<'_, '_, ()>| {
-            {
-                let mut list: OwnedRefMut<ListType> = context
-                    .allocator_handle
-                    .allocate_object::<ListType>(ListDescriptor::new_if_sized(ty).unwrap());
-                list.push_item_bytes_with(|bytes| {
-                    bytes.iter_mut().enumerate().for_each(|(i, byte)| *byte = i as u8);
-                })
-                .unwrap();
-                list.push_item_bytes_with(|bytes| {
-                    bytes.iter_mut().enumerate().for_each(|(i, byte)| *byte = 2 * i as u8);
-                })
-                .unwrap();
-                dbg!(list.get(0).unwrap().bytes_if_sized());
-                dbg!(list.get(1).unwrap().bytes_if_sized());
-                dbg!(list.len());
-            }
-            {
-                let mut list: OwnedRefMut<ListType> = context.allocator_handle.allocate_object::<ListType>(
-                    ListDescriptor::new(Unique::new(ListType::new(PrimitiveType::U8))),
-                );
-                let mut inner_list_1: OwnedRefMut<ListType> = context
-                    .allocator_handle
-                    .allocate_object::<ListType>(ListDescriptor::new(PrimitiveType::U8));
-                list.push(inner_list_1).unwrap();
-                let mut inner_list_2: OwnedRefMut<ListType> = context
-                    .allocator_handle
-                    .allocate_object::<ListType>(ListDescriptor::new(PrimitiveType::U8));
-                list.push(inner_list_2).unwrap();
-                dbg!(list.get(0).unwrap().bytes_if_sized());
-                dbg!(list.get(1).unwrap().bytes_if_sized());
-                dbg!(list.len());
-            }
-            let mut cursor = Cursor::new(context.outputs[0].as_mut());
+                Box::new(move |context: ExecutionContext<'_, 'state>, _transient: &mut ()| {
+                    // Executed once per graph execution.
+                    {
+                        let mut list: OwnedRefMut<ListType> = context
+                            .allocator_handle
+                            .allocate_object::<ListType>(ListDescriptor::new_if_sized(ty).unwrap());
+                        list.push_item_bytes_with(|bytes| {
+                            bytes.iter_mut().enumerate().for_each(|(i, byte)| *byte = i as u8);
+                        })
+                        .unwrap();
+                        list.push_item_bytes_with(|bytes| {
+                            bytes.iter_mut().enumerate().for_each(|(i, byte)| *byte = 2 * i as u8);
+                        })
+                        .unwrap();
+                        dbg!(list.get(0).unwrap().bytes_if_sized());
+                        dbg!(list.get(1).unwrap().bytes_if_sized());
+                        dbg!(list.len());
+                    }
+                    {
+                        let mut list: OwnedRefMut<ListType> =
+                            context.allocator_handle.allocate_object::<ListType>(ListDescriptor::new(
+                                Unique::new(ListType::new(PrimitiveType::U8)),
+                            ));
+                        let mut inner_list_1: OwnedRefMut<ListType> = context
+                            .allocator_handle
+                            .allocate_object::<ListType>(ListDescriptor::new(PrimitiveType::U8));
+                        list.push(inner_list_1).unwrap();
+                        let mut inner_list_2: OwnedRefMut<ListType> = context
+                            .allocator_handle
+                            .allocate_object::<ListType>(ListDescriptor::new(PrimitiveType::U8));
+                        list.push(inner_list_2).unwrap();
+                        dbg!(list.get(0).unwrap().bytes_if_sized());
+                        dbg!(list.get(1).unwrap().bytes_if_sized());
+                        dbg!(list.len());
+                    }
+                    let mut cursor = Cursor::new(context.outputs[0].as_mut());
 
-            for input in context.inputs.values.iter() {
-                cursor.write(input).unwrap();
-            }
-        })
+                    for input in context.inputs.values.iter() {
+                        cursor.write(input).unwrap();
+                    }
+                }) as Box<dyn ExecutorClosure<'state>>
+            },
+        )
     }
 }

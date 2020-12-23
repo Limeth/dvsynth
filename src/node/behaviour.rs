@@ -1,17 +1,11 @@
-use crate::graph::alloc::{Allocation, Allocator, TaskRefCounter};
 use crate::graph::{ApplicationContext, NodeIndex};
 use crate::node::{ChannelValueRefs, ChannelValues, DynTypeTrait, NodeConfiguration};
 use crate::style::Theme;
 use downcast_rs::{impl_downcast, Downcast};
 use iced::Element;
 use iced_winit::winit::event_loop::EventLoopWindowTarget;
-use std::cell::RefCell;
-use std::collections::hash_map::Entry;
-use std::collections::HashMap;
 use std::fmt::Debug;
 use std::marker::PhantomData;
-use std::num::NonZeroUsize;
-use std::sync::Arc;
 
 pub use array_constructor::*;
 pub use binary_op::*;
@@ -21,10 +15,7 @@ pub use debug::*;
 pub use list_constructor::*;
 pub use window::*;
 
-use super::{
-    AllocationPointer, DowncastFromTypeEnum, OwnedRefMut, Ref, RefMut, SizedTypeExt, TypeEnum, TypeTrait,
-    Unique,
-};
+use super::{OwnedRefMut, SizedTypeExt, TypeEnum, TypeTrait};
 
 pub struct Input {
     pub data: Box<[u8]>,
@@ -94,9 +85,152 @@ impl<M: NodeBehaviourMessage> NodeEvent<M> {
     }
 }
 
-pub trait NodeExecutorState: Downcast + Debug + Send + Sync {}
-impl<T> NodeExecutorState for T where T: Downcast + Debug + Send + Sync {}
-impl_downcast!(NodeExecutorState);
+// FIXME: Maybe just store `Box<dyn NodeExecutor<'static>>` instead?
+pub struct NodeExecutorStateContainer<'state> {
+    ptr: Box<dyn NodeExecutor<'state> + 'state>,
+}
+
+impl<'state> NodeExecutorStateContainer<'state> {
+    pub fn from<T: NodeBehaviour>(state: T::State<'state>) -> Self {
+        Self { ptr: Box::new(state) as Box<dyn NodeExecutor<'state> + 'state> }
+    }
+
+    /// Safety: The returned value must not outlive self.
+    unsafe fn as_trait_object(&mut self) -> std::raw::TraitObject {
+        let raw: *mut dyn NodeExecutor<'state> = &mut *self.ptr as *mut _;
+
+        std::mem::transmute(raw)
+    }
+
+    unsafe fn downcast_mut<T: NodeBehaviour>(&mut self) -> &mut T::State<'state> {
+        let trait_object = self.as_trait_object();
+        &mut *(trait_object.data as *mut T::State<'state>)
+    }
+
+    pub fn update<'invocation, T: NodeBehaviour>(
+        &'invocation mut self,
+        context: &'invocation ApplicationContext,
+        behaviour: &T,
+    ) where
+        'state: 'invocation,
+    {
+        let state = unsafe { self.downcast_mut::<T>() };
+
+        state.update(context, behaviour)
+    }
+
+    pub fn execute<'invocation>(&'invocation mut self, context: ExecutionContext<'invocation, 'state>)
+    where 'state: 'invocation {
+        self.ptr.execute(context);
+    }
+}
+
+pub trait NodeExecutor<'state>: Debug + Send + Sync {
+    fn execute<'invocation>(&'invocation mut self, context: ExecutionContext<'invocation, 'state>)
+    where 'state: 'invocation;
+}
+
+pub trait NodeExecutorState<'state>: NodeExecutor<'state> {
+    type Behaviour: NodeBehaviour;
+
+    fn update<'invocation>(
+        &'invocation mut self,
+        context: &'invocation ApplicationContext,
+        behaviour: &Self::Behaviour,
+    ) where
+        'state: 'invocation;
+}
+
+pub trait TransientTrait = Send + Sync;
+pub trait ExecutorClosureConstructor<'state, T, Transient = ()> = Fn(&T, &ApplicationContext, &mut Transient) -> Box<dyn ExecutorClosure<'state, Transient> + 'state>
+    + Send
+    + Sync
+where Transient: TransientTrait + 'state;
+pub trait ExecutorClosure<'state, Transient = ()> =
+    for<'i> FnMut(ExecutionContext<'i, 'state>, &mut Transient) + Send + Sync
+    where Transient: TransientTrait + 'state;
+
+/// A `NodeExecutorState`, such that is created using:
+/// * The `create_closure` executor constructor, which constructs the executor using `&T` and `&ApplicationContext`;
+/// * The `transient` data, which is the state persisted across calls to `create_closure`.
+pub struct NodeExecutorStateClosure<'state, T, Transient = ()>
+where
+    T: NodeBehaviour,
+    Transient: TransientTrait + 'state,
+{
+    create_closure: Box<dyn ExecutorClosureConstructor<'state, T, Transient> + 'state>,
+    execute: Box<dyn ExecutorClosure<'state, Transient> + 'state>,
+    transient: Transient,
+}
+
+impl<'state, T, Transient> NodeExecutorStateClosure<'state, T, Transient>
+where
+    T: NodeBehaviour,
+    Transient: TransientTrait + 'state,
+{
+    pub fn new<'invocation>(
+        behaviour: &'invocation T,
+        context: &'invocation ApplicationContext,
+        transient: Transient,
+        create_closure: impl ExecutorClosureConstructor<'state, T, Transient> + 'state,
+    ) -> Self
+    where
+        'state: 'invocation,
+    {
+        Self::from_box(behaviour, context, transient, Box::new(create_closure))
+    }
+
+    fn from_box<'invocation>(
+        behaviour: &'invocation T,
+        context: &'invocation ApplicationContext,
+        mut transient: Transient,
+        create_closure: Box<dyn ExecutorClosureConstructor<'state, T, Transient> + 'state>,
+    ) -> Self
+    where
+        'state: 'invocation,
+    {
+        Self { execute: (create_closure)(behaviour, context, &mut transient), create_closure, transient }
+    }
+}
+
+impl<'state, T, Transient> Debug for NodeExecutorStateClosure<'state, T, Transient>
+where
+    T: NodeBehaviour,
+    Transient: TransientTrait + 'state,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("NodeExecutorStateClosure")
+    }
+}
+
+impl<'state, T, Transient> NodeExecutorState<'state> for NodeExecutorStateClosure<'state, T, Transient>
+where
+    T: NodeBehaviour,
+    Transient: TransientTrait + 'state,
+{
+    type Behaviour = T;
+
+    fn update<'invocation>(
+        &'invocation mut self,
+        context: &'invocation ApplicationContext,
+        behaviour: &Self::Behaviour,
+    ) where
+        'state: 'invocation,
+    {
+        self.execute = (self.create_closure)(behaviour, context, &mut self.transient)
+    }
+}
+
+impl<'state, T, Transient> NodeExecutor<'state> for NodeExecutorStateClosure<'state, T, Transient>
+where
+    T: NodeBehaviour,
+    Transient: TransientTrait + 'state,
+{
+    fn execute<'invocation>(&'invocation mut self, context: ExecutionContext<'invocation, 'state>)
+    where 'state: 'invocation {
+        (self.execute)(context, &mut self.transient)
+    }
+}
 
 /// Makes it possible for tasks (nodes) to dynamically allocate data
 /// that can be shared with other tasks via channels.
@@ -112,23 +246,13 @@ impl<'invocation, 'state: 'invocation> AllocatorHandle<'invocation, 'state> {
     }
 }
 
-// #[derive(Default)]
-// pub(crate) struct TaskRefResolver<'a> {
-//     pub(crate) ref_guards: HashMap<AllocationPointer, AllocationRefGuard<'a>>,
-// }
-
-// impl<'a> TaskRefResolver<'a> {}
-
-// static_assertions::const_assert_eq!(std::mem::size_of::<AllocatorHandle<'_>>(), 0);
-
-impl<'invocation, 'state: 'invocation> !Send for AllocatorHandle<'invocation, 'state> {}
-impl<'invocation, 'state: 'invocation> !Sync for AllocatorHandle<'invocation, 'state> {}
+/// Must not be `Send`, because then the `'invocation` lifetime would not be enforced.
+/// The user could send the handle to another thread, letting the current invocation complete
+/// and the handle outlive the completed invocation, which would be a bug.
+impl !Send for AllocatorHandle<'_, '_> {}
+impl !Sync for AllocatorHandle<'_, '_> {}
 
 impl<'invocation, 'state: 'invocation> AllocatorHandle<'invocation, 'state> {
-    // pub fn allocate_default<T: TypeTrait + Default>(self) -> OwnedRefMut<T> {
-    //     OwnedRefMut::<T>::allocate_default(self)
-    // }
-
     pub fn allocate_object<T: DynTypeTrait>(self, descriptor: T::Descriptor) -> OwnedRefMut<'state, T> {
         OwnedRefMut::allocate_object(descriptor, self)
     }
@@ -136,133 +260,41 @@ impl<'invocation, 'state: 'invocation> AllocatorHandle<'invocation, 'state> {
     pub fn allocate_bytes<T: TypeTrait + SizedTypeExt>(self, ty: T) -> OwnedRefMut<'state, T> {
         OwnedRefMut::allocate_bytes(ty, self)
     }
-
-    // pub(crate) fn deref<T: DynTypeAllocator + DowncastFromTypeEnum>(
-    //     &self,
-    //     reference: &dyn RefExt<T>,
-    // ) -> Option<(&'a T::DynAlloc, &'a T)>
-    // {
-    //     // match self.ref_resolver.ref_guards.entry(reference.get_ptr()) {
-    //     //     Entry::Occupied(_) => (),
-    //     //     Entry::Vacant(entry) => {
-    //     //         let value: AllocationRefGuard<'a> =
-    //     //             unsafe { Allocator::get().deref_ptr(reference.get_ptr()) }
-    //     //                 .expect("Attempt to dereference a freed value.");
-    //     //         entry.insert(value);
-    //     //     }
-    //     // };
-
-    //     let ref_guard = self.ref_resolver.ref_guards.get(&reference.get_ptr()).unwrap();
-    //     let ty = ref_guard.ty().downcast_ref::<T>()?;
-    //     let value_ref = unsafe { ref_guard.deref() }.downcast_ref().unwrap();
-
-    //     Some((value_ref, ty))
-    // }
-
-    // pub(crate) fn deref_mut<T: DynTypeAllocator + DowncastFromTypeEnum>(
-    //     &mut self,
-    //     reference: &dyn RefMutExt<T>,
-    // ) -> Option<(&'a mut T::DynAlloc, &'a T)>
-    // {
-    //     // match self.ref_resolver.ref_guards.entry(reference.get_ptr()) {
-    //     //     Entry::Occupied(_) => (),
-    //     //     Entry::Vacant(entry) => {
-    //     //         let value: AllocationRefGuard<'a> =
-    //     //             unsafe { Allocator::get().deref_ptr(reference.get_ptr()) }
-    //     //                 .expect("Attempt to dereference a freed value.");
-    //     //         entry.insert(value);
-    //     //     }
-    //     // };
-
-    //     let ref_guard = Allocator::get().deref
-    //     let ty = ref_guard.ty().downcast_ref::<T>()?;
-    //     let value_ref = unsafe { ref_guard.deref_mut() }.downcast_mut().unwrap();
-    //     Some((value_ref, ty))
-    // }
 }
 
-pub struct ExecutionContext<'invocation, 'state: 'invocation, S: 'state + ?Sized> {
+pub struct ExecutionContext<'invocation, 'state: 'invocation> {
     pub application_context: &'invocation ApplicationContext,
-    // pub allocator_handle: &'a mut AllocatorHandle<'a>,
     pub allocator_handle: AllocatorHandle<'invocation, 'state>,
-    pub state: Option<&'state mut S>,
     pub inputs: &'invocation ChannelValueRefs<'invocation>,
     pub outputs: &'invocation mut ChannelValues,
 }
 
-impl<'invocation, 'state: 'invocation, S: ?Sized> ExecutionContext<'invocation, 'state, S> {
-    pub fn map_state<R: ?Sized + 'state>(
-        self,
-        map: impl FnOnce(&'state mut S) -> &'state mut R,
-    ) -> ExecutionContext<'invocation, 'state, R>
-    {
-        ExecutionContext {
-            application_context: self.application_context,
-            allocator_handle: self.allocator_handle,
-            state: self.state.map(|state| (map)(state)),
-            inputs: self.inputs,
-            outputs: self.outputs,
-        }
-    }
-}
-
-pub type ExecutionContextContainer<'invocation, 'state> =
-    ExecutionContext<'invocation, 'state, dyn NodeExecutorState>;
-
-pub type NodeExecutorContainer = dyn Send + Sync + Fn(ExecutionContextContainer);
-
-pub trait NodeExecutor<S>: 'static + Send + Sync {
-    fn execute<'invocation, 'state: 'invocation>(&self, context: ExecutionContext<'invocation, 'state, S>);
-}
-
-pub type BoxNodeExecutor<S> =
-    Box<dyn Send + Sync + for<'invocation, 'state> Fn(ExecutionContext<'invocation, 'state, S>)>;
-
-impl<S: 'static> NodeExecutor<S> for BoxNodeExecutor<S> {
-    fn execute<'invocation, 'state: 'invocation>(&self, context: ExecutionContext<'invocation, 'state, S>) {
-        (self)(context)
-    }
-}
-
-pub type NodeStateInitializerContainer =
-    dyn Send + Sync + Fn(&ApplicationContext) -> Box<dyn NodeExecutorState>;
-
-pub trait NodeStateInitializer<S>: 'static + Send + Sync {
-    fn initialize_state(&self, context: &ApplicationContext) -> S;
-}
-
-pub type BoxNodeStateInitializer<S> = Box<dyn Send + Sync + Fn(&ApplicationContext) -> S>;
-
-impl<S: 'static> NodeStateInitializer<S> for BoxNodeStateInitializer<S> {
-    fn initialize_state(&self, context: &ApplicationContext) -> S {
-        (self)(context)
-    }
-}
-
 pub type MainThreadTask = dyn Send + FnOnce(&EventLoopWindowTarget<crate::Message>);
 
-pub trait NodeBehaviourContainer {
+pub trait NodeBehaviourContainer: dyn_clone::DynClone + std::fmt::Debug + Send + Sync + 'static {
     fn name(&self) -> &str;
     fn update(&mut self, event: NodeEventContainer) -> Vec<NodeCommand>;
     fn view(&mut self, theme: &dyn Theme) -> Option<Element<Box<dyn NodeBehaviourMessage>>>;
-    fn create_executor(&self) -> Arc<NodeExecutorContainer>;
-    fn create_state_initializer(&self) -> Option<Arc<NodeStateInitializerContainer>>;
+    // fn create_executor(&self) -> Arc<NodeExecutorContainer>;
+    // fn create_state_initializer(&self) -> Option<Arc<dyn NodeStateInitializerContainer>>;
+    fn create_state<'state>(&self, context: &ApplicationContext) -> NodeExecutorStateContainer<'state>;
+    fn update_state<'state>(
+        &self,
+        context: &ApplicationContext,
+        state: &mut NodeExecutorStateContainer<'state>,
+    );
 }
 
-pub trait NodeBehaviour {
+dyn_clone::clone_trait_object!(NodeBehaviourContainer);
+
+pub trait NodeBehaviour: std::fmt::Debug + Clone + Send + Sync + 'static {
     type Message: NodeBehaviourMessage;
-    type State: NodeExecutorState;
-    type FnStateInitializer: NodeStateInitializer<Self::State> = BoxNodeStateInitializer<Self::State>;
-    type FnExecutor: NodeExecutor<Self::State> = BoxNodeExecutor<Self::State>;
+    type State<'state>: NodeExecutorState<'state, Behaviour = Self>;
 
     fn name(&self) -> &str;
     fn update(&mut self, event: NodeEvent<Self::Message>) -> Vec<NodeCommand>;
     fn view(&mut self, theme: &dyn Theme) -> Option<Element<Self::Message>>;
-    fn create_executor(&self) -> Self::FnExecutor;
-
-    fn create_state_initializer(&self) -> Option<Self::FnStateInitializer> {
-        None
-    }
+    fn create_state<'state>(&self, context: &ApplicationContext) -> Self::State<'state>;
 }
 
 impl<T: NodeBehaviour> NodeBehaviourContainer for T {
@@ -279,25 +311,19 @@ impl<T: NodeBehaviour> NodeBehaviourContainer for T {
             .map(|element| element.map(|message| Box::new(message) as Box<dyn NodeBehaviourMessage>))
     }
 
-    fn create_state_initializer(&self) -> Option<Arc<NodeStateInitializerContainer>> {
-        NodeBehaviour::create_state_initializer(self).map(|initializer| {
-            Arc::new(move |context: &ApplicationContext| {
-                let state = initializer.initialize_state(context);
+    fn create_state<'state>(&self, context: &ApplicationContext) -> NodeExecutorStateContainer<'state> {
+        let state = <Self as NodeBehaviour>::create_state(self, context);
 
-                Box::new(state) as Box<dyn NodeExecutorState>
-            }) as Arc<NodeStateInitializerContainer>
-        })
+        NodeExecutorStateContainer::from::<Self>(state)
     }
 
-    fn create_executor(&self) -> Arc<NodeExecutorContainer> {
-        let typed_executor = NodeBehaviour::create_executor(self);
-
-        Arc::new(move |context: ExecutionContextContainer<'_, '_>| {
-            let context =
-                context.map_state(|state| state.downcast_mut::<<Self as NodeBehaviour>::State>().unwrap());
-
-            typed_executor.execute(context)
-        })
+    fn update_state<'state>(
+        &self,
+        context: &ApplicationContext,
+        state: &mut NodeExecutorStateContainer<'state>,
+    )
+    {
+        state.update::<Self>(context, self)
     }
 }
 
