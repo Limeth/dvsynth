@@ -3,6 +3,7 @@ use std::borrow::Cow;
 use std::fmt::{Debug, Display};
 use std::marker::PhantomData;
 use std::mem::Discriminant;
+use std::ops::Deref;
 
 pub use array::*;
 pub use list::*;
@@ -13,28 +14,28 @@ pub use reference::*;
 pub use texture::*;
 
 macro_rules! impl_downcast_from_type_enum {
-    ($variant:ident($ty:ident)) => {
-        impl DowncastFromTypeEnum for $ty {
-            fn downcast_from(from: TypeEnum) -> Option<Self>
+    ($([$($generics:tt)*])? $variant:ident ($($ty:tt)*)) => {
+        impl $(<$($generics)*>)? DowncastFromTypeEnum for $($ty)* {
+            fn resolve_from(from: TypeEnum) -> Option<crate::node::ty::TypeResolution<Self, TypeEnum>>
             where Self: Sized {
                 if let TypeEnum::$variant(inner) = from {
-                    Some(inner)
+                    Some(crate::node::ty::TypeResolution::Resolved(inner))
                 } else {
                     None
                 }
             }
 
-            fn downcast_from_ref(from: &TypeEnum) -> Option<&Self> {
+            fn resolve_from_ref(from: &TypeEnum) -> Option<crate::node::ty::TypeResolution<&Self, &TypeEnum>> {
                 if let TypeEnum::$variant(inner) = from {
-                    Some(inner)
+                    Some(crate::node::ty::TypeResolution::Resolved(inner))
                 } else {
                     None
                 }
             }
 
-            fn downcast_from_mut(from: &mut TypeEnum) -> Option<&mut Self> {
+            fn resolve_from_mut(from: &mut TypeEnum) -> Option<crate::node::ty::TypeResolution<&mut Self, &mut TypeEnum>> {
                 if let TypeEnum::$variant(inner) = from {
-                    Some(inner)
+                    Some(crate::node::ty::TypeResolution::Resolved(inner))
                 } else {
                     None
                 }
@@ -60,8 +61,9 @@ pub mod prelude {
     pub use super::reference::prelude::*;
     pub use super::texture::prelude::*;
     pub use super::{
-        CloneTypeExt, CloneableTypeExt, SafeBinaryRepresentationTypeExt, SizeRefExt, SizeRefMutExt,
-        SizeTypeExt, SizedRefExt, SizedRefMutExt, SizedTypeExt, TypeExt,
+        CloneTypeExt, CloneableTypeExt, DowncastFromTypeEnum, DowncastFromTypeEnumExt,
+        SafeBinaryRepresentationTypeExt, SizeRefExt, SizeRefMutExt, SizeTypeExt, SizedRefExt, SizedRefMutExt,
+        SizedTypeExt, TypeDesc, TypeExt,
     };
 }
 
@@ -323,7 +325,7 @@ pub struct DirectInnerRefTypes<T> {
     __marker: PhantomData<T>,
 }
 
-pub unsafe trait TypeExt: Into<TypeEnum> + PartialEq + Eq + Send + Sync + 'static {
+pub unsafe trait TypeExt: Sized + PartialEq + Eq + Send + Sync + 'static {
     /// Returns `true`, if the type can be safely cast/reinterpreted as another.
     /// Otherwise returns `false`.
     fn is_abi_compatible(&self, other: &Self) -> bool;
@@ -426,14 +428,153 @@ mod ty_traits {
 
 pub use ty_traits::{CloneableTypeExt, SafeBinaryRepresentationTypeExt, SizedTypeExt};
 
-/// Implementors of this trait represent concrete channel types which can be referred to.
-pub trait TypeTrait: TypeExt + DowncastFromTypeEnum {}
+/// A type descriptor, that can either be a concrete type (implements `TypeTrait`) or a wildcard type `!`.
+/// The type `!` stands for any type and can typically be resolved using `downcast` functions into
+/// the appropriate concrete type.
+///
+/// For example, data of type `Unique<List<PrimitiveType>>` can be expressed via all of the
+/// following types:
+/// * `Unique<List<PrimitiveType>>`
+/// * `Unique<List<!>>`
+/// * `Unique<!>`
+/// * `!`
+pub unsafe trait TypeDesc: TypeExt + DowncastFromTypeEnum {
+    const WILDCARD: bool = false;
 
+    fn is_wildcard(&self) -> bool {
+        Self::WILDCARD
+    }
+}
+
+unsafe impl TypeExt for ! {
+    fn is_abi_compatible(&self, other: &Self) -> bool {
+        unreachable!()
+    }
+
+    unsafe fn children<'a>(&'a self, data: Bytes<'a>) -> Vec<TypedBytes<'a>> {
+        unreachable!()
+    }
+}
+
+impl DowncastFromTypeEnum for ! {
+    fn resolve_from(from: TypeEnum) -> Option<TypeResolution<Self, TypeEnum>>
+    where Self: Sized {
+        Some(TypeResolution::Wildcard(from))
+    }
+
+    fn resolve_from_ref(from: &TypeEnum) -> Option<TypeResolution<&Self, &TypeEnum>> {
+        Some(TypeResolution::Wildcard(from))
+    }
+
+    fn resolve_from_mut(from: &mut TypeEnum) -> Option<TypeResolution<&mut Self, &mut TypeEnum>> {
+        Some(TypeResolution::Wildcard(from))
+    }
+}
+
+unsafe impl TypeDesc for ! {
+    const WILDCARD: bool = true;
+}
+
+/// Implementors of this trait represent concrete channel types which can be referred to.
+pub trait TypeTrait: TypeDesc + Into<TypeEnum> {}
+
+/// The result of a downcast.
+pub enum TypeResolution<Resolved, Unresolved> {
+    Resolved(Resolved),
+    Wildcard(Unresolved),
+}
+
+impl<Resolved, Unresolved> TypeResolution<Resolved, Unresolved> {
+    pub fn unwrap_resolved(self) -> Resolved {
+        if let TypeResolution::Resolved(resolved) = self {
+            resolved
+        } else {
+            panic!("Tried to unwrap `TypeResolution` as `TypeResolution::Resolved`, but the variant does not match.");
+        }
+    }
+}
+
+impl<Resolved> TypeResolution<Resolved, TypeEnum>
+where Resolved: Into<TypeEnum>
+{
+    pub fn into_type_enum(self) -> TypeEnum {
+        match self {
+            TypeResolution::Resolved(resolved) => resolved.into(),
+            TypeResolution::Wildcard(unresolved) => unresolved,
+        }
+    }
+}
+
+impl<Resolved> TypeResolution<&mut Resolved, &mut TypeEnum>
+where Resolved: Into<TypeEnum> + Clone
+{
+    pub fn into_type_enum(self) -> TypeEnum {
+        match self {
+            TypeResolution::Resolved(resolved) => resolved.clone().into(),
+            TypeResolution::Wildcard(unresolved) => unresolved.clone(),
+        }
+    }
+}
+
+impl<Resolved> TypeResolution<&Resolved, &TypeEnum>
+where Resolved: Into<TypeEnum> + Clone
+{
+    pub fn into_type_enum(self) -> TypeEnum {
+        match self {
+            TypeResolution::Resolved(resolved) => resolved.clone().into(),
+            TypeResolution::Wildcard(unresolved) => unresolved.clone(),
+        }
+    }
+}
+
+/// Downcasts the [`TypeEnum`].
 pub trait DowncastFromTypeEnum {
+    fn resolve_from(from: TypeEnum) -> Option<TypeResolution<Self, TypeEnum>>
+    where Self: Sized;
+    fn resolve_from_ref(from: &TypeEnum) -> Option<TypeResolution<&Self, &TypeEnum>>;
+    fn resolve_from_mut(from: &mut TypeEnum) -> Option<TypeResolution<&mut Self, &mut TypeEnum>>;
+}
+
+pub trait DowncastFromTypeEnumExt {
     fn downcast_from(from: TypeEnum) -> Option<Self>
     where Self: Sized;
     fn downcast_from_ref(from: &TypeEnum) -> Option<&Self>;
     fn downcast_from_mut(from: &mut TypeEnum) -> Option<&mut Self>;
+}
+
+impl<T> DowncastFromTypeEnumExt for T
+where T: DowncastFromTypeEnum
+{
+    fn downcast_from(from: TypeEnum) -> Option<Self>
+    where Self: Sized {
+        Self::resolve_from(from).and_then(|resolution| {
+            if let TypeResolution::Resolved(resolved) = resolution {
+                Some(resolved)
+            } else {
+                None
+            }
+        })
+    }
+
+    fn downcast_from_ref(from: &TypeEnum) -> Option<&Self> {
+        Self::resolve_from_ref(from).and_then(|resolution| {
+            if let TypeResolution::Resolved(resolved) = resolution {
+                Some(resolved)
+            } else {
+                None
+            }
+        })
+    }
+
+    fn downcast_from_mut(from: &mut TypeEnum) -> Option<&mut Self> {
+        Self::resolve_from_mut(from).and_then(|resolution| {
+            if let TypeResolution::Resolved(resolved) = resolution {
+                Some(resolved)
+            } else {
+                None
+            }
+        })
+    }
 }
 
 pub trait InitializeWith<T>: Default {
@@ -474,6 +615,8 @@ where T: DynTypeTrait
         <T as DynTypeTrait>::children(self, data)
     }
 }
+
+unsafe impl<T> TypeDesc for T where T: DynTypeTrait {}
 
 macro_rules! define_type_enum {
     (@void $($tt:tt)*) => {};
@@ -557,8 +700,8 @@ macro_rules! define_type_enum {
 }
 
 define_type_enum![
-    Shared(Shared) <- Shared::new(PrimitiveType::U8),
-    Unique(Unique) <- Unique::new(PrimitiveType::U8),
+    Shared(Shared) <- Shared::new(PrimitiveType::U8).upcast(),
+    Unique(Unique) <- Unique::new(PrimitiveType::U8).upcast(),
     Primitive(PrimitiveType) <- PrimitiveType::U8,
     Option(OptionType) <- OptionType::new(PrimitiveType::U8),
     // Tuple(Vec<Self>),
@@ -568,6 +711,18 @@ define_type_enum![
 ];
 
 impl TypeEnum {
+    pub fn resolve<T: DowncastFromTypeEnum + Sized>(self) -> Option<TypeResolution<T, Self>> {
+        T::resolve_from(self)
+    }
+
+    pub fn resolve_ref<T: DowncastFromTypeEnum>(&self) -> Option<TypeResolution<&T, &Self>> {
+        T::resolve_from_ref(self)
+    }
+
+    pub fn resolve_mut<T: DowncastFromTypeEnum>(&mut self) -> Option<TypeResolution<&mut T, &mut Self>> {
+        T::resolve_from_mut(self)
+    }
+
     pub fn downcast<T: DowncastFromTypeEnum + Sized>(self) -> Option<T> {
         T::downcast_from(self)
     }

@@ -1,7 +1,7 @@
 use super::{
     BorrowedRefAny, BorrowedRefMutAny, Bytes, DowncastFromTypeEnum, DynTypeDescriptor, DynTypeTrait, Ref,
-    RefAnyExt, RefMut, RefMutAny, RefMutAnyExt, SizeRefMutExt, SizedTypeExt, TypeEnum, TypeExt, TypedBytes,
-    TypedBytesMut,
+    RefAnyExt, RefMut, RefMutAny, RefMutAnyExt, SizeRefMutExt, SizedTypeExt, TypeDesc, TypeEnum, TypeExt,
+    TypedBytes, TypedBytesMut,
 };
 use crate::graph::ListAllocation;
 use crate::util::CowMapExt;

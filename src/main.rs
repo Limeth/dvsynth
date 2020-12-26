@@ -1,3 +1,5 @@
+#![feature(associated_type_bounds)]
+#![feature(never_type)]
 #![feature(raw)]
 #![feature(generic_associated_types)]
 #![feature(negative_impls)]

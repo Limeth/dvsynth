@@ -240,8 +240,11 @@ impl !Send for AllocatorHandle<'_, '_> {}
 impl !Sync for AllocatorHandle<'_, '_> {}
 
 impl<'invocation, 'state: 'invocation> AllocatorHandle<'invocation, 'state> {
-    pub fn allocate_object<T: DynTypeTrait>(self, descriptor: T::Descriptor) -> OwnedRefMut<'state, Unique> {
-        OwnedRefMut::allocate_object::<T>(descriptor, self)
+    pub fn allocate_object<T: DynTypeTrait>(
+        self,
+        descriptor: T::Descriptor,
+    ) -> OwnedRefMut<'state, Unique<T>> {
+        OwnedRefMut::<Unique<T>>::allocate_object(descriptor, self)
     }
 
     // pub fn allocate_bytes<T: TypeTrait + SizedTypeExt>(self, ty: T) -> OwnedRefMut<'state, T> {

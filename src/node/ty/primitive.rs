@@ -1,6 +1,6 @@
 use super::{
-    Bytes, CloneableTypeExt, DowncastFromTypeEnum, SafeBinaryRepresentationTypeExt, SizedTypeExt, TypeEnum,
-    TypeExt, TypedBytes,
+    Bytes, CloneableTypeExt, DowncastFromTypeEnum, SafeBinaryRepresentationTypeExt, SizedTypeExt, TypeDesc,
+    TypeEnum, TypeExt, TypeTrait, TypedBytes,
 };
 use byteorder::{ByteOrder, ReadBytesExt, WriteBytesExt};
 use std::fmt::Display;
@@ -271,3 +271,6 @@ impl From<PrimitiveType> for TypeEnum {
 }
 
 impl_downcast_from_type_enum!(Primitive(PrimitiveType));
+
+unsafe impl TypeDesc for PrimitiveType {}
+impl TypeTrait for PrimitiveType {}

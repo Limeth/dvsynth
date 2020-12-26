@@ -5,7 +5,7 @@ use std::fmt::Display;
 
 use super::{
     BorrowedRefAny, BorrowedRefMutAny, Bytes, BytesMut, DowncastFromTypeEnum, Ref, RefAnyExt, RefMut,
-    RefMutAny, RefMutAnyExt, SizedTypeExt, TypeEnum, TypeExt, TypeTrait, TypedBytes, TypedBytesMut,
+    RefMutAny, RefMutAnyExt, SizedTypeExt, TypeDesc, TypeEnum, TypeExt, TypeTrait, TypedBytes, TypedBytesMut,
 };
 
 pub mod prelude {
@@ -110,6 +110,7 @@ impl From<OptionType> for TypeEnum {
 
 impl_downcast_from_type_enum!(Option(OptionType));
 
+unsafe impl TypeDesc for OptionType {}
 impl TypeTrait for OptionType {}
 
 pub trait OptionRefExt<'a> {

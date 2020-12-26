@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use std::fmt::Display;
 
-use super::{Bytes, DowncastFromTypeEnum, SizedTypeExt, TypeEnum, TypeExt, TypedBytes};
+use super::{Bytes, DowncastFromTypeEnum, SizedTypeExt, TypeDesc, TypeEnum, TypeExt, TypeTrait, TypedBytes};
 
 pub mod prelude {}
 
@@ -99,3 +99,6 @@ impl From<ArrayType> for TypeEnum {
 }
 
 impl_downcast_from_type_enum!(Array(ArrayType));
+
+unsafe impl TypeDesc for ArrayType {}
+impl TypeTrait for ArrayType {}
