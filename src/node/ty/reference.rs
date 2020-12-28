@@ -188,10 +188,34 @@ impl<'state> OwnedRefMut<'state, !> {
             None
         }
     }
+
+    /// Safety: A zeroed buffer may not be a valid value for the provided type and must be
+    ///         initialized properly.
+    pub unsafe fn zeroed_from_enum_if_sized(
+        ty: TypeEnum,
+        handle: AllocatorHandle<'_, 'state>,
+    ) -> Option<Self> {
+        ty.value_size_if_sized().map(|size| OwnedRefMut {
+            bytes: smallvec![0; size].into(),
+            ty,
+            rc: NodeStateRefcounter(handle.node),
+            __marker: Default::default(),
+        })
+    }
+
+    pub fn copied_from(typed_bytes: TypedBytes<'_>, handle: AllocatorHandle<'_, 'state>) -> Option<Self> {
+        let (bytes_src, ty) = typed_bytes.into();
+        unsafe {
+            Self::zeroed_from_enum_if_sized(ty.into_owned(), handle).map(|mut owned| {
+                owned.bytes.copy_from_slice(bytes_src.bytes().unwrap());
+                owned
+            })
+        }
+    }
 }
 
 impl<'state, T: TypeTrait> OwnedRefMut<'state, T> {
-    pub fn upcast(self) -> OwnedRefMutAny<'state> {
+    pub fn upcast(self) -> OwnedRefMut<'state> {
         unsafe { self.reinterpret() }
     }
 }
@@ -206,6 +230,35 @@ impl<'state, T: TypeDesc> OwnedRefMut<'state, T> {
         // Safety: Source and target types are of the same layout, the type `T`
         // is only used in `PhantomData`.
         std::mem::transmute(self)
+    }
+
+    /// Safety: A zeroed buffer may not be a valid value for the provided type and must be
+    ///         initialized properly.
+    ///         Additionally, it must be possible to downcast the type of `typed_bytes` to
+    ///         the generic type `T`.
+    pub unsafe fn zeroed_from_enum_with_unchecked_type_if_sized(
+        ty: TypeEnum,
+        handle: AllocatorHandle<'_, 'state>,
+    ) -> Option<Self> {
+        ty.value_size_if_sized().map(|size| OwnedRefMut {
+            bytes: smallvec![0; size].into(),
+            ty,
+            rc: NodeStateRefcounter(handle.node),
+            __marker: Default::default(),
+        })
+    }
+
+    /// Safety: It must be possible to downcast the type of `typed_bytes` to
+    ///         the generic type `T`.
+    pub unsafe fn copied_with_unchecked_type_if_sized(
+        typed_bytes: TypedBytes<'_>,
+        handle: AllocatorHandle<'_, 'state>,
+    ) -> Option<Self> {
+        let (bytes_src, ty) = typed_bytes.into();
+        Self::zeroed_from_enum_with_unchecked_type_if_sized(ty.into_owned(), handle).map(|mut owned| {
+            owned.bytes.copy_from_slice(bytes_src.bytes().unwrap());
+            owned
+        })
     }
 
     fn clone_from_if_cloneable<'reference, 'invocation>(
@@ -346,7 +399,7 @@ impl<'a, T: TypeDesc> BorrowedRefMut<'a, T> {
 }
 
 impl<'a, T: TypeDesc> BorrowedRefMut<'a, T> {
-    pub fn upcast(self) -> BorrowedRefMut<'a, !> {
+    pub fn upcast(self) -> BorrowedRefMut<'a> {
         BorrowedRefMut { typed_bytes: self.typed_bytes, rc: self.rc, __marker: Default::default() }
     }
 }
@@ -409,7 +462,7 @@ impl<'a> BorrowedRef<'a, !> {
 }
 
 impl<'a, T: TypeDesc> BorrowedRef<'a, T> {
-    pub fn upcast(self) -> BorrowedRef<'a, !> {
+    pub fn upcast(self) -> BorrowedRef<'a> {
         BorrowedRef { typed_bytes: self.typed_bytes, rc: self.rc, __marker: Default::default() }
     }
 }
@@ -425,7 +478,3 @@ impl<'a, T: TypeDesc> RefAny<'a> for BorrowedRef<'a, T> {
         (self.rc, self.typed_bytes.borrow())
     }
 }
-
-pub type OwnedRefMutAny<'a> = OwnedRefMut<'a, !>;
-pub type BorrowedRefMutAny<'a> = BorrowedRefMut<'a, !>;
-pub type BorrowedRefAny<'a> = BorrowedRef<'a, !>;

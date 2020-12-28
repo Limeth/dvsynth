@@ -11,9 +11,9 @@
 #![feature(trait_alias)]
 //!
 //! Task list:
-//! * Make it possible to own sized types (and fix allocation)
-//! * Bind OwnedRef types to state lifetime so as to make sure it is not sent between tasks
-//!   externally.
+//! * Finish adding generic params to channel types
+//! * Explore the usage of associated types to avoid dynamic allocation for
+//!   owned references of sized channel types.
 //! * Node generics
 //! * Window node:
 //!     * Make window size accessible only when resizable is false

@@ -703,7 +703,7 @@ define_type_enum![
     Shared(Shared) <- Shared::new(PrimitiveType::U8).upcast(),
     Unique(Unique) <- Unique::new(PrimitiveType::U8).upcast(),
     Primitive(PrimitiveType) <- PrimitiveType::U8,
-    Option(OptionType) <- OptionType::new(PrimitiveType::U8),
+    Option(OptionType) <- OptionType::new(PrimitiveType::U8).upcast(),
     // Tuple(Vec<Self>),
     Array(ArrayType) <- ArrayType::single(PrimitiveType::U8),
     List(ListType) <- ListType::new(PrimitiveType::U8),

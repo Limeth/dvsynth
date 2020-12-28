@@ -8,9 +8,9 @@ use crate::graph::alloc::Allocator;
 use crate::node::behaviour::AllocatorHandle;
 
 use super::{
-    AllocationPointer, BorrowedRef, BorrowedRefAny, BorrowedRefMut, BorrowedRefMutAny, Bytes,
-    CloneableTypeExt, DowncastFromTypeEnum, OwnedRefMut, Ref, RefAnyExt, RefMut, RefMutAny, SizedTypeExt,
-    TypeDesc, TypeEnum, TypeExt, TypeResolution, TypeTrait, TypedBytes,
+    AllocationPointer, BorrowedRef, BorrowedRefMut, Bytes, CloneableTypeExt, DowncastFromTypeEnum,
+    OwnedRefMut, Ref, RefAnyExt, RefMut, RefMutAny, SizedTypeExt, TypeDesc, TypeEnum, TypeExt,
+    TypeResolution, TypeTrait, TypedBytes,
 };
 
 pub mod prelude {

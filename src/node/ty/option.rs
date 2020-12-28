@@ -1,12 +1,14 @@
+use super::{
+    BorrowedRef, BorrowedRefMut, Bytes, BytesMut, DowncastFromTypeEnum, OwnedRefMut, Ref, RefAnyExt, RefMut,
+    RefMutAny, RefMutAnyExt, SizedTypeExt, TypeDesc, TypeEnum, TypeExt, TypeResolution, TypeTrait,
+    TypedBytes, TypedBytesMut,
+};
+use crate::node::behaviour::AllocatorHandle;
 use crate::util::CowMapExt;
 use std::borrow::Cow;
 use std::convert::{TryFrom, TryInto};
 use std::fmt::Display;
-
-use super::{
-    BorrowedRefAny, BorrowedRefMutAny, Bytes, BytesMut, DowncastFromTypeEnum, Ref, RefAnyExt, RefMut,
-    RefMutAny, RefMutAnyExt, SizedTypeExt, TypeDesc, TypeEnum, TypeExt, TypeTrait, TypedBytes, TypedBytesMut,
-};
+use std::marker::PhantomData;
 
 pub mod prelude {
     pub use super::{OptionRefExt, OptionRefMutExt};
@@ -33,56 +35,102 @@ impl TryFrom<u8> for OptionFlags {
 
 /// A type that is either `None<>`
 #[derive(Debug, Hash, PartialEq, Eq, Clone)]
-pub struct OptionType {
-    pub item_type: Box<TypeEnum>,
+pub struct OptionType<T: TypeDesc = !> {
+    pub child_ty: Box<TypeEnum>,
+    __marker: PhantomData<T>,
 }
 
-impl OptionType {
-    pub fn new(item_type: impl Into<TypeEnum> + SizedTypeExt) -> Self {
-        Self { item_type: Box::new(item_type.into()) }
+impl OptionType<!> {
+    pub fn from_enum_if_sized(child_ty: impl Into<TypeEnum>) -> Option<Self> {
+        let child_ty = child_ty.into();
+        child_ty
+            .value_size_if_sized()
+            .map(|_| Self { child_ty: Box::new(child_ty), __marker: Default::default() })
     }
 
-    pub fn new_if_sized(item_type: impl Into<TypeEnum>) -> Option<Self> {
-        let item_type = item_type.into();
-        item_type.value_size_if_sized().map(|_| Self { item_type: Box::new(item_type) })
+    pub fn downcast_child<T: TypeDesc>(self) -> Option<OptionType<T>> {
+        if self.child_ty.resolve_ref::<T>().is_some() {
+            Some(OptionType { child_ty: self.child_ty, __marker: Default::default() })
+        } else {
+            None
+        }
     }
 
+    pub fn downcast_child_ref<T: TypeDesc>(&self) -> Option<&OptionType<T>> {
+        if self.child_ty.resolve_ref::<T>().is_some() {
+            // Safety: No fields except for the marker `PhantomData` are affected.
+            Some(unsafe { std::mem::transmute::<&Self, &OptionType<T>>(self) })
+        } else {
+            None
+        }
+    }
+
+    pub fn downcast_child_mut<T: TypeDesc>(&mut self) -> Option<&mut OptionType<T>> {
+        if self.child_ty.resolve_ref::<T>().is_some() {
+            // Safety: No fields except for the marker `PhantomData` are affected.
+            Some(unsafe { std::mem::transmute::<&mut Self, &mut OptionType<T>>(self) })
+        } else {
+            None
+        }
+    }
+}
+
+impl<T: TypeTrait + SizedTypeExt> OptionType<T> {
+    pub fn new(child_ty: T) -> Self {
+        Self { child_ty: Box::new(child_ty.into()), __marker: Default::default() }
+    }
+}
+
+impl<T: TypeDesc> OptionType<T> {
+    pub fn upcast(self) -> OptionType<!> {
+        OptionType { child_ty: self.child_ty, __marker: Default::default() }
+    }
+}
+
+impl<T: TypeDesc> OptionType<T> {
     fn get_flags<'a>(&'a self, data: Bytes<'a>) -> OptionFlags {
-        let value_size = self.item_type.value_size_if_sized().unwrap();
+        let value_size = self.child_ty.value_size_if_sized().unwrap();
         let bytes = data.bytes().unwrap();
 
         bytes[value_size].try_into().expect("Malformed `OptionType` flags.")
     }
 
+    fn set_flags<'a>(&'a self, data: BytesMut<'a>, flags: OptionFlags) {
+        let value_size = self.child_ty.value_size_if_sized().unwrap();
+        let bytes = data.bytes_mut().unwrap();
+
+        bytes[value_size] = flags as u8;
+    }
+
     fn get_bytes<'a>(&'a self, data: Bytes<'a>) -> Option<TypedBytes<'a>> {
-        let value_size = self.item_type.value_size_if_sized().unwrap();
+        let value_size = self.child_ty.value_size_if_sized().unwrap();
 
         match self.get_flags(data) {
             OptionFlags::None => None,
             OptionFlags::Some => {
                 let bytes = data.bytes().unwrap();
-                Some(TypedBytes::from(&bytes[0..value_size - 1], Cow::Borrowed(self.item_type.as_ref())))
+                Some(TypedBytes::from(&bytes[0..value_size], Cow::Borrowed(self.child_ty.as_ref())))
             }
         }
     }
 }
 
-impl Display for OptionType {
+impl<T: TypeDesc> Display for OptionType<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_fmt(format_args!("Option<{}>", self.item_type))
+        f.write_fmt(format_args!("Option<{}>", self.child_ty))
     }
 }
 
-unsafe impl SizedTypeExt for OptionType {
+unsafe impl<T: TypeDesc> SizedTypeExt for OptionType<T> {
     fn value_size(&self) -> usize {
         // FIXME: use `std::alloc::Layout`s instead
-        self.item_type.value_size_if_sized().unwrap() + 1 // extra byte for flag
+        self.child_ty.value_size_if_sized().unwrap() + 1 // extra byte for flag
     }
 }
 
-unsafe impl TypeExt for OptionType {
+unsafe impl<T: TypeDesc> TypeExt for OptionType<T> {
     fn is_abi_compatible(&self, other: &Self) -> bool {
-        self.item_type.is_abi_compatible(&other.item_type)
+        self.child_ty.is_abi_compatible(&other.child_ty)
     }
 
     unsafe fn children<'a>(&'a self, data: Bytes<'a>) -> Vec<TypedBytes<'a>> {
@@ -94,27 +142,52 @@ unsafe impl TypeExt for OptionType {
     }
 
     fn has_safe_binary_representation(&self) -> bool {
-        self.item_type.has_safe_binary_representation()
+        self.child_ty.has_safe_binary_representation()
     }
 
     fn is_cloneable(&self) -> bool {
-        self.item_type.is_cloneable()
+        self.child_ty.is_cloneable()
     }
 }
 
-impl From<OptionType> for TypeEnum {
-    fn from(other: OptionType) -> Self {
-        TypeEnum::Option(other)
+impl<T: TypeDesc> From<OptionType<T>> for TypeEnum {
+    fn from(other: OptionType<T>) -> Self {
+        TypeEnum::Option(other.upcast())
     }
 }
 
-impl_downcast_from_type_enum!(Option(OptionType));
+impl<T: TypeDesc> DowncastFromTypeEnum for OptionType<T> {
+    fn resolve_from(from: TypeEnum) -> Option<TypeResolution<Self, TypeEnum>>
+    where Self: Sized {
+        if let TypeEnum::Option(inner) = from {
+            inner.downcast_child::<T>().map(|ty| TypeResolution::Resolved(ty))
+        } else {
+            None
+        }
+    }
 
-unsafe impl TypeDesc for OptionType {}
-impl TypeTrait for OptionType {}
+    fn resolve_from_ref(from: &TypeEnum) -> Option<TypeResolution<&Self, &TypeEnum>> {
+        if let TypeEnum::Option(inner) = from {
+            inner.downcast_child_ref::<T>().map(|ty| TypeResolution::Resolved(ty))
+        } else {
+            None
+        }
+    }
 
-pub trait OptionRefExt<'a> {
-    fn get(&self) -> Option<BorrowedRefAny<'_>>;
+    fn resolve_from_mut(from: &mut TypeEnum) -> Option<TypeResolution<&mut Self, &mut TypeEnum>> {
+        if let TypeEnum::Option(inner) = from {
+            inner.downcast_child_mut::<T>().map(|ty| TypeResolution::Resolved(ty))
+        } else {
+            None
+        }
+    }
+}
+
+unsafe impl<T: TypeDesc> TypeDesc for OptionType<T> {}
+impl<T: TypeDesc> TypeTrait for OptionType<T> {}
+
+pub trait OptionRefExt<'a, C: TypeDesc> {
+    fn get(&self) -> Option<BorrowedRef<'_, C>>;
     fn is_some(&self) -> bool;
 
     fn is_none(&self) -> bool {
@@ -122,16 +195,22 @@ pub trait OptionRefExt<'a> {
     }
 }
 
-pub trait OptionRefMutExt<'a> {
-    fn get_mut(&mut self) -> Option<BorrowedRefMutAny<'_>>;
-    fn set<'b, R>(&mut self, item: impl Into<Option<R>>) -> Result<(), ()>
-    where R: RefMutAny<'b> + 'b;
+pub trait OptionRefMutExt<'a, C: TypeDesc> {
+    fn get_mut(&mut self) -> Option<BorrowedRefMut<'_, C>>;
+    fn take<'state>(&mut self, handle: AllocatorHandle<'_, 'state>) -> Option<OwnedRefMut<'state, C>>;
+    fn replace<'state, 'b>(
+        &mut self,
+        item: impl Into<Option<OwnedRefMut<'b, C>>>,
+        handle: AllocatorHandle<'_, 'state>,
+    ) -> Result<Option<OwnedRefMut<'state, C>>, ()>;
 }
 
-impl<'a, T> OptionRefExt<'a> for T
-where T: Ref<'a, OptionType>
+impl<'a, T, C> OptionRefExt<'a, C> for T
+where
+    T: Ref<'a, OptionType<C>>,
+    C: TypeDesc,
 {
-    fn get(&self) -> Option<BorrowedRefAny<'_>> {
+    fn get(&self) -> Option<BorrowedRef<'_, C>> {
         let typed_bytes = unsafe { self.typed_bytes() };
         let (bytes, ty) = typed_bytes.into();
         let ty = ty.map(|ty| ty.downcast_ref::<OptionType>().unwrap());
@@ -139,11 +218,11 @@ where T: Ref<'a, OptionType>
         match ty.get_flags(bytes) {
             OptionFlags::None => None,
             OptionFlags::Some => {
-                let value_size = ty.item_type.value_size_if_sized().unwrap();
-                let child_ty = ty.map(|ty| ty.item_type.as_ref());
+                let value_size = ty.child_ty.value_size_if_sized().unwrap();
+                let child_ty = ty.map(|ty| ty.child_ty.as_ref());
                 let bytes = bytes.bytes().unwrap();
-                let child_typed_bytes = TypedBytes::from(&bytes[0..value_size - 1], child_ty);
-                Some(unsafe { BorrowedRefAny::from(child_typed_bytes, self.refcounter()) })
+                let child_typed_bytes = TypedBytes::from(&bytes[0..value_size], child_ty);
+                Some(unsafe { BorrowedRef::from_unchecked_type(child_typed_bytes, self.refcounter()) })
             }
         }
     }
@@ -157,10 +236,12 @@ where T: Ref<'a, OptionType>
     }
 }
 
-impl<'a, T> OptionRefMutExt<'a> for T
-where T: RefMut<'a, OptionType>
+impl<'a, T, C> OptionRefMutExt<'a, C> for T
+where
+    T: RefMut<'a, OptionType<C>>,
+    C: TypeDesc,
 {
-    fn get_mut(&mut self) -> Option<BorrowedRefMutAny<'_>> {
+    fn get_mut(&mut self) -> Option<BorrowedRefMut<'_, C>> {
         let (rc, typed_bytes) = unsafe { self.rc_and_typed_bytes_mut() };
         let (bytes, ty) = typed_bytes.into();
         let ty = ty.map(|ty| ty.downcast_ref::<OptionType>().unwrap());
@@ -168,17 +249,56 @@ where T: RefMut<'a, OptionType>
         match ty.get_flags(bytes.borrow()) {
             OptionFlags::None => None,
             OptionFlags::Some => {
-                let value_size = ty.item_type.value_size_if_sized().unwrap();
-                let child_ty = ty.map(|ty| ty.item_type.as_ref());
+                let value_size = ty.child_ty.value_size_if_sized().unwrap();
+                let child_ty = ty.map(|ty| ty.child_ty.as_ref());
                 let bytes = bytes.bytes_mut().unwrap();
-                let child_typed_bytes = TypedBytesMut::from(&mut bytes[0..value_size - 1], child_ty);
-                Some(unsafe { BorrowedRefMutAny::from(child_typed_bytes, rc) })
+                let child_typed_bytes = TypedBytesMut::from(&mut bytes[0..value_size], child_ty);
+                Some(unsafe { BorrowedRefMut::from_unchecked_type(child_typed_bytes, rc) })
             }
         }
     }
 
-    fn set<'b, R>(&mut self, item: impl Into<Option<R>>) -> Result<(), ()>
-    where R: RefMutAny<'b> + 'b {
-        todo!()
+    fn take<'state>(&mut self, handle: AllocatorHandle<'_, 'state>) -> Option<OwnedRefMut<'state, C>> {
+        let typed_bytes = unsafe { self.typed_bytes_mut() };
+        let (mut bytes, ty) = typed_bytes.into();
+        let ty = ty.map(|ty| ty.downcast_ref::<OptionType>().unwrap());
+
+        match ty.get_flags(bytes.borrow()) {
+            OptionFlags::None => None,
+            OptionFlags::Some => {
+                ty.set_flags(bytes.borrow_mut(), OptionFlags::None);
+
+                let value_size = ty.child_ty.value_size_if_sized().unwrap();
+                let child_ty = ty.map(|ty| ty.child_ty.as_ref());
+                let bytes = bytes.bytes_mut().unwrap();
+                let child_typed_bytes = TypedBytes::from(&bytes[0..value_size], child_ty);
+
+                Some(unsafe {
+                    OwnedRefMut::copied_with_unchecked_type_if_sized(child_typed_bytes, handle).unwrap()
+                })
+            }
+        }
+    }
+
+    fn replace<'state, 'b>(
+        &mut self,
+        item: impl Into<Option<OwnedRefMut<'b, C>>>,
+        handle: AllocatorHandle<'_, 'state>,
+    ) -> Result<Option<OwnedRefMut<'state, C>>, ()> {
+        let result = self.take(handle);
+
+        if let Some(mut item) = item.into() {
+            let typed_bytes = unsafe { self.typed_bytes_mut() };
+            let (mut bytes, ty) = typed_bytes.into();
+            let ty = ty.map(|ty| ty.downcast_ref::<OptionType>().unwrap());
+            let value_size = ty.child_ty.value_size_if_sized().unwrap();
+            let item_typed_bytes = unsafe { item.typed_bytes_mut() };
+
+            ty.set_flags(bytes.borrow_mut(), OptionFlags::Some);
+            bytes.bytes_mut().unwrap()[0..value_size]
+                .copy_from_slice(item_typed_bytes.bytes().bytes().unwrap());
+        }
+
+        Ok(result)
     }
 }

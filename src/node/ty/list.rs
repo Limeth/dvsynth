@@ -1,5 +1,5 @@
 use super::{
-    BorrowedRefAny, BorrowedRefMutAny, Bytes, DowncastFromTypeEnum, DynTypeDescriptor, DynTypeTrait, Ref,
+    BorrowedRef, BorrowedRefMut, Bytes, DowncastFromTypeEnum, DynTypeDescriptor, DynTypeTrait, Ref,
     RefAnyExt, RefMut, RefMutAny, RefMutAnyExt, SizeRefMutExt, SizedTypeExt, TypeDesc, TypeEnum, TypeExt,
     TypedBytes, TypedBytesMut,
 };
@@ -87,7 +87,7 @@ impl DynTypeTrait for ListType {
 
 pub trait ListRefExt<'a> {
     fn len(&self) -> usize;
-    fn get(&self, index: usize) -> Result<BorrowedRefAny<'_>, ()>;
+    fn get(&self, index: usize) -> Result<BorrowedRef<'_>, ()>;
 }
 
 impl<'a, T> ListRefExt<'a> for T
@@ -102,7 +102,7 @@ where T: Ref<'a, ListType>
         list.data.len() / item_size
     }
 
-    fn get(&self, index: usize) -> Result<BorrowedRefAny<'_>, ()> {
+    fn get(&self, index: usize) -> Result<BorrowedRef<'_>, ()> {
         let typed_bytes = unsafe { self.typed_bytes() };
         let (bytes, ty) = typed_bytes.into();
         let child_ty = ty.map(|ty| {
@@ -116,7 +116,7 @@ where T: Ref<'a, ListType>
             Err(())
         } else {
             let bytes = &list.data[(index * item_size)..((index + 1) * item_size)];
-            Ok(unsafe { BorrowedRefAny::from(TypedBytes::from(bytes, child_ty), self.refcounter()) })
+            Ok(unsafe { BorrowedRef::from(TypedBytes::from(bytes, child_ty), self.refcounter()) })
         }
     }
 }
@@ -126,7 +126,7 @@ pub trait ListRefMutExt<'a> {
     fn remove(&mut self, index: usize) -> Result<(), ()>;
     fn push<'b>(&mut self, item: impl RefMutAny<'b> + 'b) -> Result<(), ()>;
     fn insert<'b>(&mut self, index: usize, item: impl RefMutAny<'b> + 'b) -> Result<(), ()>;
-    fn get_mut(&mut self, index: usize) -> Result<BorrowedRefMutAny<'_>, ()>;
+    fn get_mut(&mut self, index: usize) -> Result<BorrowedRefMut<'_>, ()>;
 
     // API for types with safe binary representation:
     // fn item_range_bytes_mut(&mut self, range: Range<usize>) -> Option<&mut [u8]>;
@@ -137,7 +137,7 @@ pub trait ListRefMutExt<'a> {
 impl<'a, T> ListRefMutExt<'a> for T
 where T: RefMut<'a, ListType>
 {
-    fn get_mut(&mut self, index: usize) -> Result<BorrowedRefMutAny<'_>, ()> {
+    fn get_mut(&mut self, index: usize) -> Result<BorrowedRefMut<'_>, ()> {
         let (rc, typed_bytes) = unsafe { self.rc_and_typed_bytes_mut() };
         let (bytes, ty) = typed_bytes.into();
         let child_ty = ty.map(|ty| {
@@ -151,7 +151,7 @@ where T: RefMut<'a, ListType>
             Err(())
         } else {
             let bytes = &mut list.data[(index * item_size)..((index + 1) * item_size)];
-            Ok(unsafe { BorrowedRefMutAny::from(TypedBytesMut::from(bytes, child_ty), rc) })
+            Ok(unsafe { BorrowedRefMut::from(TypedBytesMut::from(bytes, child_ty), rc) })
         }
     }
 
