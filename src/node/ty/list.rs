@@ -3,6 +3,7 @@ use super::{
     Ref, RefAny, RefAnyExt, RefMut, RefMutAny, RefMutAnyExt, SizeRefMutExt, SizedTypeExt, TypeDesc, TypeEnum,
     TypeExt, TypeResolution, TypeTrait, TypedBytes, TypedBytesMut,
 };
+use crate::node::behaviour::AllocatorHandle;
 use crate::util::CowMapExt;
 use std::borrow::Cow;
 use std::fmt::Display;
@@ -247,7 +248,11 @@ where
 
 pub trait ListRefMutExt<'a, T: TypeDesc> {
     // fn remove_range(&mut self, range: Range<usize>) -> Result<(), ()>;
-    // fn remove(&mut self, index: usize) -> Result<(), ()>;
+    fn remove<'state>(
+        &mut self,
+        index: usize,
+        handle: AllocatorHandle<'_, 'state>,
+    ) -> Result<OwnedRefMut<'state, T>, ()>;
     fn push<'b>(&mut self, item: OwnedRefMut<'b, T>) -> Result<(), ()>;
     fn insert<'b>(&mut self, index: usize, item: OwnedRefMut<'b, T>) -> Result<(), ()>;
     fn get_mut(&mut self, index: usize) -> Result<BorrowedRefMut<'_, T>, ()>;
@@ -282,27 +287,40 @@ where
         }
     }
 
-    // TODO: refcounting
-    //
-    // fn remove_range(&mut self, range: Range<usize>) -> Result<(), ()> {
-    //     let typed_bytes = unsafe { self.typed_bytes_mut() };
-    //     let ty = typed_bytes.borrow().ty();
-    //     let ty = ty.downcast_ref::<ListType>().unwrap();
-    //     let item_size = ty.child_ty.value_size_if_sized().unwrap();
-    //     let list = typed_bytes.bytes_mut().downcast_mut_unwrap::<ListAllocation>();
-    //     let mapped_range = Range { start: range.start * item_size, end: range.end * item_size };
+    fn remove<'state>(
+        &mut self,
+        index: usize,
+        handle: AllocatorHandle<'_, 'state>,
+    ) -> Result<OwnedRefMut<'state, T>, ()> {
+        let typed_bytes = unsafe { self.typed_bytes_mut() };
+        let (bytes, ty, rc) = typed_bytes.into();
+        let child_ty = ty.map(|ty| {
+            let ty = ty.downcast_ref::<ListType>().unwrap();
+            ty.child_ty.as_ref()
+        });
+        let item_size = child_ty.value_size_if_sized().unwrap();
+        let list = bytes.downcast_mut_unwrap::<ListAllocation>();
+        let mapped_range = Range { start: index * item_size, end: (index + 1) * item_size };
 
-    //     if mapped_range.end > list.data.len() {
-    //         Err(())
-    //     } else {
-    //         list.data.drain(mapped_range);
-    //         Ok(())
-    //     }
-    // }
+        if mapped_range.end > list.data.len() {
+            Err(())
+        } else {
+            let range = (index * item_size)..((index + 1) * item_size);
+            let item_bytes = &list.data[range];
+            let item_typed_bytes = TypedBytes::from(item_bytes, child_ty, rc);
+            let item_owned = unsafe {
+                OwnedRefMut::copied_with_unchecked_type_if_sized(item_typed_bytes.borrow(), handle).unwrap()
+            };
 
-    // fn remove(&mut self, index: usize) -> Result<(), ()> {
-    //     self.remove_range(index..(index + 1))
-    // }
+            unsafe {
+                item_typed_bytes.refcount_decrement_recursive();
+            }
+
+            list.data.drain(mapped_range);
+
+            Ok(item_owned)
+        }
+    }
 
     fn push<'b>(&mut self, mut item: OwnedRefMut<'b, T>) -> Result<(), ()> {
         let mut typed_bytes = unsafe { self.typed_bytes_mut() };

@@ -1,4 +1,5 @@
 use crate::graph::alloc::{AllocatedType, AllocationInner};
+use crate::util::CowMapExt;
 use std::borrow::Cow;
 use std::fmt::{Debug, Display};
 use std::marker::PhantomData;
@@ -181,10 +182,29 @@ impl<'a> TypedBytes<'a> {
         self.ty.as_ref().children(self.borrow())
     }
 
-    pub fn bytes_slice<R>(self, range: R) -> Option<TypedBytes<'a>>
-    where [u8]: std::ops::Index<R, Output = [u8]> {
+    pub fn map(
+        self,
+        map_bytes: impl FnOnce(Bytes<'a>) -> Option<Bytes<'a>>,
+        map_ty: impl FnOnce(&TypeEnum) -> &TypeEnum,
+    ) -> Option<TypedBytes<'a>> {
         let Self { bytes, ty, rc } = self;
-        bytes.bytes_slice(range).map(move |bytes| TypedBytes { bytes, ty, rc })
+        (map_bytes)(bytes).map(move |bytes| Self { bytes, ty: ty.map(map_ty), rc })
+    }
+
+    pub fn bytes_slice<R>(
+        self,
+        range: R,
+        map_ty: impl FnOnce(&TypeEnum) -> &TypeEnum,
+    ) -> Option<TypedBytes<'a>>
+    where
+        [u8]: std::ops::Index<R, Output = [u8]>,
+    {
+        self.map(move |bytes| bytes.bytes_slice(range), map_ty)
+    }
+
+    pub fn bytes_slice_with_same_ty<R>(self, range: R) -> Option<TypedBytes<'a>>
+    where [u8]: std::ops::Index<R, Output = [u8]> {
+        self.bytes_slice(range, |ty| ty)
     }
 
     pub unsafe fn refcount_increment_recursive_for(&self, rc: &dyn Refcounter) {
@@ -396,16 +416,45 @@ impl<'a> TypedBytesMut<'a> {
     //     TypedBytesMut { bytes: self.bytes.borrow_mut(), ty: self.ty.clone() }
     // }
 
-    pub fn bytes_slice<R>(self, range: R) -> Option<TypedBytes<'a>>
-    where [u8]: std::ops::Index<R, Output = [u8]> {
+    pub fn map(
+        self,
+        map_bytes: impl FnOnce(BytesMut<'a>) -> Option<BytesMut<'a>>,
+        map_ty: impl FnOnce(&TypeEnum) -> &TypeEnum,
+    ) -> Option<TypedBytesMut<'a>> {
         let Self { bytes, ty, rc } = self;
-        bytes.bytes_slice(range).map(move |bytes| TypedBytes { bytes, ty, rc })
+        (map_bytes)(bytes).map(move |bytes| Self { bytes, ty: ty.map(map_ty), rc })
     }
 
-    pub fn bytes_slice_mut<R>(self, range: R) -> Option<TypedBytesMut<'a>>
+    pub fn bytes_slice<R>(
+        self,
+        range: R,
+        map_ty: impl FnOnce(&TypeEnum) -> &TypeEnum,
+    ) -> Option<TypedBytes<'a>>
+    where
+        [u8]: std::ops::Index<R, Output = [u8]>,
+    {
+        self.downgrade().bytes_slice(range, map_ty)
+    }
+
+    pub fn bytes_slice_mut<R>(
+        self,
+        range: R,
+        map_ty: impl FnOnce(&TypeEnum) -> &TypeEnum,
+    ) -> Option<TypedBytesMut<'a>>
+    where
+        [u8]: std::ops::IndexMut<R, Output = [u8]>,
+    {
+        self.map(move |bytes| bytes.bytes_slice_mut(range), map_ty)
+    }
+
+    pub fn bytes_slice_with_same_ty<R>(self, range: R) -> Option<TypedBytes<'a>>
+    where [u8]: std::ops::Index<R, Output = [u8]> {
+        self.bytes_slice(range, |ty| ty)
+    }
+
+    pub fn bytes_slice_mut_with_same_ty<R>(self, range: R) -> Option<TypedBytesMut<'a>>
     where [u8]: std::ops::IndexMut<R, Output = [u8]> {
-        let Self { bytes, ty, rc } = self;
-        bytes.bytes_slice_mut(range).map(move |bytes| TypedBytesMut { bytes, ty, rc })
+        self.bytes_slice_mut(range, |ty| ty)
     }
 
     pub fn borrow_mut(&mut self) -> TypedBytesMut<'_> {

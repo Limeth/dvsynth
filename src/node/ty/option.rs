@@ -107,7 +107,10 @@ impl<T: TypeDesc> OptionType<T> {
 
         match self.get_flags(data.borrow().bytes()) {
             OptionFlags::None => None,
-            OptionFlags::Some => Some(data.bytes_slice(0..value_size).unwrap()),
+            OptionFlags::Some => Some(
+                data.bytes_slice(0..value_size, |ty| &*ty.downcast_ref::<OptionType>().unwrap().child_ty)
+                    .unwrap(),
+            ),
         }
     }
 }
@@ -215,7 +218,9 @@ where
             OptionFlags::None => None,
             OptionFlags::Some => {
                 let value_size = ty.child_ty.value_size_if_sized().unwrap();
-                let inner_typed_bytes = typed_bytes.bytes_slice(0..value_size).unwrap();
+                let inner_typed_bytes = typed_bytes
+                    .bytes_slice(0..value_size, |ty| &*ty.downcast_ref::<OptionType>().unwrap().child_ty)
+                    .unwrap();
 
                 Some(unsafe { BorrowedRef::from_unchecked_type(inner_typed_bytes) })
             }
@@ -244,7 +249,9 @@ where
             OptionFlags::None => None,
             OptionFlags::Some => {
                 let value_size = ty.child_ty.value_size_if_sized().unwrap();
-                let inner_typed_bytes = typed_bytes.bytes_slice_mut(0..value_size).unwrap();
+                let inner_typed_bytes = typed_bytes
+                    .bytes_slice_mut(0..value_size, |ty| &*ty.downcast_ref::<OptionType>().unwrap().child_ty)
+                    .unwrap();
 
                 Some(unsafe { BorrowedRefMut::from_unchecked_type(inner_typed_bytes) })
             }
@@ -266,7 +273,10 @@ where
                 let mut typed_bytes: TypedBytesMut = (bytes, ty, rc).into();
                 let ty = typed_bytes.borrow().ty().map(|ty| ty.downcast_ref::<OptionType>().unwrap());
                 let value_size = ty.child_ty.value_size_if_sized().unwrap();
-                let inner_typed_bytes = typed_bytes.borrow_mut().bytes_slice_mut(0..value_size).unwrap();
+                let inner_typed_bytes = typed_bytes
+                    .borrow_mut()
+                    .bytes_slice_mut(0..value_size, |ty| &*ty.downcast_ref::<OptionType>().unwrap().child_ty)
+                    .unwrap();
                 let owned = unsafe {
                     OwnedRefMut::copied_with_unchecked_type_if_sized(inner_typed_bytes.borrow(), handle)
                         .unwrap()
@@ -303,7 +313,10 @@ where
                 (bytes, ty, rc).into()
             };
 
-            let mut inner_typed_bytes = typed_bytes.borrow_mut().bytes_slice_mut(0..value_size).unwrap();
+            let mut inner_typed_bytes = typed_bytes
+                .borrow_mut()
+                .bytes_slice_mut(0..value_size, |ty| &*ty.downcast_ref::<OptionType>().unwrap().child_ty)
+                .unwrap();
 
             inner_typed_bytes
                 .borrow_mut()
