@@ -241,7 +241,7 @@ unsafe impl TypeExt for PrimitiveType {
         self.kind().is_abi_compatible(&other.kind()) && self.value_size() == other.value_size()
     }
 
-    unsafe fn children<'a>(&'a self, _data: Bytes<'a>) -> Vec<TypedBytes<'a>> {
+    unsafe fn children<'a>(&'a self, _data: TypedBytes<'a>) -> Vec<TypedBytes<'a>> {
         vec![]
     }
 

@@ -111,9 +111,9 @@ unsafe impl<T: TypeDesc> TypeExt for Unique<T> {
         self.child_ty.is_abi_compatible(&other.child_ty)
     }
 
-    unsafe fn children<'a>(&'a self, data: Bytes<'a>) -> Vec<TypedBytes<'a>> {
-        let ptr = bytes_to_ptr(data.borrow());
-        let typed_bytes = Allocator::get().deref_ptr(ptr).unwrap();
+    unsafe fn children<'a>(&'a self, data: TypedBytes<'a>) -> Vec<TypedBytes<'a>> {
+        let ptr = typed_bytes_to_ptr(data.borrow()).unwrap();
+        let typed_bytes = Allocator::get().deref_ptr(ptr, data.refcounter()).unwrap();
         vec![typed_bytes]
     }
 
@@ -174,12 +174,12 @@ where
     C: TypeDesc,
 {
     fn deref_mut(&mut self) -> BorrowedRefMut<'_, C> {
-        let (rc, typed_bytes) = unsafe { self.rc_and_typed_bytes_mut() };
+        let typed_bytes = unsafe { self.typed_bytes_mut() };
         let ptr = typed_bytes_to_ptr(typed_bytes.borrow()).unwrap();
 
         unsafe {
-            let typed_bytes = Allocator::get().deref_mut_ptr(ptr).unwrap();
-            BorrowedRefMut::from_unchecked_type(typed_bytes, rc)
+            let typed_bytes = Allocator::get().deref_mut_ptr(ptr, typed_bytes.refcounter_mut()).unwrap();
+            BorrowedRefMut::from_unchecked_type(typed_bytes)
         }
     }
 }
@@ -231,11 +231,11 @@ where
 {
     fn deref(&self) -> BorrowedRef<'_, C> {
         let typed_bytes = unsafe { self.typed_bytes() };
-        let ptr = typed_bytes_to_ptr(typed_bytes).unwrap();
+        let ptr = typed_bytes_to_ptr(typed_bytes.borrow()).unwrap();
 
         unsafe {
-            let typed_bytes = Allocator::get().deref_ptr(ptr).unwrap();
-            BorrowedRef::from_unchecked_type(typed_bytes, self.refcounter())
+            let typed_bytes = Allocator::get().deref_ptr(ptr, typed_bytes.refcounter()).unwrap();
+            BorrowedRef::from_unchecked_type(typed_bytes)
         }
     }
 }
@@ -310,9 +310,9 @@ unsafe impl<T: TypeDesc> TypeExt for Shared<T> {
         self.child_ty.is_abi_compatible(&other.child_ty)
     }
 
-    unsafe fn children<'a>(&'a self, data: Bytes<'a>) -> Vec<TypedBytes<'a>> {
-        let ptr = bytes_to_ptr(data.borrow());
-        let typed_bytes = Allocator::get().deref_ptr(ptr).unwrap();
+    unsafe fn children<'a>(&'a self, data: TypedBytes<'a>) -> Vec<TypedBytes<'a>> {
+        let ptr = typed_bytes_to_ptr(data.borrow()).unwrap();
+        let typed_bytes = Allocator::get().deref_ptr(ptr, data.refcounter()).unwrap();
         vec![typed_bytes]
     }
 
@@ -375,11 +375,11 @@ where
 {
     fn deref(&self) -> BorrowedRef<'_, C> {
         let typed_bytes = unsafe { self.typed_bytes() };
-        let ptr = typed_bytes_to_ptr(typed_bytes).unwrap();
+        let ptr = typed_bytes_to_ptr(typed_bytes.borrow()).unwrap();
 
         unsafe {
-            let typed_bytes = Allocator::get().deref_ptr(ptr).unwrap();
-            BorrowedRef::from_unchecked_type(typed_bytes, self.refcounter())
+            let typed_bytes = Allocator::get().deref_ptr(ptr, typed_bytes.refcounter()).unwrap();
+            BorrowedRef::from_unchecked_type(typed_bytes)
         }
     }
 }

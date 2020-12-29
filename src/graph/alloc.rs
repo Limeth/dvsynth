@@ -13,8 +13,8 @@ use lazy_static::lazy_static;
 
 use crate::node::behaviour::AllocatorHandle;
 use crate::node::{
-    AllocationPointer, Bytes, BytesMut, DynTypeDescriptor, SizedTypeExt, TypeEnum, TypeExt, TypeTrait,
-    TypedBytes, TypedBytesMut,
+    AllocationPointer, Bytes, BytesMut, DynTypeDescriptor, Refcounter, SizedTypeExt, TypeEnum, TypeExt,
+    TypeTrait, TypedBytes, TypedBytesMut,
 };
 
 use super::{DynTypeTrait, NodeIndex, Schedule};
@@ -176,12 +176,12 @@ impl AllocationInner {
         Self { ty: ty_enum, inner }
     }
 
-    pub fn as_ref(&self) -> TypedBytes<'_> {
-        TypedBytes::from(self.inner.as_ref(), Cow::Borrowed(&self.ty))
+    pub fn as_ref<'a>(&'a self, rc: &'a dyn Refcounter) -> TypedBytes<'a> {
+        TypedBytes::from(self.inner.as_ref(), Cow::Borrowed(&self.ty), rc)
     }
 
-    pub fn as_mut(&mut self) -> TypedBytesMut<'_> {
-        TypedBytesMut::from(self.inner.as_mut(), Cow::Borrowed(&self.ty))
+    pub fn as_mut<'a>(&'a mut self, rc: &'a mut dyn Refcounter) -> TypedBytesMut<'a> {
+        TypedBytesMut::from(self.inner.as_mut(), Cow::Borrowed(&self.ty), rc)
     }
 
     pub fn ty_mut(&mut self) -> &mut TypeEnum {
@@ -519,65 +519,37 @@ impl Allocator {
         }
     }
 
-    // /// Safety: Access safety must be ensured externally by the execution graph.
-    // ///         Extra caution must be taken to request a correct lifetime 'a.
-    // pub unsafe fn ptr_ref<'a>(&self, allocation_ptr: AllocationPointer) -> Option<&'a AllocationPointer> {
-    //     let allocations = self.allocations.read().unwrap();
-    //     allocations.vec.get(allocation_ptr.as_usize()).map(|allocation| {
-    //         let allocation_inner =
-    //             allocation.inner.as_ref().as_ref().expect("Dereferencing a freed value.").as_ref();
-
-    //         &allocation_inner.ptr
-    //     })
-    // }
-
-    // /// Safety: Access safety must be ensured externally by the execution graph.
-    // ///         Extra caution must be taken to request a correct lifetime 'a.
-    // pub unsafe fn ptr_mut<'a>(&self, allocation_ptr: AllocationPointer) -> Option<&'a mut AllocationPointer> {
-    //     let allocations = self.allocations.read().unwrap();
-    //     allocations.vec.get(allocation_ptr.as_usize()).map(|allocation| {
-    //         let allocation_inner =
-    //             allocation.inner.as_ref().as_ref().expect("Dereferencing a freed value.").as_mut();
-
-    //         &mut allocation_inner.ptr
-    //     })
-    // }
-
     /// Safety: Access safety must be ensured externally by the execution graph.
     ///         Extra caution must be taken to request a correct lifetime 'a.
-    pub unsafe fn deref_ptr<'a>(&self, allocation_ptr: AllocationPointer) -> Option<TypedBytes<'a>> {
+    pub unsafe fn deref_ptr<'a>(
+        &self,
+        allocation_ptr: AllocationPointer,
+        rc: &'a dyn Refcounter,
+    ) -> Option<TypedBytes<'a>> {
         let allocations = self.allocations.read().unwrap();
-        allocations.vec.get(allocation_ptr.as_usize()).map(|allocation| {
+        allocations.vec.get(allocation_ptr.as_usize()).map(move |allocation| {
             let allocation_inner =
                 allocation.inner.as_ref().as_ref().expect("Dereferencing a freed value.").as_ref();
 
-            allocation_inner.as_ref()
+            allocation_inner.as_ref(rc)
         })
     }
 
     /// Safety: Access safety must be ensured externally by the execution graph.
     ///         Extra caution must be taken to request a correct lifetime 'a.
-    pub unsafe fn deref_mut_ptr<'a>(&self, allocation_ptr: AllocationPointer) -> Option<TypedBytesMut<'a>> {
+    pub unsafe fn deref_mut_ptr<'a>(
+        &self,
+        allocation_ptr: AllocationPointer,
+        rc: &'a mut dyn Refcounter,
+    ) -> Option<TypedBytesMut<'a>> {
         let allocations = self.allocations.read().unwrap();
-        allocations.vec.get(allocation_ptr.as_usize()).map(|allocation| {
+        allocations.vec.get(allocation_ptr.as_usize()).map(move |allocation| {
             let allocation_inner =
                 allocation.inner.as_ref().as_ref().expect("Dereferencing a freed value.").as_mut();
 
-            allocation_inner.as_mut()
+            allocation_inner.as_mut(rc)
         })
     }
-
-    // /// Safety: Access safety must be ensured externally by the execution graph.
-    // ///         Extra caution must be taken to request a correct lifetime 'a.
-    // pub unsafe fn swap<'a>(&self, allocation_ptr_a: AllocationPointer, allocation_ptr_b: AllocationPointer) -> Option<TypedBytesMut<'a>> {
-    //     let allocations = self.allocations.read().unwrap();
-    //     allocations.vec.get(allocation_ptr.as_usize()).map(|allocation| {
-    //         let allocation_inner =
-    //             allocation.inner.as_ref().as_ref().expect("Dereferencing a freed value.").as_mut();
-
-    //         allocation_inner.as_mut()
-    //     })
-    // }
 
     pub unsafe fn map_type<'a>(
         &self,
@@ -596,30 +568,4 @@ impl Allocator {
             })
             .ok_or(())
     }
-
-    // pub fn deref<'a, T: DynTypeTrait>(
-    //     &self,
-    //     reference: impl RefExt<'a, T>,
-    // ) -> Option<(&'a T::DynAlloc, &'a T)>
-    // {
-    //     let (data, ty) = unsafe { self.deref_ptr(reference.get_ptr())? };
-
-    //     Some((
-    //         data.downcast_ref().expect("Type mismatch when dereferencing."),
-    //         ty.downcast_ref().expect("Type mismatch when dereferencing."),
-    //     ))
-    // }
-
-    // pub fn deref_mut<'a, T: DynTypeTrait>(
-    //     &self,
-    //     reference: impl RefMutExt<'a, T>,
-    // ) -> Option<(&'a mut T::DynAlloc, &'a T)>
-    // {
-    //     let (data, ty) = unsafe { self.deref_mut_ptr(reference.get_ptr())? };
-
-    //     Some((
-    //         data.downcast_mut().expect("Type mismatch when dereferencing."),
-    //         ty.downcast_ref().expect("Type mismatch when dereferencing."),
-    //     ))
-    // }
 }

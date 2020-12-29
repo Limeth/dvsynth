@@ -1,7 +1,7 @@
+use super::{Bytes, DowncastFromTypeEnum, SizedTypeExt, TypeDesc, TypeEnum, TypeExt, TypeTrait, TypedBytes};
+use crate::util::CowMapExt;
 use std::borrow::Cow;
 use std::fmt::Display;
-
-use super::{Bytes, DowncastFromTypeEnum, SizedTypeExt, TypeDesc, TypeEnum, TypeExt, TypeTrait, TypedBytes};
 
 pub mod prelude {}
 
@@ -69,13 +69,17 @@ unsafe impl TypeExt for ArrayType {
         }
     }
 
-    unsafe fn children<'a>(&'a self, data: Bytes<'a>) -> Vec<TypedBytes<'a>> {
-        let value_size = self.item_type.value_size_if_sized().unwrap();
-        let bytes = data.bytes().unwrap();
+    unsafe fn children<'a>(&'a self, typed_bytes: TypedBytes<'a>) -> Vec<TypedBytes<'a>> {
+        let (bytes, ty, rc) = typed_bytes.into();
+        let ty = ty.map(|ty| ty.downcast_ref::<ArrayType>().unwrap());
+        let value_size = ty.item_type.value_size_if_sized().unwrap();
+        let child_ty = ty.map(|ty| &*ty.item_type);
 
         bytes
+            .bytes()
+            .unwrap()
             .chunks_exact(value_size)
-            .map(|chunk| TypedBytes::from(chunk, Cow::Borrowed(self.item_type.as_ref())))
+            .map(|chunk| TypedBytes::from(chunk, child_ty.clone(), rc))
             .collect()
     }
 

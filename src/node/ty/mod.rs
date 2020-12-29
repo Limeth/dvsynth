@@ -73,6 +73,17 @@ pub struct AllocationPointer {
     pub(crate) index: u64,
 }
 
+pub unsafe fn visit_recursive_postorder<'a>(
+    typed_bytes: TypedBytes<'a>,
+    visit: &mut dyn FnMut(TypedBytes<'_>),
+) {
+    for child in typed_bytes.children() {
+        visit_recursive_postorder(child, visit);
+    }
+
+    (visit)(typed_bytes.borrow());
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum Bytes<'a> {
     Bytes(&'a [u8]),
@@ -85,6 +96,15 @@ impl<'a> Bytes<'a> {
         match self {
             Bytes(ref inner) => Bytes(&**inner),
             Object { ty_name, ref data } => Object { ty_name, data: &**data },
+        }
+    }
+
+    pub fn bytes_slice<R>(self, range: R) -> Option<Bytes<'a>>
+    where [u8]: std::ops::Index<R, Output = [u8]> {
+        if let Bytes::Bytes(bytes) = self {
+            Some(Bytes::Bytes(&bytes[range]))
+        } else {
+            None
         }
     }
 
@@ -129,21 +149,20 @@ impl<'a> From<&'a [u8]> for Bytes<'a> {
 pub struct TypedBytes<'a> {
     bytes: Bytes<'a>,
     ty: Cow<'a, TypeEnum>,
-}
-
-impl<'a> From<&'a AllocationInner> for TypedBytes<'a> {
-    fn from(inner: &'a AllocationInner) -> Self {
-        inner.as_ref()
-    }
+    rc: &'a dyn Refcounter,
 }
 
 impl<'a> TypedBytes<'a> {
-    pub fn from(bytes: impl Into<Bytes<'a>>, ty: impl Into<Cow<'a, TypeEnum>>) -> Self {
-        Self { bytes: bytes.into(), ty: ty.into() }
+    pub fn from(
+        bytes: impl Into<Bytes<'a>>,
+        ty: impl Into<Cow<'a, TypeEnum>>,
+        rc: &'a dyn Refcounter,
+    ) -> Self {
+        Self { bytes: bytes.into(), ty: ty.into(), rc }
     }
 
     pub fn borrow(&self) -> TypedBytes<'_> {
-        TypedBytes { bytes: self.bytes.borrow(), ty: Cow::Borrowed(&*self.ty.as_ref()) }
+        TypedBytes { bytes: self.bytes.borrow(), ty: Cow::Borrowed(&*self.ty.as_ref()), rc: &*self.rc }
     }
 
     pub fn bytes(self) -> Bytes<'a> {
@@ -154,14 +173,60 @@ impl<'a> TypedBytes<'a> {
         self.ty
     }
 
+    pub fn refcounter(self) -> &'a dyn Refcounter {
+        self.rc
+    }
+
     pub unsafe fn children(&self) -> Vec<TypedBytes<'_>> {
-        self.ty.as_ref().children(self.bytes.borrow())
+        self.ty.as_ref().children(self.borrow())
+    }
+
+    pub fn bytes_slice<R>(self, range: R) -> Option<TypedBytes<'a>>
+    where [u8]: std::ops::Index<R, Output = [u8]> {
+        let Self { bytes, ty, rc } = self;
+        bytes.bytes_slice(range).map(move |bytes| TypedBytes { bytes, ty, rc })
+    }
+
+    pub unsafe fn refcount_increment_recursive_for(&self, rc: &dyn Refcounter) {
+        visit_recursive_postorder(self.borrow(), &mut |typed_bytes| {
+            if let Some(ptr) = crate::ty::ptr::typed_bytes_to_ptr(typed_bytes) {
+                rc.refcount_increment(ptr);
+            }
+        });
+    }
+
+    pub unsafe fn refcount_decrement_recursive_for(&self, rc: &dyn Refcounter) {
+        visit_recursive_postorder(self.borrow(), &mut |typed_bytes| {
+            if let Some(ptr) = crate::ty::ptr::typed_bytes_to_ptr(typed_bytes) {
+                rc.refcount_decrement(ptr);
+            }
+        });
+    }
+
+    pub unsafe fn refcount_increment_recursive(&self) {
+        self.refcount_increment_recursive_for(self.borrow().refcounter())
+    }
+
+    pub unsafe fn refcount_decrement_recursive(&self) {
+        self.refcount_decrement_recursive_for(self.borrow().refcounter())
     }
 }
 
 impl<'a> From<TypedBytes<'a>> for (Bytes<'a>, Cow<'a, TypeEnum>) {
     fn from(bytes: TypedBytes<'a>) -> Self {
         (bytes.bytes, bytes.ty)
+    }
+}
+
+impl<'a> From<TypedBytes<'a>> for (Bytes<'a>, Cow<'a, TypeEnum>, &'a dyn Refcounter) {
+    fn from(bytes: TypedBytes<'a>) -> Self {
+        (bytes.bytes, bytes.ty, bytes.rc)
+    }
+}
+
+impl<'a> From<(Bytes<'a>, Cow<'a, TypeEnum>, &'a dyn Refcounter)> for TypedBytes<'a> {
+    fn from((bytes, ty, rc): (Bytes<'a>, Cow<'a, TypeEnum>, &'a dyn Refcounter)) -> Self {
+        TypedBytes::from(bytes, ty, rc)
     }
 }
 
@@ -193,6 +258,24 @@ impl<'a> BytesMut<'a> {
         match self {
             BytesMut::Bytes(ref inner) => Bytes::Bytes(&**inner),
             BytesMut::Object { ty_name, ref data } => Bytes::Object { ty_name, data: &**data },
+        }
+    }
+
+    pub fn bytes_slice_mut<R>(self, range: R) -> Option<BytesMut<'a>>
+    where [u8]: std::ops::IndexMut<R, Output = [u8]> {
+        if let BytesMut::Bytes(bytes) = self {
+            Some(BytesMut::Bytes(&mut bytes[range]))
+        } else {
+            None
+        }
+    }
+
+    pub fn bytes_slice<R>(self, range: R) -> Option<Bytes<'a>>
+    where [u8]: std::ops::Index<R, Output = [u8]> {
+        if let BytesMut::Bytes(bytes) = self {
+            Some(Bytes::Bytes(&bytes[range]))
+        } else {
+            None
         }
     }
 
@@ -267,17 +350,16 @@ impl<'a> From<&'a mut [u8]> for BytesMut<'a> {
 pub struct TypedBytesMut<'a> {
     bytes: BytesMut<'a>,
     ty: Cow<'a, TypeEnum>,
-}
-
-impl<'a> From<&'a mut AllocationInner> for TypedBytesMut<'a> {
-    fn from(inner: &'a mut AllocationInner) -> Self {
-        inner.as_mut()
-    }
+    rc: &'a mut dyn Refcounter,
 }
 
 impl<'a> TypedBytesMut<'a> {
-    pub fn from(bytes: impl Into<BytesMut<'a>>, ty: impl Into<Cow<'a, TypeEnum>>) -> Self {
-        Self { bytes: bytes.into(), ty: ty.into() }
+    pub fn from(
+        bytes: impl Into<BytesMut<'a>>,
+        ty: impl Into<Cow<'a, TypeEnum>>,
+        rc: &'a mut dyn Refcounter,
+    ) -> Self {
+        Self { bytes: bytes.into(), ty: ty.into(), rc }
     }
 
     pub fn bytes_mut(self) -> BytesMut<'a> {
@@ -292,8 +374,16 @@ impl<'a> TypedBytesMut<'a> {
         self.ty
     }
 
+    pub fn refcounter(self) -> &'a dyn Refcounter {
+        &*self.rc
+    }
+
+    pub fn refcounter_mut(self) -> &'a mut dyn Refcounter {
+        self.rc
+    }
+
     pub fn downgrade(self) -> TypedBytes<'a> {
-        TypedBytes { bytes: self.bytes.downgrade(), ty: self.ty.clone() }
+        TypedBytes { bytes: self.bytes.downgrade(), ty: self.ty.clone(), rc: &*self.rc }
     }
 
     // pub fn borrow<'b>(&'b self) -> TypedBytes<'b> {
@@ -306,18 +396,70 @@ impl<'a> TypedBytesMut<'a> {
     //     TypedBytesMut { bytes: self.bytes.borrow_mut(), ty: self.ty.clone() }
     // }
 
+    pub fn bytes_slice<R>(self, range: R) -> Option<TypedBytes<'a>>
+    where [u8]: std::ops::Index<R, Output = [u8]> {
+        let Self { bytes, ty, rc } = self;
+        bytes.bytes_slice(range).map(move |bytes| TypedBytes { bytes, ty, rc })
+    }
+
+    pub fn bytes_slice_mut<R>(self, range: R) -> Option<TypedBytesMut<'a>>
+    where [u8]: std::ops::IndexMut<R, Output = [u8]> {
+        let Self { bytes, ty, rc } = self;
+        bytes.bytes_slice_mut(range).map(move |bytes| TypedBytesMut { bytes, ty, rc })
+    }
+
     pub fn borrow_mut(&mut self) -> TypedBytesMut<'_> {
-        TypedBytesMut { bytes: self.bytes.borrow_mut(), ty: Cow::Borrowed(&*self.ty.as_ref()) }
+        TypedBytesMut {
+            bytes: self.bytes.borrow_mut(),
+            ty: Cow::Borrowed(&*self.ty.as_ref()),
+            rc: &mut *self.rc,
+        }
     }
 
     pub fn borrow(&self) -> TypedBytes<'_> {
-        TypedBytes { bytes: self.bytes.borrow(), ty: Cow::Borrowed(&*self.ty.as_ref()) }
+        TypedBytes { bytes: self.bytes.borrow(), ty: Cow::Borrowed(&*self.ty.as_ref()), rc: &*self.rc }
+    }
+
+    pub unsafe fn refcount_increment_recursive_for(&self, rc: &dyn Refcounter) {
+        visit_recursive_postorder(self.borrow(), &mut |typed_bytes| {
+            if let Some(ptr) = crate::ty::ptr::typed_bytes_to_ptr(typed_bytes) {
+                rc.refcount_increment(ptr);
+            }
+        });
+    }
+
+    pub unsafe fn refcount_decrement_recursive_for(&self, rc: &dyn Refcounter) {
+        visit_recursive_postorder(self.borrow(), &mut |typed_bytes| {
+            if let Some(ptr) = crate::ty::ptr::typed_bytes_to_ptr(typed_bytes) {
+                rc.refcount_decrement(ptr);
+            }
+        });
+    }
+
+    pub unsafe fn refcount_increment_recursive(&self) {
+        self.refcount_increment_recursive_for(self.borrow().refcounter())
+    }
+
+    pub unsafe fn refcount_decrement_recursive(&self) {
+        self.refcount_decrement_recursive_for(self.borrow().refcounter())
     }
 }
 
 impl<'a> From<TypedBytesMut<'a>> for (BytesMut<'a>, Cow<'a, TypeEnum>) {
     fn from(bytes: TypedBytesMut<'a>) -> Self {
         (bytes.bytes, bytes.ty)
+    }
+}
+
+impl<'a> From<TypedBytesMut<'a>> for (BytesMut<'a>, Cow<'a, TypeEnum>, &'a mut dyn Refcounter) {
+    fn from(bytes: TypedBytesMut<'a>) -> Self {
+        (bytes.bytes, bytes.ty, bytes.rc)
+    }
+}
+
+impl<'a> From<(BytesMut<'a>, Cow<'a, TypeEnum>, &'a mut dyn Refcounter)> for TypedBytesMut<'a> {
+    fn from((bytes, ty, rc): (BytesMut<'a>, Cow<'a, TypeEnum>, &'a mut dyn Refcounter)) -> Self {
+        TypedBytesMut::from(bytes, ty, rc)
     }
 }
 
@@ -330,7 +472,7 @@ pub unsafe trait TypeExt: Sized + PartialEq + Eq + Send + Sync + 'static {
     /// Otherwise returns `false`.
     fn is_abi_compatible(&self, other: &Self) -> bool;
 
-    unsafe fn children<'a>(&'a self, data: Bytes<'a>) -> Vec<TypedBytes<'a>>;
+    unsafe fn children<'a>(&'a self, data: TypedBytes<'a>) -> Vec<TypedBytes<'a>>;
 
     // Type properties.
 
@@ -451,7 +593,7 @@ unsafe impl TypeExt for ! {
         unreachable!()
     }
 
-    unsafe fn children<'a>(&'a self, data: Bytes<'a>) -> Vec<TypedBytes<'a>> {
+    unsafe fn children<'a>(&'a self, data: TypedBytes<'a>) -> Vec<TypedBytes<'a>> {
         unreachable!()
     }
 }
@@ -599,7 +741,7 @@ where Self: TypeTrait
 
     fn create_value_from_descriptor(descriptor: Self::Descriptor) -> Self::DynAlloc;
     fn is_abi_compatible(&self, other: &Self) -> bool;
-    unsafe fn children<'a>(&'a self, data: Bytes<'a>) -> Vec<TypedBytes<'a>>;
+    unsafe fn children<'a>(&'a self, data: TypedBytes<'a>) -> Vec<TypedBytes<'a>>;
 }
 
 impl<T> TypeTrait for T where T: DynTypeTrait {}
@@ -611,7 +753,7 @@ where T: DynTypeTrait
         <T as DynTypeTrait>::is_abi_compatible(self, other)
     }
 
-    unsafe fn children<'a>(&'a self, data: Bytes<'a>) -> Vec<TypedBytes<'a>> {
+    unsafe fn children<'a>(&'a self, data: TypedBytes<'a>) -> Vec<TypedBytes<'a>> {
         <T as DynTypeTrait>::children(self, data)
     }
 }
@@ -678,7 +820,7 @@ macro_rules! define_type_enum {
                 }
             }
 
-            unsafe fn children_impl<'a>(&'a self, data: Bytes<'a>) -> Vec<TypedBytes<'a>> {
+            unsafe fn children_impl<'a>(&'a self, data: TypedBytes<'a>) -> Vec<TypedBytes<'a>> {
                 use TypeEnum::*;
                 match self {
                     $(
@@ -706,7 +848,7 @@ define_type_enum![
     Option(OptionType) <- OptionType::new(PrimitiveType::U8).upcast(),
     // Tuple(Vec<Self>),
     Array(ArrayType) <- ArrayType::single(PrimitiveType::U8),
-    List(ListType) <- ListType::new(PrimitiveType::U8),
+    List(ListType) <- ListType::new(PrimitiveType::U8).upcast(),
     Texture(TextureType) <- TextureType::new(),
 ];
 
@@ -775,7 +917,7 @@ unsafe impl TypeExt for TypeEnum {
         }
     }
 
-    unsafe fn children<'a>(&'a self, data: Bytes<'a>) -> Vec<TypedBytes<'a>> {
+    unsafe fn children<'a>(&'a self, data: TypedBytes<'a>) -> Vec<TypedBytes<'a>> {
         self.children_impl(data)
     }
 
@@ -906,13 +1048,13 @@ where R: RefMutAny<'a>
             {
                 return Err(());
             }
-        }
 
-        unsafe {
-            self.refcount_increment_recursive_for(from.refcounter());
-            from.refcount_increment_recursive_for(self.refcounter());
-            self.refcount_decrement_recursive();
-            from.refcount_decrement_recursive();
+            unsafe {
+                typed_bytes_a.refcount_increment_recursive_for(typed_bytes_b.borrow().refcounter());
+                typed_bytes_b.refcount_increment_recursive_for(typed_bytes_a.borrow().refcounter());
+                typed_bytes_a.refcount_decrement_recursive();
+                typed_bytes_b.refcount_decrement_recursive();
+            }
         }
 
         let mut typed_bytes_a = unsafe { self.typed_bytes_mut() };

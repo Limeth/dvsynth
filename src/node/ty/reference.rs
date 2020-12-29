@@ -10,6 +10,7 @@ use crate::util::SmallBoxedSlice;
 use byteorder::{LittleEndian, ReadBytesExt};
 use smallvec::{smallvec, Array, SmallVec};
 use std::borrow::Cow;
+use std::fmt::Debug;
 use std::io::Cursor;
 use std::marker::PhantomData;
 
@@ -27,7 +28,7 @@ impl<A: Array<Item = u8>> From<AllocationPointer> for SmallBoxedSlice<A> {
 }
 
 /// Tracks the number of pointer references.
-pub trait Refcounter {
+pub trait Refcounter: Debug {
     fn refcount_increment(&self, ptr: AllocationPointer);
     fn refcount_decrement(&self, ptr: AllocationPointer);
 }
@@ -39,7 +40,7 @@ impl Refcounter for () {
 }
 
 /// Tracks the number of references stored in the state of a node.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct NodeStateRefcounter(pub NodeIndex);
 
 impl Refcounter for NodeStateRefcounter {
@@ -50,17 +51,6 @@ impl Refcounter for NodeStateRefcounter {
     fn refcount_decrement(&self, ptr: AllocationPointer) {
         unsafe { Allocator::get().refcount_owned_decrement(ptr, self.0).unwrap() }
     }
-}
-
-pub unsafe fn visit_recursive_postorder<'a>(
-    typed_bytes: TypedBytes<'a>,
-    visit: &mut dyn FnMut(TypedBytes<'_>),
-) {
-    for child in typed_bytes.children() {
-        visit_recursive_postorder(child, visit);
-    }
-
-    (visit)(typed_bytes.borrow());
 }
 
 /// A common trait for references that allow for shared access.
@@ -112,65 +102,26 @@ where R: Ref<'a, T>
 pub trait RefMut<'a, T: TypeDesc>: Ref<'a, T> + RefMutAny<'a> {}
 
 pub trait RefAny<'a>: Sized {
-    unsafe fn refcounter(&self) -> &dyn Refcounter;
-
-    /// Data accessed by dereferencing the pointer.
-    ///
-    /// `Ref`/`RefMut`: The referenced data.
-    /// `OwnedRef`/`OwnedRefMut`: The referenced data.
-    unsafe fn rc_and_typed_bytes<'b>(&'b self) -> (&'b dyn Refcounter, TypedBytes<'b>);
+    unsafe fn typed_bytes<'b>(&'b self) -> TypedBytes<'b>;
 }
 
 pub trait RefMutAny<'a>: RefAny<'a> {
-    unsafe fn refcounter_mut(&mut self) -> &mut dyn Refcounter;
-
-    unsafe fn rc_and_typed_bytes_mut<'b>(&'b mut self) -> (&'b mut dyn Refcounter, TypedBytesMut<'b>);
+    unsafe fn typed_bytes_mut<'b>(&'b mut self) -> TypedBytesMut<'b>;
 
     // FIXME: separate into an OwnedAny?
     // unsafe fn into_typed_bytes(self) -> TypedBytesMut<'a>;
 }
 
-pub trait RefAnyExt<'a>: RefAny<'a> {
-    unsafe fn typed_bytes<'b>(&'b self) -> TypedBytes<'b> {
-        self.rc_and_typed_bytes().1
-    }
-
-    unsafe fn refcount_increment_recursive_for(&self, rc: &dyn Refcounter) {
-        visit_recursive_postorder(self.typed_bytes(), &mut |typed_bytes| {
-            if let Some(ptr) = crate::ty::ptr::typed_bytes_to_ptr(typed_bytes) {
-                rc.refcount_increment(ptr);
-            }
-        });
-    }
-
-    unsafe fn refcount_decrement_recursive_for(&self, rc: &dyn Refcounter) {
-        visit_recursive_postorder(self.typed_bytes(), &mut |typed_bytes| {
-            if let Some(ptr) = crate::ty::ptr::typed_bytes_to_ptr(typed_bytes) {
-                rc.refcount_decrement(ptr);
-            }
-        });
-    }
-
-    unsafe fn refcount_increment_recursive(&self) {
-        self.refcount_increment_recursive_for(self.refcounter())
-    }
-
-    unsafe fn refcount_decrement_recursive(&self) {
-        self.refcount_decrement_recursive_for(self.refcounter())
-    }
-}
+// TODO: Remove if remain unused
+pub trait RefAnyExt<'a>: RefAny<'a> {}
 
 impl<'a, R> RefAnyExt<'a> for R where R: RefAny<'a> {}
 
-pub trait RefMutAnyExt<'a>: RefMutAny<'a> {
-    unsafe fn typed_bytes_mut<'b>(&'b mut self) -> TypedBytesMut<'b> {
-        self.rc_and_typed_bytes_mut().1
-    }
-}
+// TODO: Remove if remain unused
+pub trait RefMutAnyExt<'a>: RefMutAny<'a> {}
 
 impl<'a, R> RefMutAnyExt<'a> for R where R: RefMutAny<'a> {}
 
-// TODO: Consider allowing the lifetime to be a sub-lifetime of 'state?
 /// A refcounted mutable reference to `T`.
 pub struct OwnedRefMut<'state, T: TypeDesc = !> {
     ty: TypeEnum,
@@ -191,6 +142,7 @@ impl<'state> OwnedRefMut<'state, !> {
 
     /// Safety: A zeroed buffer may not be a valid value for the provided type and must be
     ///         initialized properly.
+    ///         Moreover, the refcount must be incremented after the memory has been written to.
     pub unsafe fn zeroed_from_enum_if_sized(
         ty: TypeEnum,
         handle: AllocatorHandle<'_, 'state>,
@@ -234,6 +186,7 @@ impl<'state, T: TypeDesc> OwnedRefMut<'state, T> {
 
     /// Safety: A zeroed buffer may not be a valid value for the provided type and must be
     ///         initialized properly.
+    ///         Moreover, the refcount must be incremented after the memory has been written to.
     ///         Additionally, it must be possible to downcast the type of `typed_bytes` to
     ///         the generic type `T`.
     pub unsafe fn zeroed_from_enum_with_unchecked_type_if_sized(
@@ -257,6 +210,7 @@ impl<'state, T: TypeDesc> OwnedRefMut<'state, T> {
         let (bytes_src, ty) = typed_bytes.into();
         Self::zeroed_from_enum_with_unchecked_type_if_sized(ty.into_owned(), handle).map(|mut owned| {
             owned.bytes.copy_from_slice(bytes_src.bytes().unwrap());
+            owned.typed_bytes().refcount_increment_recursive();
             owned
         })
     }
@@ -281,7 +235,7 @@ impl<'state, T: TypeDesc> OwnedRefMut<'state, T> {
         };
 
         unsafe {
-            result.refcount_increment_recursive();
+            result.typed_bytes().refcount_increment_recursive();
         }
 
         Some(result)
@@ -311,15 +265,11 @@ impl<'state, T: TypeDesc> OwnedRefMut<'state, Unique<T>> {
         T: DynTypeTrait,
     {
         let ptr = Allocator::get().allocate_object::<T>(descriptor, handle);
-        let typed_bytes = unsafe { Allocator::get().deref_ptr(ptr) }.unwrap();
+        let rc = NodeStateRefcounter(handle.node);
+        let typed_bytes = unsafe { Allocator::get().deref_ptr(ptr, &rc) }.unwrap();
         let ty = typed_bytes.ty().into_owned();
 
-        OwnedRefMut {
-            ty: Unique::from_enum(ty).into(),
-            bytes: ptr.into(),
-            rc: NodeStateRefcounter(handle.node),
-            __marker: Default::default(),
-        }
+        OwnedRefMut { ty: Unique::from_enum(ty).into(), bytes: ptr.into(), rc, __marker: Default::default() }
     }
 
     /// Safety: The value's type must have been changed to `Shared` prior to calling this method.
@@ -333,33 +283,21 @@ impl<'a, T: TypeDesc> Ref<'a, T> for OwnedRefMut<'a, T> {}
 impl<'a, T: TypeDesc> RefMut<'a, T> for OwnedRefMut<'a, T> {}
 
 impl<'a, T: TypeDesc> RefAny<'a> for OwnedRefMut<'a, T> {
-    unsafe fn refcounter(&self) -> &dyn Refcounter {
-        &self.rc
-    }
-
-    unsafe fn rc_and_typed_bytes<'b>(&'b self) -> (&'b dyn Refcounter, TypedBytes<'b>) {
-        (&self.rc, TypedBytes::from(&*self.bytes, Cow::Borrowed(&self.ty)))
+    unsafe fn typed_bytes<'b>(&'b self) -> TypedBytes<'b> {
+        TypedBytes::from(&*self.bytes, Cow::Borrowed(&self.ty), &self.rc)
     }
 }
 
 impl<'a, T: TypeDesc> RefMutAny<'a> for OwnedRefMut<'a, T> {
-    unsafe fn refcounter_mut(&mut self) -> &mut dyn Refcounter {
-        &mut self.rc
+    unsafe fn typed_bytes_mut<'b>(&'b mut self) -> TypedBytesMut<'b> {
+        TypedBytesMut::from(&mut *self.bytes, Cow::Borrowed(&self.ty), &mut self.rc)
     }
-
-    unsafe fn rc_and_typed_bytes_mut<'b>(&'b mut self) -> (&'b mut dyn Refcounter, TypedBytesMut<'b>) {
-        (&mut self.rc, TypedBytesMut::from(&mut *self.bytes, Cow::Borrowed(&self.ty)))
-    }
-
-    // unsafe fn into_typed_bytes(self) -> TypedBytesMut<'a> {
-    //     Allocator::get().deref_mut_ptr(self.ptr).unwrap()
-    // }
 }
 
 impl<'a, T: TypeDesc> Drop for OwnedRefMut<'a, T> {
     fn drop(&mut self) {
         unsafe {
-            self.refcount_decrement_recursive();
+            self.typed_bytes().refcount_decrement_recursive();
         }
     }
 }
@@ -367,25 +305,24 @@ impl<'a, T: TypeDesc> Drop for OwnedRefMut<'a, T> {
 /// A non-refcounted mutable reference to `T`.
 pub struct BorrowedRefMut<'a, T: TypeDesc = !> {
     pub(crate) typed_bytes: TypedBytesMut<'a>,
-    pub(crate) rc: &'a mut dyn Refcounter,
     __marker: PhantomData<(&'a mut T, *mut T)>,
 }
 
 impl<'a, T: TypeDesc> BorrowedRefMut<'a, T> {
     /// Safety: It must be possible to downcast `typed_bytes` to the generic type `T`.
-    pub unsafe fn from_unchecked_type(typed_bytes: TypedBytesMut<'a>, rc: &'a mut dyn Refcounter) -> Self {
-        Self { typed_bytes, rc, __marker: Default::default() }
+    pub unsafe fn from_unchecked_type(typed_bytes: TypedBytesMut<'a>) -> Self {
+        Self { typed_bytes, __marker: Default::default() }
     }
 }
 
 impl<'a> BorrowedRefMut<'a, !> {
-    pub unsafe fn from(typed_bytes: TypedBytesMut<'a>, rc: &'a mut dyn Refcounter) -> Self {
-        Self { typed_bytes, rc, __marker: Default::default() }
+    pub unsafe fn from(typed_bytes: TypedBytesMut<'a>) -> Self {
+        Self { typed_bytes, __marker: Default::default() }
     }
 
     pub fn downcast_mut<'state: 'a, T: TypeDesc>(self) -> Option<BorrowedRefMut<'a, T>> {
         if self.typed_bytes.borrow().ty().downcast_ref::<T>().is_some() {
-            Some(BorrowedRefMut { typed_bytes: self.typed_bytes, rc: self.rc, __marker: Default::default() })
+            Some(BorrowedRefMut { typed_bytes: self.typed_bytes, __marker: Default::default() })
         } else {
             None
         }
@@ -394,13 +331,13 @@ impl<'a> BorrowedRefMut<'a, !> {
 
 impl<'a, T: TypeDesc> BorrowedRefMut<'a, T> {
     pub fn to_ref<'state: 'a>(self, _handle: AllocatorHandle<'a, 'state>) -> BorrowedRef<'a, T> {
-        BorrowedRef { typed_bytes: self.typed_bytes.downgrade(), rc: self.rc, __marker: Default::default() }
+        BorrowedRef { typed_bytes: self.typed_bytes.downgrade(), __marker: Default::default() }
     }
 }
 
 impl<'a, T: TypeDesc> BorrowedRefMut<'a, T> {
     pub fn upcast(self) -> BorrowedRefMut<'a> {
-        BorrowedRefMut { typed_bytes: self.typed_bytes, rc: self.rc, __marker: Default::default() }
+        BorrowedRefMut { typed_bytes: self.typed_bytes, __marker: Default::default() }
     }
 }
 
@@ -409,52 +346,39 @@ impl<'a, T: TypeDesc> Ref<'a, T> for BorrowedRefMut<'a, T> {}
 impl<'a, T: TypeDesc> RefMut<'a, T> for BorrowedRefMut<'a, T> {}
 
 impl<'a, T: TypeDesc> RefAny<'a> for BorrowedRefMut<'a, T> {
-    unsafe fn refcounter(&self) -> &dyn Refcounter {
-        &*self.rc
-    }
-
-    unsafe fn rc_and_typed_bytes<'b>(&'b self) -> (&'b dyn Refcounter, TypedBytes<'b>) {
-        (&*self.rc, self.typed_bytes.borrow())
+    unsafe fn typed_bytes<'b>(&'b self) -> TypedBytes<'b> {
+        self.typed_bytes.borrow()
     }
 }
 
 impl<'a, T: TypeDesc> RefMutAny<'a> for BorrowedRefMut<'a, T> {
-    unsafe fn refcounter_mut(&mut self) -> &mut dyn Refcounter {
-        self.rc
+    unsafe fn typed_bytes_mut<'b>(&'b mut self) -> TypedBytesMut<'b> {
+        self.typed_bytes.borrow_mut()
     }
-
-    unsafe fn rc_and_typed_bytes_mut<'b>(&'b mut self) -> (&'b mut dyn Refcounter, TypedBytesMut<'b>) {
-        (self.rc, self.typed_bytes.borrow_mut())
-    }
-
-    // unsafe fn into_typed_bytes(self) -> TypedBytesMut<'a> {
-    //     self.typed_bytes
-    // }
 }
 
 /// A non-refcounted shared reference to `T`.
 #[derive(Clone)]
 pub struct BorrowedRef<'a, T: TypeDesc = !> {
     pub(crate) typed_bytes: TypedBytes<'a>,
-    pub(crate) rc: &'a dyn Refcounter,
     __marker: PhantomData<(&'a T, *const T)>,
 }
 
 impl<'a, T: TypeDesc> BorrowedRef<'a, T> {
     /// Safety: It must be possible to downcast `typed_bytes` to the generic type `T`.
-    pub unsafe fn from_unchecked_type(typed_bytes: TypedBytes<'a>, rc: &'a dyn Refcounter) -> Self {
-        Self { typed_bytes, rc, __marker: Default::default() }
+    pub unsafe fn from_unchecked_type(typed_bytes: TypedBytes<'a>) -> Self {
+        Self { typed_bytes, __marker: Default::default() }
     }
 }
 
 impl<'a> BorrowedRef<'a, !> {
-    pub unsafe fn from(typed_bytes: TypedBytes<'a>, rc: &'a dyn Refcounter) -> Self {
-        Self { typed_bytes, rc, __marker: Default::default() }
+    pub unsafe fn from(typed_bytes: TypedBytes<'a>) -> Self {
+        Self { typed_bytes, __marker: Default::default() }
     }
 
     pub fn downcast_ref<'state: 'a, T: TypeDesc>(self) -> Option<BorrowedRef<'a, T>> {
         if self.typed_bytes.borrow().ty().downcast_ref::<T>().is_some() {
-            Some(BorrowedRef { typed_bytes: self.typed_bytes, rc: self.rc, __marker: Default::default() })
+            Some(BorrowedRef { typed_bytes: self.typed_bytes, __marker: Default::default() })
         } else {
             None
         }
@@ -463,18 +387,14 @@ impl<'a> BorrowedRef<'a, !> {
 
 impl<'a, T: TypeDesc> BorrowedRef<'a, T> {
     pub fn upcast(self) -> BorrowedRef<'a> {
-        BorrowedRef { typed_bytes: self.typed_bytes, rc: self.rc, __marker: Default::default() }
+        BorrowedRef { typed_bytes: self.typed_bytes, __marker: Default::default() }
     }
 }
 
 impl<'a, T: TypeDesc> Ref<'a, T> for BorrowedRef<'a, T> {}
 
 impl<'a, T: TypeDesc> RefAny<'a> for BorrowedRef<'a, T> {
-    unsafe fn refcounter(&self) -> &dyn Refcounter {
-        self.rc
-    }
-
-    unsafe fn rc_and_typed_bytes<'b>(&'b self) -> (&'b dyn Refcounter, TypedBytes<'b>) {
-        (self.rc, self.typed_bytes.borrow())
+    unsafe fn typed_bytes<'b>(&'b self) -> TypedBytes<'b> {
+        self.typed_bytes.borrow()
     }
 }

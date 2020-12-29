@@ -1,6 +1,6 @@
 use super::{
-    BorrowedRef, BorrowedRefMut, Bytes, BytesMut, DowncastFromTypeEnum, OwnedRefMut, Ref, RefAnyExt, RefMut,
-    RefMutAny, RefMutAnyExt, SizedTypeExt, TypeDesc, TypeEnum, TypeExt, TypeResolution, TypeTrait,
+    BorrowedRef, BorrowedRefMut, Bytes, BytesMut, DowncastFromTypeEnum, OwnedRefMut, Ref, RefAny, RefAnyExt,
+    RefMut, RefMutAny, RefMutAnyExt, SizedTypeExt, TypeDesc, TypeEnum, TypeExt, TypeResolution, TypeTrait,
     TypedBytes, TypedBytesMut,
 };
 use crate::node::behaviour::AllocatorHandle;
@@ -102,15 +102,12 @@ impl<T: TypeDesc> OptionType<T> {
         bytes[value_size] = flags as u8;
     }
 
-    fn get_bytes<'a>(&'a self, data: Bytes<'a>) -> Option<TypedBytes<'a>> {
+    fn get_bytes<'a>(&'a self, data: TypedBytes<'a>) -> Option<TypedBytes<'a>> {
         let value_size = self.child_ty.value_size_if_sized().unwrap();
 
-        match self.get_flags(data) {
+        match self.get_flags(data.borrow().bytes()) {
             OptionFlags::None => None,
-            OptionFlags::Some => {
-                let bytes = data.bytes().unwrap();
-                Some(TypedBytes::from(&bytes[0..value_size], Cow::Borrowed(self.child_ty.as_ref())))
-            }
+            OptionFlags::Some => Some(data.bytes_slice(0..value_size).unwrap()),
         }
     }
 }
@@ -133,7 +130,7 @@ unsafe impl<T: TypeDesc> TypeExt for OptionType<T> {
         self.child_ty.is_abi_compatible(&other.child_ty)
     }
 
-    unsafe fn children<'a>(&'a self, data: Bytes<'a>) -> Vec<TypedBytes<'a>> {
+    unsafe fn children<'a>(&'a self, data: TypedBytes<'a>) -> Vec<TypedBytes<'a>> {
         self.get_bytes(data).into_iter().collect()
     }
 
@@ -212,17 +209,15 @@ where
 {
     fn get(&self) -> Option<BorrowedRef<'_, C>> {
         let typed_bytes = unsafe { self.typed_bytes() };
-        let (bytes, ty) = typed_bytes.into();
-        let ty = ty.map(|ty| ty.downcast_ref::<OptionType>().unwrap());
+        let ty = typed_bytes.borrow().ty().map(|ty| ty.downcast_ref::<OptionType>().unwrap());
 
-        match ty.get_flags(bytes) {
+        match ty.get_flags(typed_bytes.borrow().bytes()) {
             OptionFlags::None => None,
             OptionFlags::Some => {
                 let value_size = ty.child_ty.value_size_if_sized().unwrap();
-                let child_ty = ty.map(|ty| ty.child_ty.as_ref());
-                let bytes = bytes.bytes().unwrap();
-                let child_typed_bytes = TypedBytes::from(&bytes[0..value_size], child_ty);
-                Some(unsafe { BorrowedRef::from_unchecked_type(child_typed_bytes, self.refcounter()) })
+                let inner_typed_bytes = typed_bytes.bytes_slice(0..value_size).unwrap();
+
+                Some(unsafe { BorrowedRef::from_unchecked_type(inner_typed_bytes) })
             }
         }
     }
@@ -242,40 +237,46 @@ where
     C: TypeDesc,
 {
     fn get_mut(&mut self) -> Option<BorrowedRefMut<'_, C>> {
-        let (rc, typed_bytes) = unsafe { self.rc_and_typed_bytes_mut() };
-        let (bytes, ty) = typed_bytes.into();
-        let ty = ty.map(|ty| ty.downcast_ref::<OptionType>().unwrap());
+        let typed_bytes = unsafe { self.typed_bytes_mut() };
+        let ty = typed_bytes.borrow().ty().map(|ty| ty.downcast_ref::<OptionType>().unwrap());
 
-        match ty.get_flags(bytes.borrow()) {
+        match ty.get_flags(typed_bytes.borrow().bytes()) {
             OptionFlags::None => None,
             OptionFlags::Some => {
                 let value_size = ty.child_ty.value_size_if_sized().unwrap();
-                let child_ty = ty.map(|ty| ty.child_ty.as_ref());
-                let bytes = bytes.bytes_mut().unwrap();
-                let child_typed_bytes = TypedBytesMut::from(&mut bytes[0..value_size], child_ty);
-                Some(unsafe { BorrowedRefMut::from_unchecked_type(child_typed_bytes, rc) })
+                let inner_typed_bytes = typed_bytes.bytes_slice_mut(0..value_size).unwrap();
+
+                Some(unsafe { BorrowedRefMut::from_unchecked_type(inner_typed_bytes) })
             }
         }
     }
 
     fn take<'state>(&mut self, handle: AllocatorHandle<'_, 'state>) -> Option<OwnedRefMut<'state, C>> {
         let typed_bytes = unsafe { self.typed_bytes_mut() };
-        let (mut bytes, ty) = typed_bytes.into();
-        let ty = ty.map(|ty| ty.downcast_ref::<OptionType>().unwrap());
+        let ty = typed_bytes.borrow().ty().map(|ty| ty.downcast_ref::<OptionType>().unwrap());
 
-        match ty.get_flags(bytes.borrow()) {
+        match ty.get_flags(typed_bytes.borrow().bytes()) {
             OptionFlags::None => None,
             OptionFlags::Some => {
-                ty.set_flags(bytes.borrow_mut(), OptionFlags::None);
+                let (mut bytes, ty, rc) = typed_bytes.into();
+                let option_ty = ty.downcast_ref::<OptionType>().unwrap();
 
+                option_ty.set_flags(bytes.borrow_mut(), OptionFlags::None);
+
+                let mut typed_bytes: TypedBytesMut = (bytes, ty, rc).into();
+                let ty = typed_bytes.borrow().ty().map(|ty| ty.downcast_ref::<OptionType>().unwrap());
                 let value_size = ty.child_ty.value_size_if_sized().unwrap();
-                let child_ty = ty.map(|ty| ty.child_ty.as_ref());
-                let bytes = bytes.bytes_mut().unwrap();
-                let child_typed_bytes = TypedBytes::from(&bytes[0..value_size], child_ty);
+                let inner_typed_bytes = typed_bytes.borrow_mut().bytes_slice_mut(0..value_size).unwrap();
+                let owned = unsafe {
+                    OwnedRefMut::copied_with_unchecked_type_if_sized(inner_typed_bytes.borrow(), handle)
+                        .unwrap()
+                };
 
-                Some(unsafe {
-                    OwnedRefMut::copied_with_unchecked_type_if_sized(child_typed_bytes, handle).unwrap()
-                })
+                unsafe {
+                    inner_typed_bytes.refcount_decrement_recursive();
+                }
+
+                Some(owned)
             }
         }
     }
@@ -289,14 +290,31 @@ where
 
         if let Some(mut item) = item.into() {
             let typed_bytes = unsafe { self.typed_bytes_mut() };
-            let (mut bytes, ty) = typed_bytes.into();
-            let ty = ty.map(|ty| ty.downcast_ref::<OptionType>().unwrap());
-            let value_size = ty.child_ty.value_size_if_sized().unwrap();
             let item_typed_bytes = unsafe { item.typed_bytes_mut() };
+            let ty = typed_bytes.borrow().ty().map(|ty| ty.downcast_ref::<OptionType>().unwrap());
+            let value_size = ty.child_ty.value_size_if_sized().unwrap();
 
-            ty.set_flags(bytes.borrow_mut(), OptionFlags::Some);
-            bytes.bytes_mut().unwrap()[0..value_size]
+            let mut typed_bytes: TypedBytesMut = {
+                let (mut bytes, ty, rc) = typed_bytes.into();
+                let option_ty = ty.downcast_ref::<OptionType>().unwrap();
+
+                option_ty.set_flags(bytes.borrow_mut(), OptionFlags::Some);
+
+                (bytes, ty, rc).into()
+            };
+
+            let mut inner_typed_bytes = typed_bytes.borrow_mut().bytes_slice_mut(0..value_size).unwrap();
+
+            inner_typed_bytes
+                .borrow_mut()
+                .bytes_mut()
+                .bytes_mut()
+                .unwrap()
                 .copy_from_slice(item_typed_bytes.bytes().bytes().unwrap());
+
+            unsafe {
+                inner_typed_bytes.refcount_increment_recursive();
+            }
         }
 
         Ok(result)

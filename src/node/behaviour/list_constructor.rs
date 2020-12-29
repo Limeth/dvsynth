@@ -156,20 +156,18 @@ impl NodeBehaviour for ListConstructorNodeBehaviour {
                     }
                     {
                         let mut list: OwnedRefMut<Unique<ListType>> =
-                            context.allocator_handle.allocate_object::<ListType>(ListDescriptor::new(
-                                Unique::new(ListType::new(PrimitiveType::U8)),
-                            ));
+                            context.allocator_handle.allocate_object::<ListType>(
+                                ListDescriptor::new(Unique::new(ListType::new(PrimitiveType::U8))).upcast(),
+                            );
                         let mut list: BorrowedRefMut<ListType> = list.deref_mut();
-                        let mut inner_list_1: OwnedRefMut<Unique<ListType>> =
-                            context
-                                .allocator_handle
-                                .allocate_object::<ListType>(ListDescriptor::new(PrimitiveType::U8));
-                        list.push(inner_list_1).unwrap();
-                        let mut inner_list_2: OwnedRefMut<Unique<ListType>> =
-                            context
-                                .allocator_handle
-                                .allocate_object::<ListType>(ListDescriptor::new(PrimitiveType::U8));
-                        list.push(inner_list_2).unwrap();
+                        let mut inner_list_1: OwnedRefMut<Unique<ListType<PrimitiveType>>> = context
+                            .allocator_handle
+                            .allocate_object::<ListType<_>>(ListDescriptor::new(PrimitiveType::U8));
+                        list.push(inner_list_1.upcast()).unwrap();
+                        let mut inner_list_2: OwnedRefMut<Unique<ListType<PrimitiveType>>> = context
+                            .allocator_handle
+                            .allocate_object::<ListType<_>>(ListDescriptor::new(PrimitiveType::U8));
+                        list.push(inner_list_2.upcast()).unwrap();
                         dbg!(list.get(0).unwrap().bytes_if_sized());
                         dbg!(list.get(1).unwrap().bytes_if_sized());
                         dbg!(list.len());

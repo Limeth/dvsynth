@@ -51,7 +51,7 @@ impl DynTypeTrait for TextureType {
         todo!()
     }
 
-    unsafe fn children<'a>(&'a self, _data: Bytes<'a>) -> Vec<TypedBytes<'a>> {
+    unsafe fn children<'a>(&'a self, _data: TypedBytes<'a>) -> Vec<TypedBytes<'a>> {
         todo!()
     }
 }
