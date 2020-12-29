@@ -1,10 +1,13 @@
 use super::{
     Bytes, CloneableTypeExt, DowncastFromTypeEnum, SafeBinaryRepresentationTypeExt, SizedTypeExt, TypeDesc,
-    TypeEnum, TypeExt, TypeTrait, TypedBytes,
+    TypeEnum, TypeExt, TypeResolution, TypeTrait, TypedBytes,
 };
 use byteorder::{ByteOrder, ReadBytesExt, WriteBytesExt};
-use std::fmt::Display;
+use std::any::TypeId;
+use std::fmt::{Debug, Display};
+use std::hash::{Hash, Hasher};
 use std::io::{Cursor, Read, Write};
+use std::marker::PhantomData;
 
 pub mod prelude {}
 
@@ -23,178 +26,230 @@ impl PrimitiveKind {
     }
 }
 
-/// Should not be used for large data storage, as the size is defined by the largest variant.
-#[derive(Debug, PartialEq, Clone, Copy)]
-pub enum PrimitiveChannelValue {
-    U8(u8),
-    U16(u16),
-    U32(u32),
-    U64(u64),
-    U128(u128),
-    I8(i8),
-    I16(i16),
-    I32(i32),
-    I64(i64),
-    I128(i128),
-    F32(f32),
-    F64(f64),
-}
-
-impl PrimitiveChannelValue {
-    pub fn ty(&self) -> PrimitiveType {
-        use PrimitiveChannelValue::*;
-        match self {
-            U8(_) => PrimitiveType::U8,
-            U16(_) => PrimitiveType::U16,
-            U32(_) => PrimitiveType::U32,
-            U64(_) => PrimitiveType::U64,
-            U128(_) => PrimitiveType::U128,
-            I8(_) => PrimitiveType::I8,
-            I16(_) => PrimitiveType::I16,
-            I32(_) => PrimitiveType::I32,
-            I64(_) => PrimitiveType::I64,
-            I128(_) => PrimitiveType::I128,
-            F32(_) => PrimitiveType::F32,
-            F64(_) => PrimitiveType::F64,
-        }
-    }
-
-    pub fn value_to_string(&self) -> String {
-        use PrimitiveChannelValue::*;
-        match self {
-            U8(value) => value.to_string(),
-            U16(value) => value.to_string(),
-            U32(value) => value.to_string(),
-            U64(value) => value.to_string(),
-            U128(value) => value.to_string(),
-            I8(value) => value.to_string(),
-            I16(value) => value.to_string(),
-            I32(value) => value.to_string(),
-            I64(value) => value.to_string(),
-            I128(value) => value.to_string(),
-            F32(value) => value.to_string(),
-            F64(value) => value.to_string(),
-        }
-    }
-
-    pub fn write<E: ByteOrder>(&self, write: &mut dyn Write) -> std::io::Result<()> {
-        use PrimitiveChannelValue::*;
-        match self {
-            U8(value) => write.write_u8(*value),
-            U16(value) => write.write_u16::<E>(*value),
-            U32(value) => write.write_u32::<E>(*value),
-            U64(value) => write.write_u64::<E>(*value),
-            U128(value) => write.write_u128::<E>(*value),
-            I8(value) => write.write_i8(*value),
-            I16(value) => write.write_i16::<E>(*value),
-            I32(value) => write.write_i32::<E>(*value),
-            I64(value) => write.write_i64::<E>(*value),
-            I128(value) => write.write_i128::<E>(*value),
-            F32(value) => write.write_f32::<E>(*value),
-            F64(value) => write.write_f64::<E>(*value),
-        }
-    }
-}
-
-macro_rules! impl_primitive_conversions {
+macro_rules! impl_primitive_types {
     {
-        $($enum_variant:ident ($primitive_type:ident)),*$(,)?
+        $($enum_variant:ident ($primitive_type:ident, $primitive_kind:ident)),*$(,)?
     } => {
+        pub struct PrimitiveType<T: 'static> {
+            __marker: PhantomData<T>,
+        }
+
+        impl<T> Hash for PrimitiveType<T> {
+            fn hash<H>(&self, state: &mut H)
+            where
+                H: Hasher
+            {
+                TypeId::of::<T>().hash(state);
+            }
+        }
+
+        impl<T> Clone for PrimitiveType<T> {
+            fn clone(&self) -> Self {
+                Self { __marker: Default::default() }
+            }
+        }
+
+        impl<T> Default for PrimitiveType<T> {
+            fn default() -> Self {
+                Self { __marker: Default::default() }
+            }
+        }
+
+        impl<T> PartialEq for PrimitiveType<T> {
+            fn eq(&self, other: &Self) -> bool {
+                true
+            }
+        }
+
+        impl<T> Eq for PrimitiveType<T> {}
+
+        impl<T> Display for PrimitiveType<T> {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_fmt(format_args!("PrimitiveType<{}>", std::any::type_name::<T>()))
+            }
+        }
+
+        impl<T> Debug for PrimitiveType<T> {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_fmt(format_args!("PrimitiveType<{}>", std::any::type_name::<T>()))
+            }
+        }
+
+        #[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
+        pub enum PrimitiveTypeEnum {
+            $($enum_variant,)*
+        }
+
+        impl From<PrimitiveTypeEnum> for TypeEnum {
+            fn from(from: PrimitiveTypeEnum) -> Self {
+                use PrimitiveTypeEnum::*;
+                match from {
+                    $(
+                        $enum_variant => TypeEnum::$enum_variant(Default::default()),
+                    )*
+                }
+            }
+        }
+
+        /// Should not be used for large data storage, as the size is defined by the largest variant.
+        #[derive(Debug, PartialEq, Clone, Copy)]
+        pub enum PrimitiveChannelValue {
+            $($enum_variant($primitive_type),)*
+        }
+
+        impl PrimitiveTypeEnum {
+            pub const VALUES: [PrimitiveTypeEnum; 12] = {
+                use PrimitiveTypeEnum::*;
+                [$($enum_variant,)*]
+            };
+
+            pub fn kind(&self) -> PrimitiveKind {
+                use PrimitiveTypeEnum::*;
+                match self {
+                    $(
+                        $enum_variant => PrimitiveKind::$primitive_kind,
+                    )*
+                }
+            }
+
+            pub fn default_value(&self) -> PrimitiveChannelValue {
+                use PrimitiveTypeEnum::*;
+                match self {
+                    $(
+                        $enum_variant => PrimitiveChannelValue::$enum_variant(Default::default()),
+                    )*
+                }
+            }
+
+            pub fn parse(&self, from: impl AsRef<str>) -> Option<PrimitiveChannelValue> {
+                use PrimitiveTypeEnum::*;
+                Some(match self {
+                    $(
+                        $enum_variant => PrimitiveChannelValue::$enum_variant(from.as_ref().parse().ok()?),
+                    )*
+                })
+            }
+        }
+
+        impl PrimitiveChannelValue {
+            pub fn ty(&self) -> PrimitiveTypeEnum {
+                use PrimitiveChannelValue::*;
+                match self {
+                    $(
+                        $enum_variant(_) => PrimitiveTypeEnum::$enum_variant,
+                    )*
+                }
+            }
+
+            pub fn value_to_string(&self) -> String {
+                use PrimitiveChannelValue::*;
+                match self {
+                    $(
+                        $enum_variant(value) => value.to_string(),
+                    )*
+                }
+            }
+        }
+
         $(
             impl From<$primitive_type> for PrimitiveChannelValue {
                 fn from(primitive: $primitive_type) -> Self {
                     PrimitiveChannelValue::$enum_variant(primitive)
                 }
             }
+
+            unsafe impl SizedTypeExt for PrimitiveType<$primitive_type> {
+                fn value_size(&self) -> usize {
+                    std::mem::size_of::<$primitive_type>()
+                }
+            }
+
+            unsafe impl SafeBinaryRepresentationTypeExt for PrimitiveType<$primitive_type> {}
+
+            unsafe impl CloneableTypeExt for PrimitiveType<$primitive_type> {}
+
+            unsafe impl TypeExt for PrimitiveType<$primitive_type> {
+                fn is_abi_compatible(&self, other: &Self) -> bool {
+                    true
+                }
+
+                unsafe fn children<'a>(&'a self, _data: TypedBytes<'a>) -> Vec<TypedBytes<'a>> {
+                    vec![]
+                }
+
+                fn value_size_if_sized(&self) -> Option<usize> {
+                    Some(self.value_size())
+                }
+
+                fn has_safe_binary_representation(&self) -> bool {
+                    true
+                }
+
+                fn is_cloneable(&self) -> bool {
+                    true
+                }
+            }
+
+            unsafe impl TypeDesc for PrimitiveType<$primitive_type> {}
+            impl TypeTrait for PrimitiveType<$primitive_type> {}
+
+            impl From<PrimitiveType<$primitive_type>> for TypeEnum {
+                fn from(from: PrimitiveType<$primitive_type>) -> Self {
+                    TypeEnum::$enum_variant(from)
+                }
+            }
+
+            // impl DowncastFromTypeEnum for PrimitiveType<$primitive_type> {
+            //     fn resolve_from(from: TypeEnum) -> Option<TypeResolution<Self, TypeEnum>>
+            //     where Self: Sized {
+            //         if let TypeEnum::$enum_variant(value) = from {
+            //             Some(value)
+            //         } else {
+            //             None
+            //         }
+            //     }
+
+            //     fn resolve_from_ref(from: &TypeEnum) -> Option<TypeResolution<&Self, &TypeEnum>> {
+            //         if let TypeEnum::$enum_variant(value) = from {
+            //             Some(value)
+            //         } else {
+            //             None
+            //         }
+            //     }
+
+            //     fn resolve_from_mut(from: &mut TypeEnum) -> Option<TypeResolution<&mut Self, &mut TypeEnum>> {
+            //         if let TypeEnum::$enum_variant(value) = from {
+            //             Some(value)
+            //         } else {
+            //             None
+            //         }
+            //     }
+            // }
+
+            impl_downcast_from_type_enum!($enum_variant(PrimitiveType<$primitive_type>));
         )*
     }
 }
 
-impl_primitive_conversions! {
-    U8(u8),
-    U16(u16),
-    U32(u32),
-    U64(u64),
-    U128(u128),
-    I8(i8),
-    I16(i16),
-    I32(i32),
-    I64(i64),
-    I128(i128),
-    F32(f32),
-    F64(f64),
+impl_primitive_types! {
+    U8(u8, UnsignedInteger),
+    U16(u16, UnsignedInteger),
+    U32(u32, UnsignedInteger),
+    U64(u64, UnsignedInteger),
+    U128(u128, UnsignedInteger),
+    I8(i8, SignedInteger),
+    I16(i16, SignedInteger),
+    I32(i32, SignedInteger),
+    I64(i64, SignedInteger),
+    I128(i128, SignedInteger),
+    F32(f32, Float),
+    F64(f64, Float),
 }
 
-#[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
-pub enum PrimitiveType {
-    U8,
-    U16,
-    U32,
-    U64,
-    U128,
-    I8,
-    I16,
-    I32,
-    I64,
-    I128,
-    F32,
-    F64,
-}
-
-impl PrimitiveType {
-    pub const VALUES: [PrimitiveType; 12] = {
-        use PrimitiveType::*;
-        [U8, U16, U32, U64, U128, I8, I16, I32, I64, I128, F32, F64]
-    };
-
-    pub fn kind(&self) -> PrimitiveKind {
-        use PrimitiveType::*;
-        match self {
-            U8 | U16 | U32 | U64 | U128 => PrimitiveKind::UnsignedInteger,
-            I8 | I16 | I32 | I64 | I128 => PrimitiveKind::SignedInteger,
-            F32 | F64 => PrimitiveKind::Float,
-        }
-    }
-
-    pub fn default_value(&self) -> PrimitiveChannelValue {
-        use PrimitiveType::*;
-        match self {
-            U8 => PrimitiveChannelValue::U8(Default::default()),
-            U16 => PrimitiveChannelValue::U16(Default::default()),
-            U32 => PrimitiveChannelValue::U32(Default::default()),
-            U64 => PrimitiveChannelValue::U64(Default::default()),
-            U128 => PrimitiveChannelValue::U128(Default::default()),
-            I8 => PrimitiveChannelValue::I8(Default::default()),
-            I16 => PrimitiveChannelValue::I16(Default::default()),
-            I32 => PrimitiveChannelValue::I32(Default::default()),
-            I64 => PrimitiveChannelValue::I64(Default::default()),
-            I128 => PrimitiveChannelValue::I128(Default::default()),
-            F32 => PrimitiveChannelValue::F32(Default::default()),
-            F64 => PrimitiveChannelValue::F64(Default::default()),
-        }
-    }
-
-    pub fn parse(&self, from: impl AsRef<str>) -> Option<PrimitiveChannelValue> {
-        use PrimitiveType::*;
-        Some(match self {
-            U8 => PrimitiveChannelValue::U8(from.as_ref().parse().ok()?),
-            U16 => PrimitiveChannelValue::U16(from.as_ref().parse().ok()?),
-            U32 => PrimitiveChannelValue::U32(from.as_ref().parse().ok()?),
-            U64 => PrimitiveChannelValue::U64(from.as_ref().parse().ok()?),
-            U128 => PrimitiveChannelValue::U128(from.as_ref().parse().ok()?),
-            I8 => PrimitiveChannelValue::I8(from.as_ref().parse().ok()?),
-            I16 => PrimitiveChannelValue::I16(from.as_ref().parse().ok()?),
-            I32 => PrimitiveChannelValue::I32(from.as_ref().parse().ok()?),
-            I64 => PrimitiveChannelValue::I64(from.as_ref().parse().ok()?),
-            I128 => PrimitiveChannelValue::I128(from.as_ref().parse().ok()?),
-            F32 => PrimitiveChannelValue::F32(from.as_ref().parse().ok()?),
-            F64 => PrimitiveChannelValue::F64(from.as_ref().parse().ok()?),
-        })
-    }
-
+impl PrimitiveTypeEnum {
     pub fn read<E: ByteOrder, R>(&self, read: R) -> std::io::Result<PrimitiveChannelValue>
     where Cursor<R>: Read {
-        use PrimitiveType::*;
+        use PrimitiveTypeEnum::*;
         let mut read = Cursor::new(read);
         Ok(match self {
             U8 => PrimitiveChannelValue::U8(read.read_u8()?),
@@ -213,64 +268,28 @@ impl PrimitiveType {
     }
 }
 
-impl Display for PrimitiveType {
+impl Display for PrimitiveTypeEnum {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_fmt(format_args!("{:?}", self))
     }
 }
 
-unsafe impl SizedTypeExt for PrimitiveType {
-    fn value_size(&self) -> usize {
-        use PrimitiveType::*;
+impl PrimitiveChannelValue {
+    pub fn write<E: ByteOrder>(&self, write: &mut dyn Write) -> std::io::Result<()> {
+        use PrimitiveChannelValue::*;
         match self {
-            U8 | I8 => 1,
-            U16 | I16 => 2,
-            U32 | I32 | F32 => 4,
-            U64 | I64 | F64 => 8,
-            U128 | I128 => 16,
+            U8(value) => write.write_u8(*value),
+            U16(value) => write.write_u16::<E>(*value),
+            U32(value) => write.write_u32::<E>(*value),
+            U64(value) => write.write_u64::<E>(*value),
+            U128(value) => write.write_u128::<E>(*value),
+            I8(value) => write.write_i8(*value),
+            I16(value) => write.write_i16::<E>(*value),
+            I32(value) => write.write_i32::<E>(*value),
+            I64(value) => write.write_i64::<E>(*value),
+            I128(value) => write.write_i128::<E>(*value),
+            F32(value) => write.write_f32::<E>(*value),
+            F64(value) => write.write_f64::<E>(*value),
         }
     }
 }
-
-unsafe impl SafeBinaryRepresentationTypeExt for PrimitiveType {}
-
-unsafe impl CloneableTypeExt for PrimitiveType {}
-
-unsafe impl TypeExt for PrimitiveType {
-    fn is_abi_compatible(&self, other: &Self) -> bool {
-        self.kind().is_abi_compatible(&other.kind()) && self.value_size() == other.value_size()
-    }
-
-    unsafe fn children<'a>(&'a self, _data: TypedBytes<'a>) -> Vec<TypedBytes<'a>> {
-        vec![]
-    }
-
-    fn value_size_if_sized(&self) -> Option<usize> {
-        Some(self.value_size())
-    }
-
-    fn has_safe_binary_representation(&self) -> bool {
-        true
-    }
-
-    fn is_cloneable(&self) -> bool {
-        true
-    }
-}
-
-// trait PrimitiveRefExt {
-//     pub
-// }
-
-// impl<R> R where R: RefExt<PrimitiveType> {}
-
-impl From<PrimitiveType> for TypeEnum {
-    fn from(other: PrimitiveType) -> Self {
-        TypeEnum::Primitive(other)
-    }
-}
-
-impl_downcast_from_type_enum!(Primitive(PrimitiveType));
-
-unsafe impl TypeDesc for PrimitiveType {}
-impl TypeTrait for PrimitiveType {}

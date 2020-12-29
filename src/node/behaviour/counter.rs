@@ -4,7 +4,7 @@ use crate::{
             ApplicationContext, ExecutionContext, ExecutorClosure, NodeBehaviour, NodeCommand, NodeEvent,
             NodeStateClosure,
         },
-        Channel, NodeConfiguration, PrimitiveType,
+        Channel, NodeConfiguration, PrimitiveType, PrimitiveTypeEnum,
     },
     style::Theme,
 };
@@ -26,7 +26,7 @@ impl NodeBehaviour for CounterNodeBehaviour {
         match event {
             NodeEvent::Update => vec![NodeCommand::Configure(NodeConfiguration {
                 channels_input: vec![],
-                channels_output: vec![Channel::new("count", PrimitiveType::U32)],
+                channels_output: vec![Channel::new("count", PrimitiveTypeEnum::U32)],
             })],
             NodeEvent::Message(_) => vec![],
         }

@@ -5,7 +5,7 @@ use crate::{
         behaviour::{
             ExecutionContext, ExecutorClosure, NodeBehaviour, NodeCommand, NodeEvent, NodeStateClosure,
         },
-        Channel, NodeConfiguration, PrimitiveType,
+        Channel, NodeConfiguration, PrimitiveType, PrimitiveTypeEnum,
     },
     style::{Theme, Themeable},
 };
@@ -20,14 +20,14 @@ use std::io::Cursor;
 
 #[derive(Debug, Clone)]
 pub enum ConstantNodeMessage {
-    UpdateType(PrimitiveType),
+    UpdateType(PrimitiveTypeEnum),
     UpdateValue(String),
 }
 
 #[derive(Clone, Debug)]
 pub struct ConstantNodeBehaviour {
     value: PrimitiveChannelValue,
-    pick_list_state: pick_list::State<PrimitiveType>,
+    pick_list_state: pick_list::State<PrimitiveTypeEnum>,
     text_input_state: text_input::State,
     text_input_value: String,
     text_input_placeholder: String,
@@ -36,11 +36,11 @@ pub struct ConstantNodeBehaviour {
 impl Default for ConstantNodeBehaviour {
     fn default() -> Self {
         Self {
-            value: PrimitiveType::F32.default_value(),
+            value: PrimitiveTypeEnum::F32.default_value(),
             pick_list_state: Default::default(),
             text_input_state: Default::default(),
             text_input_value: Default::default(),
-            text_input_placeholder: PrimitiveType::F32.default_value().value_to_string(),
+            text_input_placeholder: PrimitiveTypeEnum::F32.default_value().value_to_string(),
         }
     }
 }
@@ -109,7 +109,7 @@ impl NodeBehaviour for ConstantNodeBehaviour {
                 .push(
                     PickList::new(
                         &mut self.pick_list_state,
-                        &PrimitiveType::VALUES[..],
+                        &PrimitiveTypeEnum::VALUES[..],
                         Some(self.value.ty()),
                         |new_value| ConstantNodeMessage::UpdateType(new_value),
                     )

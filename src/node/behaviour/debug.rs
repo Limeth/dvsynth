@@ -4,7 +4,7 @@ use crate::{
             ApplicationContext, ExecutionContext, ExecutorClosure, NodeBehaviour, NodeCommand, NodeEvent,
             NodeStateClosure,
         },
-        Channel, NodeConfiguration, PrimitiveType,
+        Channel, NodeConfiguration, PrimitiveType, PrimitiveTypeEnum,
     },
     style::{Theme, Themeable},
 };
@@ -17,18 +17,18 @@ use iced::{Align, Length, Row};
 
 #[derive(Debug, Clone)]
 pub enum DebugNodeMessage {
-    UpdateType(PrimitiveType),
+    UpdateType(PrimitiveTypeEnum),
 }
 
 #[derive(Debug, Clone)]
 pub struct DebugNodeBehaviour {
-    ty: PrimitiveType,
-    pick_list_state: pick_list::State<PrimitiveType>,
+    ty: PrimitiveTypeEnum,
+    pick_list_state: pick_list::State<PrimitiveTypeEnum>,
 }
 
 impl Default for DebugNodeBehaviour {
     fn default() -> Self {
-        Self { ty: PrimitiveType::F32, pick_list_state: Default::default() }
+        Self { ty: PrimitiveTypeEnum::F32, pick_list_state: Default::default() }
     }
 }
 
@@ -73,7 +73,7 @@ impl NodeBehaviour for DebugNodeBehaviour {
                 .push(
                     PickList::new(
                         &mut self.pick_list_state,
-                        &PrimitiveType::VALUES[..],
+                        &PrimitiveTypeEnum::VALUES[..],
                         Some(self.ty),
                         |new_value| DebugNodeMessage::UpdateType(new_value),
                     )

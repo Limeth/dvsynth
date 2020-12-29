@@ -4,7 +4,7 @@ use crate::{
             ApplicationContext, ExecutionContext, ExecutorClosure, NodeBehaviour, NodeCommand, NodeEvent,
             NodeStateClosure,
         },
-        ArrayType, Channel, NodeConfiguration, PrimitiveType,
+        ArrayType, Channel, NodeConfiguration, PrimitiveType, PrimitiveTypeEnum,
     },
     style::{self, Themeable},
 };
@@ -20,16 +20,16 @@ use style::Theme;
 
 #[derive(Debug, Clone)]
 pub enum ArrayConstructorNodeMessage {
-    UpdateType(PrimitiveType),
+    UpdateType(PrimitiveTypeEnum),
     AddChannel,
     RemoveChannel,
 }
 
 #[derive(Clone, Debug)]
 pub struct ArrayConstructorNodeBehaviour {
-    ty: PrimitiveType,
+    ty: PrimitiveTypeEnum,
     channel_count: NonZeroUsize,
-    pick_list_state: pick_list::State<PrimitiveType>,
+    pick_list_state: pick_list::State<PrimitiveTypeEnum>,
     button_add_state: ButtonState,
     button_remove_state: ButtonState,
 }
@@ -37,7 +37,7 @@ pub struct ArrayConstructorNodeBehaviour {
 impl Default for ArrayConstructorNodeBehaviour {
     fn default() -> Self {
         Self {
-            ty: PrimitiveType::F32,
+            ty: PrimitiveTypeEnum::F32,
             channel_count: unsafe { NonZeroUsize::new_unchecked(1) },
             pick_list_state: Default::default(),
             button_add_state: Default::default(),
@@ -53,7 +53,10 @@ impl ArrayConstructorNodeBehaviour {
                 .into_iter()
                 .map(|channel_index| Channel::new(format!("item #{}", channel_index), self.ty))
                 .collect(),
-            channels_output: vec![Channel::new("array", ArrayType::new(self.ty, self.channel_count.get()))],
+            channels_output: vec![Channel::new(
+                "array",
+                ArrayType::new_if_sized(self.ty, self.channel_count.get()).unwrap(),
+            )],
         })
     }
 }
@@ -100,7 +103,7 @@ impl NodeBehaviour for ArrayConstructorNodeBehaviour {
                 .push(
                     PickList::new(
                         &mut self.pick_list_state,
-                        &PrimitiveType::VALUES[..],
+                        &PrimitiveTypeEnum::VALUES[..],
                         Some(self.ty),
                         |new_value| ArrayConstructorNodeMessage::UpdateType(new_value),
                     )

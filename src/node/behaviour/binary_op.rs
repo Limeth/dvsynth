@@ -5,7 +5,7 @@ use crate::{
             ApplicationContext, ExecutionContext, ExecutorClosure, NodeBehaviour, NodeCommand, NodeEvent,
             NodeStateClosure,
         },
-        Channel, NodeConfiguration, PrimitiveType,
+        Channel, NodeConfiguration, PrimitiveType, PrimitiveTypeEnum,
     },
     style::{Theme, Themeable},
 };
@@ -20,14 +20,14 @@ use std::ops::{Add, Div, Mul, Sub};
 
 #[derive(Debug, Clone)]
 pub enum BinaryOpMessage {
-    UpdateType(PrimitiveType),
+    UpdateType(PrimitiveTypeEnum),
     UpdateOp(BinaryOp),
 }
 
 #[derive(Clone, Debug)]
 pub struct BinaryOpNodeBehaviour {
-    pub pick_list_ty_state: pick_list::State<PrimitiveType>,
-    pub pick_list_ty_value: PrimitiveType,
+    pub pick_list_ty_state: pick_list::State<PrimitiveTypeEnum>,
+    pub pick_list_ty_value: PrimitiveTypeEnum,
     pub pick_list_op_state: pick_list::State<BinaryOp>,
     pub op: BinaryOp,
 }
@@ -37,7 +37,7 @@ impl Default for BinaryOpNodeBehaviour {
         Self {
             op: BinaryOp::Add,
             pick_list_ty_state: Default::default(),
-            pick_list_ty_value: PrimitiveType::F32,
+            pick_list_ty_value: PrimitiveTypeEnum::F32,
             pick_list_op_state: Default::default(),
         }
     }
@@ -90,7 +90,7 @@ impl NodeBehaviour for BinaryOpNodeBehaviour {
                     Container::new(
                         PickList::new(
                             &mut self.pick_list_ty_state,
-                            &PrimitiveType::VALUES[..],
+                            &PrimitiveTypeEnum::VALUES[..],
                             Some(self.pick_list_ty_value),
                             |new_value| BinaryOpMessage::UpdateType(new_value),
                         )

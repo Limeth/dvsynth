@@ -6,7 +6,7 @@ use crate::{
             ApplicationContext, ExecutionContext, ExecutorClosure, NodeBehaviour, NodeCommand, NodeEvent,
             NodeStateClosure,
         },
-        Channel, NodeConfiguration, PrimitiveType,
+        Channel, NodeConfiguration, PrimitiveType, PrimitiveTypeEnum,
     },
     style::{Theme, Themeable},
 };
@@ -21,16 +21,16 @@ use std::num::NonZeroUsize;
 
 #[derive(Debug, Clone)]
 pub enum ListConstructorNodeMessage {
-    UpdateType(PrimitiveType),
+    UpdateType(PrimitiveTypeEnum),
     AddChannel,
     RemoveChannel,
 }
 
 #[derive(Debug, Clone)]
 pub struct ListConstructorNodeBehaviour {
-    ty: PrimitiveType,
+    ty: PrimitiveTypeEnum,
     channel_count: NonZeroUsize,
-    pick_list_state: pick_list::State<PrimitiveType>,
+    pick_list_state: pick_list::State<PrimitiveTypeEnum>,
     button_add_state: button::State,
     button_remove_state: button::State,
 }
@@ -38,7 +38,7 @@ pub struct ListConstructorNodeBehaviour {
 impl Default for ListConstructorNodeBehaviour {
     fn default() -> Self {
         Self {
-            ty: PrimitiveType::F32,
+            ty: PrimitiveTypeEnum::F32,
             channel_count: unsafe { NonZeroUsize::new_unchecked(1) },
             pick_list_state: Default::default(),
             button_add_state: Default::default(),
@@ -54,7 +54,10 @@ impl ListConstructorNodeBehaviour {
                 .into_iter()
                 .map(|channel_index| Channel::new(format!("item #{}", channel_index), self.ty))
                 .collect(),
-            channels_output: vec![Channel::new("list", Unique::new(ListType::new(self.ty)))],
+            channels_output: vec![Channel::new(
+                "list",
+                Unique::new(ListType::new_if_sized(self.ty).unwrap()),
+            )],
         })
     }
 }
@@ -102,7 +105,7 @@ impl NodeBehaviour for ListConstructorNodeBehaviour {
                 .push(
                     PickList::new(
                         &mut self.pick_list_state,
-                        &PrimitiveType::VALUES[..],
+                        &PrimitiveTypeEnum::VALUES[..],
                         Some(self.ty),
                         |new_value| ListConstructorNodeMessage::UpdateType(new_value),
                     )
@@ -157,16 +160,21 @@ impl NodeBehaviour for ListConstructorNodeBehaviour {
                     {
                         let mut list: OwnedRefMut<Unique<ListType>> =
                             context.allocator_handle.allocate_object::<ListType>(
-                                ListDescriptor::new(Unique::new(ListType::new(PrimitiveType::U8))).upcast(),
+                                ListDescriptor::new(Unique::new(ListType::new(
+                                    PrimitiveType::<u8>::default(),
+                                )))
+                                .upcast(),
                             );
                         let mut list: BorrowedRefMut<ListType> = list.deref_mut();
-                        let mut inner_list_1: OwnedRefMut<Unique<ListType<PrimitiveType>>> = context
-                            .allocator_handle
-                            .allocate_object::<ListType<_>>(ListDescriptor::new(PrimitiveType::U8));
+                        let mut inner_list_1: OwnedRefMut<Unique<ListType<PrimitiveType<u8>>>> =
+                            context.allocator_handle.allocate_object::<ListType<_>>(ListDescriptor::new(
+                                PrimitiveType::<u8>::default(),
+                            ));
                         list.push(inner_list_1.upcast()).unwrap();
-                        let mut inner_list_2: OwnedRefMut<Unique<ListType<PrimitiveType>>> = context
-                            .allocator_handle
-                            .allocate_object::<ListType<_>>(ListDescriptor::new(PrimitiveType::U8));
+                        let mut inner_list_2: OwnedRefMut<Unique<ListType<PrimitiveType<u8>>>> =
+                            context.allocator_handle.allocate_object::<ListType<_>>(ListDescriptor::new(
+                                PrimitiveType::<u8>::default(),
+                            ));
                         list.push(inner_list_2.upcast()).unwrap();
                         dbg!(list.get(0).unwrap().bytes_if_sized());
                         dbg!(list.get(1).unwrap().bytes_if_sized());

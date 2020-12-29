@@ -810,10 +810,8 @@ where T: DynTypeTrait
 unsafe impl<T> TypeDesc for T where T: DynTypeTrait {}
 
 macro_rules! define_type_enum {
-    (@void $($tt:tt)*) => {};
-
     [
-        $($variant:ident($inner:ident) <- $value_for_discriminant:expr),*$(,)?
+        $($variant:ident($inner:ty) <- $value_for_discriminant:expr),*$(,)?
     ] => {
         #[derive(Debug, Hash, PartialEq, Eq, Clone)]
         pub enum TypeEnum {
@@ -891,14 +889,27 @@ macro_rules! define_type_enum {
 }
 
 define_type_enum![
-    Shared(Shared) <- Shared::new(PrimitiveType::U8).upcast(),
-    Unique(Unique) <- Unique::new(PrimitiveType::U8).upcast(),
-    Primitive(PrimitiveType) <- PrimitiveType::U8,
-    Option(OptionType) <- OptionType::new(PrimitiveType::U8).upcast(),
+    Shared(Shared) <- Shared::new(PrimitiveType::<u8>::default()).upcast(),
+    Unique(Unique) <- Unique::new(PrimitiveType::<u8>::default()).upcast(),
+    Option(OptionType) <- OptionType::new(PrimitiveType::<u8>::default()).upcast(),
     // Tuple(Vec<Self>),
-    Array(ArrayType) <- ArrayType::single(PrimitiveType::U8),
-    List(ListType) <- ListType::new(PrimitiveType::U8).upcast(),
+    Array(ArrayType) <- ArrayType::single(PrimitiveType::<u8>::default()),
+    List(ListType) <- ListType::new(PrimitiveType::<u8>::default()).upcast(),
     Texture(TextureType) <- TextureType::new(),
+
+    // Primitives
+    U8(PrimitiveType<u8>) <- Default::default(),
+    U16(PrimitiveType<u16>) <- Default::default(),
+    U32(PrimitiveType<u32>) <- Default::default(),
+    U64(PrimitiveType<u64>) <- Default::default(),
+    U128(PrimitiveType<u128>) <- Default::default(),
+    I8(PrimitiveType<i8>) <- Default::default(),
+    I16(PrimitiveType<i16>) <- Default::default(),
+    I32(PrimitiveType<i32>) <- Default::default(),
+    I64(PrimitiveType<i64>) <- Default::default(),
+    I128(PrimitiveType<i128>) <- Default::default(),
+    F32(PrimitiveType<f32>) <- Default::default(),
+    F64(PrimitiveType<f64>) <- Default::default(),
 ];
 
 impl TypeEnum {
@@ -924,6 +935,24 @@ impl TypeEnum {
 
     pub fn downcast_mut<T: DowncastFromTypeEnum>(&mut self) -> Option<&mut T> {
         T::downcast_from_mut(self)
+    }
+
+    pub fn as_primitive_type_enum(&self) -> Option<PrimitiveTypeEnum> {
+        match self {
+            TypeEnum::U8(_) => Some(PrimitiveTypeEnum::U8),
+            TypeEnum::U16(_) => Some(PrimitiveTypeEnum::U16),
+            TypeEnum::U32(_) => Some(PrimitiveTypeEnum::U32),
+            TypeEnum::U64(_) => Some(PrimitiveTypeEnum::U64),
+            TypeEnum::U128(_) => Some(PrimitiveTypeEnum::U128),
+            TypeEnum::I8(_) => Some(PrimitiveTypeEnum::I8),
+            TypeEnum::I16(_) => Some(PrimitiveTypeEnum::I16),
+            TypeEnum::I32(_) => Some(PrimitiveTypeEnum::I32),
+            TypeEnum::I64(_) => Some(PrimitiveTypeEnum::I64),
+            TypeEnum::I128(_) => Some(PrimitiveTypeEnum::I128),
+            TypeEnum::F32(_) => Some(PrimitiveTypeEnum::F32),
+            TypeEnum::F64(_) => Some(PrimitiveTypeEnum::F64),
+            _ => None,
+        }
     }
 }
 
@@ -951,17 +980,20 @@ unsafe impl TypeExt for TypeEnum {
             }
             (Unique(a), Unique(b)) => return TypeExt::is_abi_compatible(a, b),
             (Shared(a), Shared(b)) => return TypeExt::is_abi_compatible(a, b),
-            (Primitive(a), Primitive(b)) => return TypeExt::is_abi_compatible(a, b),
             (List(a), List(b)) => return TypeExt::is_abi_compatible(a, b),
             (Texture(a), Texture(b)) => return TypeExt::is_abi_compatible(a, b),
             (a, b) => {
-                debug_assert_ne!(
-                    std::mem::discriminant(a),
-                    std::mem::discriminant(b),
-                    "Missing an implementation of `is_abi_compatible` in `TypeEnum` for the type `{}`.",
-                    Self::variant_name_of(std::mem::discriminant(a)),
-                );
-                false
+                if let (Some(a), Some(b)) = (a.as_primitive_type_enum(), b.as_primitive_type_enum()) {
+                    a.kind().is_abi_compatible(&b.kind())
+                } else {
+                    debug_assert_ne!(
+                        std::mem::discriminant(a),
+                        std::mem::discriminant(b),
+                        "Missing an implementation of `is_abi_compatible` in `TypeEnum` for the type `{}`.",
+                        Self::variant_name_of(std::mem::discriminant(a)),
+                    );
+                    false
+                }
             }
         }
     }

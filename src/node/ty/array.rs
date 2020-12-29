@@ -60,13 +60,7 @@ unsafe impl TypeExt for ArrayType {
             item_type_b = &array.item_type;
         }
 
-        if let (TypeEnum::Primitive(primitive_type_a), TypeEnum::Primitive(primitive_type_b)) =
-            (item_type_a.as_ref(), item_type_b.as_ref())
-        {
-            primitive_type_a.kind().is_abi_compatible(&primitive_type_b.kind())
-        } else {
-            item_type_a.is_abi_compatible(item_type_b)
-        }
+        item_type_a.is_abi_compatible(item_type_b)
     }
 
     unsafe fn children<'a>(&'a self, typed_bytes: TypedBytes<'a>) -> Vec<TypedBytes<'a>> {
