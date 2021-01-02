@@ -10,7 +10,7 @@ pub mod ty;
 
 pub mod behaviour;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ChannelDirection {
     In,
     Out,

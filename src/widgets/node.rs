@@ -1,7 +1,9 @@
 use super::*;
+use crate::graph::GraphValidationErrors;
 use crate::node::{ChannelPassBy, ChannelRef, ConnectionPassBy, NodeConfiguration, TypeEnum, TypeExt};
 use crate::util::{RectangleExt, Segments, StrokeType};
 use crate::{style, util, ChannelDirection, ChannelIdentifier, Connection};
+use iced::widget::canvas::{Fill, FillRule};
 use iced::widget::Space;
 use iced_graphics::canvas::{Frame, LineCap, LineJoin, Path, Stroke};
 use iced_graphics::{self, Backend, Primitive};
@@ -278,6 +280,8 @@ pub struct FloatingPanesBehaviour<M> {
     pub on_channel_disconnect: fn(ChannelIdentifier) -> M,
     pub on_connection_create: fn(Connection) -> M,
     pub connections: Vec<Connection>,
+    // FIXME: Make it possible to store references instead of cloning
+    pub graph_validation_errors: GraphValidationErrors,
 }
 
 macro_rules! get_is_aliased {
@@ -605,8 +609,23 @@ where B: Backend + iced_graphics::backend::Text
             },
         ));
 
-        // Draw connections
         let mut frame = Frame::new(layout.bounds().size());
+
+        // Highlight pane-related errors
+        for ((node_index, _pane), pane_layout) in panes.children.iter().zip(layout.panes()) {
+            if panes.behaviour.graph_validation_errors.is_invalid(*node_index) {
+                let layout_bounds = pane_layout.bounds();
+                frame.stroke(
+                    &Path::rectangle(layout_bounds.min().into_array().into(), layout_bounds.size()),
+                    Stroke {
+                        color: Color::from_rgb(1.0, 0.0, 0.0),
+                        width: 2.0,
+                        line_cap: LineCap::Square,
+                        line_join: LineJoin::Miter,
+                    },
+                );
+            }
+        }
 
         // Draw existing connections
         for connection in &panes.behaviour.connections {
@@ -642,7 +661,7 @@ where B: Backend + iced_graphics::backend::Text
             } else {
                 false
             };
-            let stroke = if highlighted {
+            let mut stroke = if highlighted {
                 Stroke {
                     color: Color::from_rgba(0.5, 1.0, 0.0, 1.0),
                     width: 3.0,
@@ -657,6 +676,11 @@ where B: Backend + iced_graphics::backend::Text
                     line_join: LineJoin::Round,
                 }
             };
+
+            // Highlight connection-related errors
+            if panes.behaviour.graph_validation_errors.is_invalid(connection.clone()) {
+                stroke.color = Color::from_rgba(1.0, 0.0, 0.0, 1.0);
+            }
 
             // primitives.push(draw_point(from.into_array().into(), Color::from_rgb(1.0, 0.0, 0.0)));
             // primitives.push(draw_point(to.into_array().into(), Color::from_rgb(0.0, 0.0, 1.0)));
@@ -775,6 +799,7 @@ where B: Backend + iced_graphics::backend::Text
                     } else {
                         false
                     };
+                    let error = panes.behaviour.graph_validation_errors.is_invalid(channel);
 
                     draw_connection_point(
                         panes,
@@ -783,6 +808,7 @@ where B: Backend + iced_graphics::backend::Text
                         position,
                         channel_ref.edge_endpoint.pass_by,
                         highlighted,
+                        error,
                     );
                 }
             }
@@ -802,12 +828,17 @@ fn draw_connection_point<M: Clone, B>(
     position: Vec2<f32>,
     channel_pass_by: ChannelPassBy,
     highlighted: bool,
+    error: bool,
 ) where
     B: Backend + iced_graphics::backend::Text,
 {
     let solid = channel_pass_by > ChannelPassBy::SharedReference;
-    let (radius, color) =
+    let (radius, mut color) =
         if highlighted { (5.0, Color::from_rgb(0.5, 1.0, 0.0)) } else { (3.5, Color::WHITE) };
+
+    if error {
+        color = Color::from_rgb(1.0, 0.0, 0.0);
+    }
 
     primitives.push(util::draw_point(position, color, radius));
 

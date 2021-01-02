@@ -39,7 +39,7 @@
 
 use graph::{
     ApplicationContext, ChannelIdentifier, Connection, EdgeData, ExecutionGraph, Graph, GraphExecutor,
-    NodeData,
+    GraphValidationErrors, NodeData,
 };
 use iced::{window, Application, Command, Settings};
 use iced_winit::winit;
@@ -87,6 +87,7 @@ pub struct ApplicationState {
     graph: ExecutionGraph,
     floating_panes_state: FloatingPanesState,
     floating_panes_content_state: FloatingPanesBehaviourState,
+    graph_validation_errors: GraphValidationErrors,
 }
 
 impl Application for ApplicationState {
@@ -100,6 +101,7 @@ impl Application for ApplicationState {
                 graph: flags.graph,
                 floating_panes_state: Default::default(),
                 floating_panes_content_state: FloatingPanesBehaviourState::default(),
+                graph_validation_errors: Default::default(),
             },
             Command::none(),
         )
@@ -161,8 +163,11 @@ impl Application for ApplicationState {
         }
 
         if update_schedule {
-            if let Err(_) = self.graph.update_schedule() {
-                eprintln!("Could not construct the graph schedule.");
+            if let Err(vec) = self.graph.update_schedule() {
+                eprintln!("Could not construct the graph schedule:\n{:?}", vec);
+                self.graph_validation_errors = vec.into();
+            } else {
+                self.graph_validation_errors = Default::default();
             }
         }
 
@@ -181,6 +186,7 @@ impl Application for ApplicationState {
                 on_channel_disconnect: |channel| Message::DisconnectChannel { channel },
                 on_connection_create: |connection| Message::InsertConnection { connection },
                 connections,
+                graph_validation_errors: self.graph_validation_errors.clone(),
             },
             Box::new(|| Message::RecomputeLayout),
         )

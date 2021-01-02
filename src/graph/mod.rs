@@ -21,11 +21,12 @@ use arc_swap::ArcSwapOption;
 use iced::{Element, Settings};
 use iced_futures::futures;
 use iced_wgpu::wgpu;
-use petgraph::{stable_graph::StableGraph, visit::EdgeRef, Directed, Direction};
+use petgraph::{algo::Cycle, stable_graph::StableGraph, visit::EdgeRef, Directed, Direction};
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::{hash_map::Entry, HashMap, HashSet};
 use std::fmt::Debug;
 use std::ops::{Deref, DerefMut};
+use std::rc::Rc;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, RwLock};
 use std::thread;
@@ -453,6 +454,110 @@ pub struct Schedule {
     pub tasks: Box<[Option<Task>]>,
 }
 
+#[derive(Debug, Clone)]
+pub enum GraphValidationError {
+    IncompleteInput(UndirectedChannelIdentifier),
+    StronglyConnectedComponent { nodes: Vec<NodeIndex>, connections: Vec<Connection> },
+    InvalidConnection { connection: Connection, error: ConnectionValidityError },
+}
+
+impl GraphValidationError {
+    pub fn collect(
+        self: Rc<Self>,
+        collect: &mut dyn FnMut(GraphValidationErrorAffectedElement, Rc<GraphValidationError>),
+    ) {
+        use GraphValidationError::*;
+        match self.as_ref() {
+            IncompleteInput(undirected_channel_id) => {
+                let channel = undirected_channel_id.into_directed(ChannelDirection::In);
+                (collect)(channel.into(), self);
+            }
+            StronglyConnectedComponent { nodes, connections } => {
+                for node in nodes {
+                    (collect)((*node).into(), self.clone());
+                }
+
+                for connection in connections {
+                    (collect)(connection.clone().into(), self.clone());
+                }
+            }
+            InvalidConnection { connection, .. } => {
+                (collect)(connection.clone().into(), self);
+            }
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub enum GraphValidationErrorAffectedElement {
+    Node(NodeIndex),
+    Channel(ChannelIdentifier),
+    Connection(Connection),
+}
+
+impl From<NodeIndex> for GraphValidationErrorAffectedElement {
+    fn from(from: NodeIndex) -> Self {
+        GraphValidationErrorAffectedElement::Node(from)
+    }
+}
+
+impl From<ChannelIdentifier> for GraphValidationErrorAffectedElement {
+    fn from(from: ChannelIdentifier) -> Self {
+        GraphValidationErrorAffectedElement::Channel(from)
+    }
+}
+
+impl From<Connection> for GraphValidationErrorAffectedElement {
+    fn from(from: Connection) -> Self {
+        GraphValidationErrorAffectedElement::Connection(from)
+    }
+}
+
+/// A mapping of UI elements to graph validation errors for O(1)-time lookup during rendering.
+#[derive(Default, Clone)]
+pub struct GraphValidationErrors(
+    pub HashMap<GraphValidationErrorAffectedElement, Vec<Rc<GraphValidationError>>>,
+);
+
+impl GraphValidationErrors {
+    pub fn is_invalid(&self, element: impl Into<GraphValidationErrorAffectedElement>) -> bool {
+        self.contains_key(&element.into())
+    }
+}
+
+impl From<Vec<GraphValidationError>> for GraphValidationErrors {
+    fn from(vec: Vec<GraphValidationError>) -> Self {
+        let mut result = Self::default();
+
+        for error in vec {
+            Rc::new(error).collect(&mut |element, error| match result.entry(element) {
+                Entry::Vacant(entry) => {
+                    entry.insert(vec![error]);
+                }
+                Entry::Occupied(mut entry) => {
+                    entry.get_mut().push(error);
+                }
+            })
+        }
+
+        result
+    }
+}
+
+impl Deref for GraphValidationErrors {
+    type Target = HashMap<GraphValidationErrorAffectedElement, Vec<Rc<GraphValidationError>>>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for GraphValidationErrors {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
 pub struct ExecutionGraph {
     pub graph: Graph,
     pub active_schedule: Arc<ArcSwapOption<Schedule>>,
@@ -473,7 +578,11 @@ impl ExecutionGraph {
         connections
     }
 
-    pub fn check_graph_validity(&self) -> Result<(), ()> {
+    pub fn check_graph_validity(&self) -> Result<Vec<NodeIndex>, Vec<GraphValidationError>> {
+        let mut errors = Vec::new();
+
+        // Ensure that nodes have either no input channels connected and thus are unused or that
+        // all input channels are connected and thus are complete.
         for node_index in self.node_indices() {
             let node = self.node_weight(node_index);
             let node = node.as_ref().unwrap();
@@ -491,11 +600,16 @@ impl ExecutionGraph {
                 used = true;
             }
 
-            if used && !input_channels.is_empty() {
-                return Err(());
+            if used {
+                for input_channel in input_channels {
+                    errors.push(GraphValidationError::IncompleteInput(
+                        input_channel.into_undirected_identifier(node_index),
+                    ));
+                }
             }
         }
 
+        // Check the validity of all connections.
         let connections = self.get_connections();
 
         for edge_index in self.edge_indices() {
@@ -515,24 +629,55 @@ impl ExecutionGraph {
                 node.configuration.channel(channel.channel_direction, channel.into())
             };
 
-            if !connection.is_valid(&is_aliased, &get_channel) {
-                return Err(());
+            if let Err(error) = connection.check_validity(&is_aliased, &get_channel) {
+                errors.push(GraphValidationError::InvalidConnection { connection, error });
             }
         }
 
-        Ok(())
+        // Topologically sort the graph.
+        let sorted_nodes = petgraph::algo::toposort(&self.graph, None).map_err(|_cycle| {
+            petgraph::algo::tarjan_scc(&self.graph).into_iter().filter_map(|scc| {
+                if scc.len() <= 1 {
+                    return None;
+                }
+
+                let node_set = scc.iter().copied().collect::<HashSet<_>>();
+                let connections = self
+                    .graph
+                    .edge_indices()
+                    .filter_map(|edge_index| {
+                        let (node_from, node_to) = self.graph.edge_endpoints(edge_index).unwrap();
+
+                        if node_set.contains(&node_from) && node_set.contains(&node_to) {
+                            let edge = &self.graph[edge_index];
+
+                            Some(Connection([
+                                edge.endpoint_from.into_undirected_identifier(node_from),
+                                edge.endpoint_to.into_undirected_identifier(node_to),
+                            ]))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<Vec<_>>();
+
+                Some(GraphValidationError::StronglyConnectedComponent { nodes: scc, connections })
+            })
+        });
+
+        if sorted_nodes.is_err() {
+            errors.extend(sorted_nodes.as_ref().unwrap_err().clone());
+        }
+
+        if errors.is_empty() {
+            Ok(sorted_nodes.unwrap())
+        } else {
+            Err(errors)
+        }
     }
 
-    fn create_schedule(&mut self) -> Result<Schedule, ()> {
-        self.check_graph_validity()?;
-
-        let ordered_node_indices = match petgraph::algo::toposort(&self.graph, None) {
-            Ok(ordered_node_indices) => ordered_node_indices,
-            Err(_cycle) => {
-                return Err(());
-            }
-        };
-
+    fn create_schedule(&mut self) -> Result<Schedule, Vec<GraphValidationError>> {
+        let ordered_node_indices = self.check_graph_validity()?;
         let node_index_map: HashMap<NodeIndex, usize> = ordered_node_indices
             .iter()
             .enumerate()
@@ -640,7 +785,7 @@ impl ExecutionGraph {
         })
     }
 
-    pub fn update_schedule(&mut self) -> Result<(), ()> {
+    pub fn update_schedule(&mut self) -> Result<(), Vec<GraphValidationError>> {
         match self.create_schedule() {
             Ok(schedule) => {
                 self.active_schedule.store(Some(Arc::new(schedule)));
@@ -914,7 +1059,7 @@ impl EdgeData {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct UndirectedChannelIdentifier {
     pub node_index: NodeIndex,
     pub channel_index: usize,
@@ -939,7 +1084,7 @@ impl From<ChannelIdentifier> for UndirectedChannelIdentifier {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ChannelIdentifier {
     pub node_index: NodeIndex,
     pub channel_direction: ChannelDirection,
@@ -956,7 +1101,17 @@ impl ChannelIdentifier {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
+pub enum ConnectionValidityError {
+    /// Connection leads to the node it originated from.
+    Loop,
+    /// The methods of passing the value are incompatible.
+    IncompatiblePassBy,
+    /// The types of the channels are incompatible.
+    IncompatibleType,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Connection(pub [UndirectedChannelIdentifier; 2]);
 
 impl From<[UndirectedChannelIdentifier; 2]> for Connection {
@@ -966,22 +1121,40 @@ impl From<[UndirectedChannelIdentifier; 2]> for Connection {
 }
 
 impl Connection {
+    pub fn check_validity<'a>(
+        &self,
+        is_aliased: &dyn Fn(ChannelIdentifier) -> bool,
+        get_channel: &'a dyn Fn(ChannelIdentifier) -> ChannelRef<'a>,
+    ) -> Result<(), ConnectionValidityError> {
+        let from = self.from();
+        let to = self.to();
+
+        if from.node_index == to.node_index {
+            return Err(ConnectionValidityError::Loop);
+        }
+
+        if !ConnectionPassBy::derive_output_connection_pass_by(&is_aliased, from)
+            .can_be_downgraded_to(ConnectionPassBy::derive_input_connection_pass_by(to))
+        {
+            return Err(ConnectionValidityError::IncompatiblePassBy);
+        }
+
+        let channel_from = get_channel(from);
+        let channel_to = get_channel(to);
+
+        if !TypeEnum::is_abi_compatible(&channel_from.ty, &channel_to.ty) {
+            return Err(ConnectionValidityError::IncompatibleType);
+        }
+
+        Ok(())
+    }
+
     pub fn is_valid<'a>(
         &self,
         is_aliased: &dyn Fn(ChannelIdentifier) -> bool,
         get_channel: &'a dyn Fn(ChannelIdentifier) -> ChannelRef<'a>,
     ) -> bool {
-        let from = self.from();
-        let to = self.to();
-        from.node_index != to.node_index
-            && ConnectionPassBy::derive_output_connection_pass_by(&is_aliased, from)
-                .can_be_downgraded_to(ConnectionPassBy::derive_input_connection_pass_by(to))
-            && {
-                let channel_from = get_channel(from);
-                let channel_to = get_channel(to);
-
-                TypeEnum::is_abi_compatible(&channel_from.ty, &channel_to.ty)
-            }
+        self.check_validity(is_aliased, get_channel).is_ok()
     }
 
     pub fn try_from_identifiers([a, b]: [ChannelIdentifier; 2]) -> Option<Connection> {
