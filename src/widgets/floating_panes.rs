@@ -279,6 +279,7 @@ impl<'a, M: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a, M, R>
                 container.into() // Container { Column [ title, Container { element } ] }
             },
             state: self.state,
+            style: self.style,
             __marker: Default::default(),
         }
     }
@@ -323,6 +324,7 @@ impl FloatingPaneState {
 pub struct FloatingPane<'a, M: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a, M, R>> {
     pub state: &'a mut FloatingPaneState,
     pub behaviour_data: C::FloatingPaneBehaviourData,
+    pub style: Option<<R as WidgetRenderer>::StyleFloatingPane>,
     pub element_tree: Element<'a, M, R>,
     pub min_size: Vec2<f32>,
     pub resizeable: Vec2<bool>,

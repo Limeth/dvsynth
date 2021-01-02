@@ -3,10 +3,10 @@ use crate::node::behaviour::{
     AllocatorHandle, ExecutionContext, MainThreadTask, NodeBehaviourContainer, NodeCommand,
     NodeEventContainer, NodeStateContainer,
 };
-use crate::node::ty::{BorrowedRef, BorrowedRefMut, OptionRefExt, OptionType, TypeExt};
+use crate::node::ty::{BorrowedRef, BorrowedRefMut, OptionRefExt, OptionType, TypeEnum, TypeExt};
 use crate::node::{
-    ChannelDirection, ChannelPassBy, ChannelValueRefs, ChannelValues, DynTypeTrait, ListDescriptor,
-    NodeConfiguration, NodeStateRefcounter, OptionRefMutExt, RefAnyExt,
+    ChannelDirection, ChannelPassBy, ChannelRef, ChannelValueRefs, ChannelValues, ConnectionPassBy,
+    DynTypeTrait, ListDescriptor, NodeConfiguration, NodeStateRefcounter, OptionRefMutExt, RefAnyExt,
 };
 use crate::style::{self, consts, Theme, Themeable};
 use crate::widgets::{
@@ -85,7 +85,7 @@ impl PreparedTask {
 /// Accessible by all render threads.
 pub struct PreparedExecution {
     pub generation: usize,
-    pub tasks: Box<[RwLock<PreparedTask>]>,
+    pub tasks: Box<[Option<RwLock<PreparedTask>>]>,
 }
 
 static_assertions::assert_impl_all!(Arc<PreparedExecution>: Send, Sync);
@@ -99,6 +99,9 @@ impl PreparedExecution {
                     .tasks
                     .iter()
                     .enumerate()
+                    .filter_map(|(enumeration_index, task)| {
+                        task.as_ref().map(|task| (enumeration_index, task))
+                    })
                     .map(|(enumeration_index, task)| (task.read().unwrap().node_index, enumeration_index))
                     .collect()
             });
@@ -109,24 +112,29 @@ impl PreparedExecution {
                 .tasks
                 .iter()
                 .map(|task| {
-                    let state = previous_node_index_map
-                        .as_ref()
-                        .and_then(|previous_node_index_map| previous_node_index_map.get(&task.node_index))
-                        .map(|task_index| {
-                            let previous_task =
-                                &mut previous.as_mut().unwrap().tasks[*task_index].write().unwrap();
-                            let mut state = previous_task
-                                .state
-                                .take()
-                                .expect("Attempt to duplicate reused state during schedule preparation.");
+                    task.as_ref().map(|task| {
+                        let state = previous_node_index_map
+                            .as_ref()
+                            .and_then(|previous_node_index_map| previous_node_index_map.get(&task.node_index))
+                            .map(|task_index| {
+                                let previous_task = &mut previous.as_mut().unwrap().tasks[*task_index]
+                                    .as_ref()
+                                    .unwrap()
+                                    .write()
+                                    .unwrap();
+                                let mut state = previous_task
+                                    .state
+                                    .take()
+                                    .expect("Attempt to duplicate reused state during schedule preparation.");
 
-                            task.behaviour.update_state(context, &mut state);
+                                task.behaviour.update_state(context, &mut state);
 
-                            state
-                        })
-                        .unwrap_or_else(|| task.behaviour.create_state(context));
+                                state
+                            })
+                            .unwrap_or_else(|| task.behaviour.create_state(context));
 
-                    RwLock::new(PreparedTask::from(task, state))
+                        RwLock::new(PreparedTask::from(task, state))
+                    })
                     // RwLock::new(PreparedTask {
                     //     node_index: task.node_index,
                     //     state: Some(state),
@@ -140,15 +148,22 @@ impl PreparedExecution {
 
     pub fn execute(&mut self, schedule: &Schedule, context: &mut ApplicationContext) {
         for (task_index, task) in schedule.tasks.iter().enumerate() {
+            // Process enabled tasks only
+            let task = if let Some(task) = task {
+                task
+            } else {
+                continue;
+            };
+
             let (tasks_preceding, tasks_following) = self.tasks.split_at_mut(task_index);
-            let current_task: &mut PreparedTask = &mut tasks_following[0].write().unwrap();
+            let current_task: &mut PreparedTask = &mut tasks_following[0].as_ref().unwrap().write().unwrap();
 
             {
                 // Borrows
                 let borrow_value_guards = task
                     .borrows
                     .iter()
-                    .map(|input| tasks_preceding[input.task_index].read().unwrap())
+                    .map(|input| tasks_preceding[input.task_index].as_ref().unwrap().read().unwrap())
                     .collect::<Vec<_>>()
                     .into_boxed_slice();
                 let borrow_value_guards = borrow_value_guards
@@ -179,7 +194,7 @@ impl PreparedExecution {
                 let mut mutable_borrow_value_guards = task
                     .mutable_borrows
                     .iter()
-                    .map(|input| tasks_preceding[input.task_index].read().unwrap())
+                    .map(|input| tasks_preceding[input.task_index].as_ref().unwrap().read().unwrap())
                     .collect::<Vec<_>>()
                     .into_boxed_slice();
                 let mut mutable_borrow_value_guards = mutable_borrow_value_guards
@@ -212,7 +227,7 @@ impl PreparedExecution {
                 let mut input_value_guards = task
                     .inputs
                     .iter()
-                    .map(|input| tasks_preceding[input.task_index].read().unwrap())
+                    .map(|input| tasks_preceding[input.task_index].as_ref().unwrap().read().unwrap())
                     .collect::<Vec<_>>()
                     .into_boxed_slice();
                 let mut input_value_guards = input_value_guards
@@ -278,7 +293,7 @@ impl PreparedExecution {
             let borrow_value_guards = task
                 .borrows
                 .iter()
-                .map(|input| tasks_preceding[input.task_index].read().unwrap())
+                .map(|input| tasks_preceding[input.task_index].as_ref().unwrap().read().unwrap())
                 .collect::<Vec<_>>()
                 .into_boxed_slice();
             let borrow_value_guards = borrow_value_guards
@@ -309,7 +324,7 @@ impl PreparedExecution {
             let mut mutable_borrow_value_guards = task
                 .mutable_borrows
                 .iter()
-                .map(|input| tasks_preceding[input.task_index].read().unwrap())
+                .map(|input| tasks_preceding[input.task_index].as_ref().unwrap().read().unwrap())
                 .collect::<Vec<_>>()
                 .into_boxed_slice();
             let mut mutable_borrow_value_guards = mutable_borrow_value_guards
@@ -342,7 +357,7 @@ impl PreparedExecution {
             let mut input_value_guards = task
                 .inputs
                 .iter()
-                .map(|input| tasks_preceding[input.task_index].read().unwrap())
+                .map(|input| tasks_preceding[input.task_index].as_ref().unwrap().read().unwrap())
                 .collect::<Vec<_>>()
                 .into_boxed_slice();
             let mut input_value_guards = input_value_guards
@@ -434,7 +449,8 @@ pub struct Schedule {
     /// Used to check whether the schedule has been updated
     pub generation: usize,
     // FIXME: implement proper multithreaded scheduling
-    pub tasks: Box<[Task]>,
+    // `None` if the task is disabled.
+    pub tasks: Box<[Option<Task>]>,
 }
 
 pub struct ExecutionGraph {
@@ -443,7 +459,21 @@ pub struct ExecutionGraph {
 }
 
 impl ExecutionGraph {
-    pub fn is_graph_complete(&self) -> bool {
+    pub fn get_connections(&self) -> Vec<Connection> {
+        let mut connections = Vec::with_capacity(self.graph.edge_count());
+
+        connections.extend(self.graph.edge_indices().map(|edge_index| {
+            let edge_data = &self.graph[edge_index];
+            let (index_from, index_to) = self.graph.edge_endpoints(edge_index).unwrap();
+            let undirected_channel_id_from = edge_data.endpoint_from.into_undirected_identifier(index_from);
+            let undirected_channel_id_to = edge_data.endpoint_to.into_undirected_identifier(index_to);
+            Connection([undirected_channel_id_from, undirected_channel_id_to])
+        }));
+
+        connections
+    }
+
+    pub fn check_graph_validity(&self) -> Result<(), ()> {
         for node_index in self.node_indices() {
             let node = self.node_weight(node_index);
             let node = node.as_ref().unwrap();
@@ -452,32 +482,49 @@ impl ExecutionGraph {
                 .channels(ChannelDirection::In)
                 .map(|channel_ref| channel_ref.edge_endpoint)
                 .collect::<HashSet<EdgeEndpoint>>();
+            let mut used = false;
 
             for edge_ref in self.edges_directed(node_index, Direction::Incoming) {
                 let edge = edge_ref.weight();
-                let source_index = edge_ref.source();
-                let source_node: &NodeData = self.node_weight(source_index).unwrap();
-                let source_channel =
-                    source_node.configuration.channel(ChannelDirection::Out, edge.endpoint_from);
-                let target_channel = node.configuration.channel(ChannelDirection::In, edge.endpoint_to);
 
-                if source_channel.ty.is_abi_compatible(&target_channel.ty) {
-                    input_channels.remove(&edge.endpoint_to);
-                }
+                input_channels.remove(&edge.endpoint_to);
+                used = true;
             }
 
-            if !input_channels.is_empty() {
-                return false;
+            if used && !input_channels.is_empty() {
+                return Err(());
             }
         }
 
-        true
+        let connections = self.get_connections();
+
+        for edge_index in self.edge_indices() {
+            let edge = &self[edge_index];
+            let (node_index_from, node_index_to) = self.edge_endpoints(edge_index).unwrap();
+            let connection = Connection([
+                edge.endpoint_from.into_undirected_identifier(node_index_from),
+                edge.endpoint_to.into_undirected_identifier(node_index_to),
+            ]);
+
+            let is_aliased = |channel: ChannelIdentifier| {
+                connections.iter().filter(|connection| connection.from() == channel).count() > 1
+            };
+            let get_channel = |channel: ChannelIdentifier| {
+                let node = &self[channel.node_index];
+
+                node.configuration.channel(channel.channel_direction, channel.into())
+            };
+
+            if !connection.is_valid(&is_aliased, &get_channel) {
+                return Err(());
+            }
+        }
+
+        Ok(())
     }
 
     fn create_schedule(&mut self) -> Result<Schedule, ()> {
-        if !self.is_graph_complete() {
-            return Err(());
-        }
+        self.check_graph_validity()?;
 
         let ordered_node_indices = match petgraph::algo::toposort(&self.graph, None) {
             Ok(ordered_node_indices) => ordered_node_indices,
@@ -492,18 +539,19 @@ impl ExecutionGraph {
             .map(|(enumeration_index, node_index)| (*node_index, enumeration_index))
             .collect();
 
-        let mut tasks = Vec::<Task>::with_capacity(ordered_node_indices.len());
+        let mut tasks = Vec::<Option<Task>>::with_capacity(ordered_node_indices.len());
 
         for node_index in ordered_node_indices {
             let node = self.node_weight(node_index);
             let node = node.as_ref().unwrap();
-            let (borrows, mutable_borrows, inputs) = {
+            let optional_task = 'optional_task: loop {
                 let mut borrows: Vec<Option<TaskInput>> =
                     vec![None; node.configuration.channels_by_shared_reference.len()];
                 let mut mutable_borrows: Vec<Option<TaskInput>> =
                     vec![None; node.configuration.channels_by_mutable_reference.len()];
                 let mut inputs: Vec<Option<TaskInput>> =
                     vec![None; node.configuration.input_channels_by_value.len()];
+                let mut used = borrows.is_empty() && mutable_borrows.is_empty() && inputs.is_empty();
 
                 for edge_ref in self.edges_directed(node_index, Direction::Incoming) {
                     let edge = edge_ref.weight();
@@ -518,7 +566,13 @@ impl ExecutionGraph {
                             output_value_channel_index: edge.endpoint_from.channel_index,
                         }
                     } else {
-                        let source_task = &mut tasks[immediate_source_task_index];
+                        let source_task =
+                            if let Some(source_task) = tasks[immediate_source_task_index].as_mut() {
+                                source_task
+                            } else {
+                                break 'optional_task None;
+                            };
+
                         let source_node = self.node_weight(source_task.node_index).unwrap();
                         let global_output_channel_index =
                             source_node.configuration.get_global_channel_index(edge.endpoint_from);
@@ -539,35 +593,40 @@ impl ExecutionGraph {
                     };
 
                     task_inputs[global_input_channel_index] = Some(task_input);
+                    used = true;
                 }
 
-                let borrows = borrows
-                    .into_iter()
-                    .map(|value| value.expect("An input channel is missing a value."))
-                    .collect::<Vec<_>>()
-                    .into_boxed_slice();
-                let mutable_borrows = mutable_borrows
-                    .into_iter()
-                    .map(|value| value.expect("An input channel is missing a value."))
-                    .collect::<Vec<_>>()
-                    .into_boxed_slice();
-                let inputs = inputs
-                    .into_iter()
-                    .map(|value| value.expect("An input channel is missing a value."))
-                    .collect::<Vec<_>>()
-                    .into_boxed_slice();
+                break 'optional_task if used {
+                    let borrows = borrows
+                        .into_iter()
+                        .map(|value| value.expect("An input channel is missing a value."))
+                        .collect::<Vec<_>>()
+                        .into_boxed_slice();
+                    let mutable_borrows = mutable_borrows
+                        .into_iter()
+                        .map(|value| value.expect("An input channel is missing a value."))
+                        .collect::<Vec<_>>()
+                        .into_boxed_slice();
+                    let inputs = inputs
+                        .into_iter()
+                        .map(|value| value.expect("An input channel is missing a value."))
+                        .collect::<Vec<_>>()
+                        .into_boxed_slice();
 
-                (borrows, mutable_borrows, inputs)
+                    Some(Task {
+                        node_index,
+                        configuration: node.configuration.clone(),
+                        behaviour: node.behaviour.clone(),
+                        borrows,
+                        mutable_borrows,
+                        inputs,
+                    })
+                } else {
+                    None
+                };
             };
 
-            tasks.push(Task {
-                node_index,
-                configuration: node.configuration.clone(),
-                behaviour: node.behaviour.clone(),
-                borrows,
-                mutable_borrows,
-                inputs,
-            });
+            tasks.push(optional_task);
         }
 
         Ok(Schedule {
@@ -907,6 +966,24 @@ impl From<[UndirectedChannelIdentifier; 2]> for Connection {
 }
 
 impl Connection {
+    pub fn is_valid<'a>(
+        &self,
+        is_aliased: &dyn Fn(ChannelIdentifier) -> bool,
+        get_channel: &'a dyn Fn(ChannelIdentifier) -> ChannelRef<'a>,
+    ) -> bool {
+        let from = self.from();
+        let to = self.to();
+        from.node_index != to.node_index
+            && ConnectionPassBy::derive_output_connection_pass_by(&is_aliased, from)
+                .can_be_downgraded_to(ConnectionPassBy::derive_input_connection_pass_by(to))
+            && {
+                let channel_from = get_channel(from);
+                let channel_to = get_channel(to);
+
+                TypeEnum::is_abi_compatible(&channel_from.ty, &channel_to.ty)
+            }
+    }
+
     pub fn try_from_identifiers([a, b]: [ChannelIdentifier; 2]) -> Option<Connection> {
         if a.channel_direction == b.channel_direction {
             None

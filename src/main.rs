@@ -172,15 +172,7 @@ impl Application for ApplicationState {
     fn view(&mut self) -> iced::Element<Message> {
         let theme: Box<dyn Theme> = Box::new(style::Dark);
         let node_indices = self.graph.node_indices().collect::<Vec<_>>();
-        let mut connections = Vec::with_capacity(self.graph.edge_count());
-
-        connections.extend(self.graph.edge_indices().map(|edge_index| {
-            let edge_data = &self.graph[edge_index];
-            let (index_from, index_to) = self.graph.edge_endpoints(edge_index).unwrap();
-            let undirected_channel_id_from = edge_data.endpoint_from.into_undirected_identifier(index_from);
-            let undirected_channel_id_to = edge_data.endpoint_to.into_undirected_identifier(index_to);
-            Connection([undirected_channel_id_from, undirected_channel_id_to])
-        }));
+        let connections = self.graph.get_connections();
 
         let mut panes = FloatingPanes::new(
             &mut self.floating_panes_state,

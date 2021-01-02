@@ -1,5 +1,5 @@
 use super::*;
-use crate::node::{ChannelRef, NodeConfiguration, TypeEnum, TypeExt};
+use crate::node::{ChannelPassBy, ChannelRef, ConnectionPassBy, NodeConfiguration, TypeEnum, TypeExt};
 use crate::util::{RectangleExt, Segments, StrokeType};
 use crate::{style, util, ChannelDirection, ChannelIdentifier, Connection};
 use iced::widget::Space;
@@ -16,10 +16,6 @@ use lyon_geom::QuadraticBezierSegment;
 use petgraph::graph::NodeIndex;
 use std::hash::Hash;
 use vek::Vec2;
-
-const STROKE_TYPE_REFERENCE_SHARED: StrokeType = StrokeType::Dotted { gap_length: 5.0 };
-const STROKE_TYPE_REFERENCE_MUTABLE: StrokeType = StrokeType::Dashed { filled_length: 10.0, gap_length: 5.0 };
-const STROKE_TYPE_VALUE: StrokeType = StrokeType::Contiguous;
 
 impl<'a> ChannelRef<'a> {
     pub fn render<M: 'a + Clone, R: 'a + WidgetRenderer>(&self) -> Element<'a, M, R> {
@@ -284,6 +280,14 @@ pub struct FloatingPanesBehaviour<M> {
     pub connections: Vec<Connection>,
 }
 
+macro_rules! get_is_aliased {
+    ($panes:expr) => {
+        move |from| {
+            $panes.behaviour.connections.iter().filter(|connection| connection.from() == from).count() > 1
+        }
+    };
+}
+
 impl<M: Clone> FloatingPanesBehaviour<M> {
     /// A reflexive function to check whether two channels can be connected
     fn can_connect<'a, R: 'a + WidgetRenderer>(
@@ -291,19 +295,15 @@ impl<M: Clone> FloatingPanesBehaviour<M> {
         from: ChannelIdentifier,
         to: ChannelIdentifier,
     ) -> bool {
-        from.node_index != to.node_index
-            && from.channel_direction != to.channel_direction
-            && from.pass_by.can_be_downgraded_to(to.pass_by)
-            && {
-                let pane_from = panes.children.get(&from.node_index).unwrap();
-                let pane_to = panes.children.get(&to.node_index).unwrap();
-                let channel_from =
-                    pane_from.behaviour_data.node_configuration.channel(from.channel_direction, from.into());
-                let channel_to =
-                    pane_to.behaviour_data.node_configuration.channel(to.channel_direction, to.into());
+        if let Some(connection) = Connection::try_from_identifiers([from, to]) {
+            connection.is_valid(&get_is_aliased!(panes), &move |channel| {
+                let pane = panes.children.get(&channel.node_index).unwrap();
 
-                TypeEnum::is_abi_compatible(&channel_from.ty, &channel_to.ty)
-            }
+                pane.behaviour_data.node_configuration.channel(channel.channel_direction, channel.into())
+            })
+        } else {
+            false
+        }
     }
 
     fn is_connected(&self, channel: ChannelIdentifier) -> bool {
@@ -660,8 +660,10 @@ where B: Backend + iced_graphics::backend::Text
 
             // primitives.push(draw_point(from.into_array().into(), Color::from_rgb(1.0, 0.0, 0.0)));
             // primitives.push(draw_point(to.into_array().into(), Color::from_rgb(0.0, 0.0, 1.0)));
+            let connection_pass_by =
+                ConnectionPassBy::derive_connection_pass_by(&get_is_aliased!(panes), connection);
 
-            ConnectionCurve { from, to }.draw(&mut frame, stroke, STROKE_TYPE_REFERENCE_SHARED);
+            ConnectionCurve { from, to }.draw(&mut frame, stroke, connection_pass_by.get_stroke_type());
 
             // Code to visualize finding the closest point to the curve
             // {
@@ -696,7 +698,7 @@ where B: Backend + iced_graphics::backend::Text
                 layout_channel,
                 selected_channel.channel_direction,
             );
-            let target_position = if let Some(Highlight::Channel(highlighted_channel)) =
+            let (target_position, connection_pass_by) = if let Some(Highlight::Channel(highlighted_channel)) =
                 panes.behaviour_state.highlight.as_ref()
             {
                 let child_layout = layout
@@ -709,12 +711,24 @@ where B: Backend + iced_graphics::backend::Text
                 let layout_channels =
                     child_layout.content().channels_with_direction(highlighted_channel.channel_direction);
                 let layout_channel = layout_channels.channel(highlighted_channel.channel_index);
-                NodeElement::<M, Self>::get_connection_point(
+                let target_position = NodeElement::<M, Self>::get_connection_point(
                     layout_channel,
                     highlighted_channel.channel_direction,
-                )
+                );
+
+                let connection =
+                    Connection::try_from_identifiers([*selected_channel, *highlighted_channel]).unwrap();
+                let connection_pass_by =
+                    ConnectionPassBy::derive_connection_pass_by(&get_is_aliased!(panes), &connection);
+
+                (target_position, connection_pass_by)
             } else {
-                panes.state.cursor_position
+                let connection_pass_by = ConnectionPassBy::derive_pending_connection_pass_by(
+                    &get_is_aliased!(panes),
+                    *selected_channel,
+                );
+
+                (panes.state.cursor_position, connection_pass_by)
             };
 
             let (from, to) = match selected_channel.channel_direction {
@@ -729,14 +743,13 @@ where B: Backend + iced_graphics::backend::Text
                 line_join: LineJoin::Round,
             };
 
-            ConnectionCurve { from, to }.draw(&mut frame, stroke, STROKE_TYPE_REFERENCE_SHARED);
+            ConnectionCurve { from, to }.draw(&mut frame, stroke, connection_pass_by.get_stroke_type());
         }
+
+        primitives.push(frame.into_geometry().into_primitive());
 
         // Draw connection points
         {
-            const CONNECTION_POINT_RADIUS: f32 = 3.0;
-            const CONNECTION_POINT_RADIUS_HIGHLIGHTED: f32 = 4.5;
-
             for (pane_layout, node_index) in layout.panes().zip(panes.children.keys().copied()) {
                 let node = panes.children.get(&node_index).unwrap();
                 let inputs_layout = pane_layout
@@ -762,23 +775,47 @@ where B: Backend + iced_graphics::backend::Text
                     } else {
                         false
                     };
-                    let (radius, color) = if highlighted {
-                        (CONNECTION_POINT_RADIUS_HIGHLIGHTED, Color::from_rgb(0.5, 1.0, 0.0))
-                    } else {
-                        (CONNECTION_POINT_RADIUS, Color::WHITE)
-                    };
 
-                    primitives.push(util::draw_point(position, color, radius));
+                    draw_connection_point(
+                        panes,
+                        &mut primitives,
+                        node_index,
+                        position,
+                        channel_ref.edge_endpoint.pass_by,
+                        highlighted,
+                    );
                 }
             }
         }
-
-        primitives.push(frame.into_geometry().into_primitive());
 
         ContentDrawResult {
             override_parent_cursor: panes.behaviour_state.highlight.is_some(),
             output: (Primitive::Group { primitives }, mouse_interaction),
         }
+    }
+}
+
+fn draw_connection_point<M: Clone, B>(
+    panes: &FloatingPanes<'_, M, iced_graphics::Renderer<B>, FloatingPanesBehaviour<M>>,
+    primitives: &mut Vec<Primitive>,
+    node_index: NodeIndex,
+    position: Vec2<f32>,
+    channel_pass_by: ChannelPassBy,
+    highlighted: bool,
+) where
+    B: Backend + iced_graphics::backend::Text,
+{
+    let solid = channel_pass_by > ChannelPassBy::SharedReference;
+    let (radius, color) =
+        if highlighted { (5.0, Color::from_rgb(0.5, 1.0, 0.0)) } else { (3.5, Color::WHITE) };
+
+    primitives.push(util::draw_point(position, color, radius));
+
+    if !solid {
+        let pane = panes.children.get(&node_index).unwrap();
+        let color = pane.style.as_ref().unwrap().style().body_background_color;
+
+        primitives.push(util::draw_point(position, color, radius * (2.0 / 3.0)));
     }
 }
 

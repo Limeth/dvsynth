@@ -1,4 +1,5 @@
-use crate::graph::{ChannelIdentifier, EdgeEndpoint, NodeIndex};
+use crate::graph::{ChannelIdentifier, Connection, EdgeEndpoint, NodeIndex};
+use crate::util::StrokeType;
 use std::cmp::Ordering;
 use std::fmt::Debug;
 use std::ops::{Deref, DerefMut, Index, IndexMut};
@@ -26,6 +27,71 @@ impl ChannelDirection {
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, PartialOrd, Ord, Hash)]
 #[repr(u8)]
+pub enum ConnectionPassBy {
+    Immutable,
+    Mutable,
+}
+
+impl ConnectionPassBy {
+    pub fn can_be_downgraded_to(self, to: Self) -> bool {
+        self >= to
+    }
+
+    pub fn get_stroke_type(self) -> StrokeType {
+        match self {
+            ConnectionPassBy::Immutable => StrokeType::Dotted { gap_length: 5.0 },
+            ConnectionPassBy::Mutable => StrokeType::Contiguous,
+        }
+    }
+
+    pub fn derive_connection_pass_by(
+        is_aliased: &dyn Fn(ChannelIdentifier) -> bool,
+        connection: &Connection,
+    ) -> ConnectionPassBy {
+        std::cmp::min(
+            Self::derive_output_connection_pass_by(is_aliased, connection.from()),
+            Self::derive_input_connection_pass_by(connection.to()),
+        )
+    }
+
+    pub fn derive_pending_connection_pass_by(
+        is_aliased: &dyn Fn(ChannelIdentifier) -> bool,
+        channel: ChannelIdentifier,
+    ) -> ConnectionPassBy {
+        match channel.channel_direction {
+            ChannelDirection::Out => Self::derive_output_connection_pass_by(is_aliased, channel),
+            ChannelDirection::In => Self::derive_input_connection_pass_by(channel),
+        }
+    }
+
+    pub fn derive_input_connection_pass_by(to: ChannelIdentifier) -> ConnectionPassBy {
+        ConnectionPassBy::from(to.pass_by)
+    }
+
+    pub fn derive_output_connection_pass_by(
+        is_aliased: &dyn Fn(ChannelIdentifier) -> bool,
+        from: ChannelIdentifier,
+    ) -> ConnectionPassBy {
+        let aliased = (is_aliased)(from);
+
+        std::cmp::min(
+            ConnectionPassBy::from(from.pass_by),
+            if aliased { ConnectionPassBy::Immutable } else { ConnectionPassBy::Mutable },
+        )
+    }
+}
+
+impl From<ChannelPassBy> for ConnectionPassBy {
+    fn from(channel: ChannelPassBy) -> Self {
+        match channel {
+            ChannelPassBy::SharedReference => ConnectionPassBy::Immutable,
+            ChannelPassBy::MutableReference | ChannelPassBy::Value => ConnectionPassBy::Mutable,
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, PartialOrd, Ord, Hash)]
+#[repr(u8)]
 pub enum ChannelPassBy {
     SharedReference,
     MutableReference,
@@ -33,10 +99,6 @@ pub enum ChannelPassBy {
 }
 
 impl ChannelPassBy {
-    pub fn can_be_downgraded_to(self, to: Self) -> bool {
-        self >= to
-    }
-
     pub fn get_category_index(self) -> usize {
         self as u8 as usize
     }

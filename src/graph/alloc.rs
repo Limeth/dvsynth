@@ -307,7 +307,9 @@ impl Allocator {
         task_ref_counters.clear();
 
         for task in &*schedule.tasks {
-            task_ref_counters.insert(task.node_index, Default::default());
+            if let Some(task) = task {
+                task_ref_counters.insert(task.node_index, Default::default());
+            }
         }
     }
 
