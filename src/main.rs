@@ -1,3 +1,4 @@
+#![feature(array_windows)]
 #![feature(associated_type_bounds)]
 #![feature(never_type)]
 #![feature(raw)]
@@ -15,6 +16,16 @@
 //! * Explore the usage of associated types to avoid dynamic allocation for
 //!   owned references of sized channel types.
 //! * Node generics
+//! * Add by-value connections (when outputs are connected to a single input).
+//!     * Allows for passing by-mutable-reference or by-value.
+//!       -[    &T]-
+//!       -[&mut T]-
+//!       -[     T]
+//!        [     T]-
+//!     * Adjust channel definitions, identifiers and storage in nodes.
+//!     * Adjust UI rendering.
+//!     * Add type resolution/downgrading based on the number of connections and target channel.
+//!     * Adjust `ExecutionContext` to include `&mut T` and `T`.
 //! * Window node:
 //!     * Make window size accessible only when resizable is false
 //!     * Fullscreen modes
@@ -124,9 +135,7 @@ impl Application for ApplicationState {
                     if node_index == channel.node_index {
                         let edge_data = frozen.edge_weight(edge).unwrap();
 
-                        if edge_data.get_channel_index(channel.channel_direction.inverse())
-                            == channel.channel_index
-                        {
+                        if edge_data.get_endpoint(channel.channel_direction.inverse()) == channel.into() {
                             return false;
                         }
                     }
@@ -143,7 +152,7 @@ impl Application for ApplicationState {
                 self.graph.add_edge(
                     from.node_index,
                     to.node_index,
-                    EdgeData { channel_index_from: from.channel_index, channel_index_to: to.channel_index },
+                    EdgeData { endpoint_from: from.into(), endpoint_to: to.into() },
                 );
 
                 update_schedule = true;
@@ -168,7 +177,9 @@ impl Application for ApplicationState {
         connections.extend(self.graph.edge_indices().map(|edge_index| {
             let edge_data = &self.graph[edge_index];
             let (index_from, index_to) = self.graph.edge_endpoints(edge_index).unwrap();
-            Connection([(index_from, edge_data.channel_index_from), (index_to, edge_data.channel_index_to)])
+            let undirected_channel_id_from = edge_data.endpoint_from.into_undirected_identifier(index_from);
+            let undirected_channel_id_to = edge_data.endpoint_to.into_undirected_identifier(index_to);
+            Connection([undirected_channel_id_from, undirected_channel_id_to])
         }));
 
         let mut panes = FloatingPanes::new(
@@ -219,11 +230,11 @@ fn main() {
             Box::new(WindowNodeBehaviour::default()),
         ));
 
-        // graph.add_node(NodeData::new(
-        //     "My Array Constructor",
-        //     [10.0, 310.0],
-        //     Box::new(ArrayConstructorNodeBehaviour::default()),
-        // ));
+        graph.add_node(NodeData::new(
+            "My Array Constructor",
+            [10.0, 310.0],
+            Box::new(ArrayConstructorNodeBehaviour::default()),
+        ));
 
         graph.add_node(NodeData::new(
             "My List Constructor",
@@ -232,6 +243,7 @@ fn main() {
         ));
 
         graph.add_node(NodeData::new("My Debug", [210.0, 510.0], Box::new(DebugNodeBehaviour::default())));
+        graph.add_node(NodeData::new("My Debug 2", [410.0, 510.0], Box::new(DebugNodeBehaviour::default())));
 
         graph.add_node(NodeData::new("My Counter", [810.0, 10.0], Box::new(CounterNodeBehaviour::default())));
 

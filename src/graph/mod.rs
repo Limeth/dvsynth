@@ -1,10 +1,12 @@
+use crate::graph::alloc::AllocationInner;
 use crate::node::behaviour::{
     AllocatorHandle, ExecutionContext, MainThreadTask, NodeBehaviourContainer, NodeCommand,
     NodeEventContainer, NodeStateContainer,
 };
-use crate::node::ty::TypeExt;
+use crate::node::ty::{BorrowedRef, BorrowedRefMut, OptionRefExt, OptionType, TypeExt};
 use crate::node::{
-    ChannelDirection, ChannelValueRefs, ChannelValues, DynTypeTrait, ListDescriptor, NodeConfiguration,
+    ChannelDirection, ChannelPassBy, ChannelValueRefs, ChannelValues, DynTypeTrait, ListDescriptor,
+    NodeConfiguration, NodeStateRefcounter, OptionRefMutExt, RefAnyExt,
 };
 use crate::style::{self, consts, Theme, Themeable};
 use crate::widgets::{
@@ -44,7 +46,39 @@ pub struct PreparedTask {
     /// Set to `None` only during the preparation of the next schedule, for the previous schedule's
     /// tasks.
     pub state: Option<NodeStateContainer<'static>>,
-    pub output_values: ChannelValues,
+    /// A list of `OptionType`-wrapped outputs.
+    ///
+    /// Provided as inputs by:
+    /// * move:              BorrowedRefMut<OptionType<T>> (allows for T to be taken out of the Option)
+    /// * mutable reference: BorrowedRefMut<T>
+    /// * shared reference:  BorrowedRef<T>
+    ///
+    /// Provided as outputs by move (BorrowedRefMut<OptionType<T>>). After the task has finished
+    /// executing, the value must be present.
+    pub output_values: Box<[RwLock<AllocationInner>]>,
+}
+
+impl PreparedTask {
+    pub fn from(task: &Task, state: NodeStateContainer<'static>) -> Self {
+        Self {
+            node_index: task.node_index,
+            state: Some(state),
+            output_values: task
+                .configuration
+                .output_channels_by_value
+                .iter()
+                .map(|channel| {
+                    RwLock::new(
+                        AllocationInner::from_enum_if_sized(
+                            OptionType::from_enum_if_sized(channel.ty.clone()).unwrap(),
+                        )
+                        .unwrap(),
+                    )
+                })
+                .collect::<Vec<_>>()
+                .into_boxed_slice(),
+        }
+    }
 }
 
 /// Data ready for the execution of a [`Schedule`].
@@ -92,72 +126,294 @@ impl PreparedExecution {
                         })
                         .unwrap_or_else(|| task.behaviour.create_state(context));
 
-                    RwLock::new(PreparedTask {
-                        node_index: task.node_index,
-                        state: Some(state),
-                        output_values: ChannelValues::zeroed(&task.configuration.channels_output),
-                    })
+                    RwLock::new(PreparedTask::from(task, state))
+                    // RwLock::new(PreparedTask {
+                    //     node_index: task.node_index,
+                    //     state: Some(state),
+                    //     output_values: ChannelValues::zeroed(&task.configuration.channels_output),
+                    // })
                 })
                 .collect::<Vec<_>>()
                 .into_boxed_slice(),
         }
     }
-}
 
-impl PreparedExecution {
     pub fn execute(&mut self, schedule: &Schedule, context: &mut ApplicationContext) {
         for (task_index, task) in schedule.tasks.iter().enumerate() {
             let (tasks_preceding, tasks_following) = self.tasks.split_at_mut(task_index);
-            let input_value_guards = task
-                .inputs
-                .iter()
-                .map(|input| tasks_preceding[input.source_task_index].read().unwrap())
-                .collect::<Vec<_>>()
-                .into_boxed_slice();
-            let input_values = ChannelValueRefs {
-                values: input_value_guards
-                    .iter()
-                    .zip(&*task.inputs)
-                    .map(|(input_value_guard, input)| {
-                        input_value_guard.output_values.values[input.source_channel_index]
-                            .as_channel_value_ref()
-                    })
-                    .collect::<Vec<_>>()
-                    .into_boxed_slice(),
-            };
             let current_task: &mut PreparedTask = &mut tasks_following[0].write().unwrap();
-            // let ref_guards = HashMap::new();
-            let allocator_handle = unsafe { AllocatorHandle::with_node_index(task.node_index) };
 
             {
-                let execution_context = ExecutionContext {
-                    application_context: &context,
-                    allocator_handle,
-                    inputs: &input_values,
-                    outputs: &mut current_task.output_values,
-                };
+                // Borrows
+                let borrow_value_guards = task
+                    .borrows
+                    .iter()
+                    .map(|input| tasks_preceding[input.task_index].read().unwrap())
+                    .collect::<Vec<_>>()
+                    .into_boxed_slice();
+                let borrow_value_guards = borrow_value_guards
+                    .iter()
+                    .zip(&*task.borrows)
+                    .map(|(task_preceding, input)| {
+                        task_preceding.output_values[input.output_value_channel_index].read().unwrap()
+                    })
+                    .collect::<Vec<_>>()
+                    .into_boxed_slice();
+                let input_borrows = borrow_value_guards
+                    .iter()
+                    .map(|borrow_value_guard| {
+                        let input_typed_bytes = borrow_value_guard.as_ref(&());
+                        let input_ref_option =
+                            unsafe { BorrowedRef::<OptionType>::from_unchecked_type(input_typed_bytes) };
+                        input_ref_option
+                    })
+                    .collect::<Vec<_>>()
+                    .into_boxed_slice();
+                let input_borrow_refs = input_borrows
+                    .iter()
+                    .map(|input_ref_option| input_ref_option.get().unwrap())
+                    .collect::<Vec<_>>()
+                    .into_boxed_slice();
 
-                // Execute task
-                current_task.state.as_mut().unwrap().execute(execution_context);
-                // (task.executor)(execution_context);
+                // Mutable borrows
+                let mut mutable_borrow_value_guards = task
+                    .mutable_borrows
+                    .iter()
+                    .map(|input| tasks_preceding[input.task_index].read().unwrap())
+                    .collect::<Vec<_>>()
+                    .into_boxed_slice();
+                let mut mutable_borrow_value_guards = mutable_borrow_value_guards
+                    .iter()
+                    .zip(&*task.mutable_borrows)
+                    .map(|(task_preceding, input)| {
+                        task_preceding.output_values[input.output_value_channel_index].write().unwrap()
+                    })
+                    .collect::<Vec<_>>()
+                    .into_boxed_slice();
+                let mut rcs = vec![(); mutable_borrow_value_guards.len()];
+                let mut input_mutable_borrows = mutable_borrow_value_guards
+                    .iter_mut()
+                    .zip(rcs.iter_mut())
+                    .map(|(mutable_borrow_value_guard, rc)| {
+                        let input_typed_bytes = mutable_borrow_value_guard.as_mut(rc);
+                        let input_ref_option =
+                            unsafe { BorrowedRefMut::<OptionType>::from_unchecked_type(input_typed_bytes) };
+                        input_ref_option
+                    })
+                    .collect::<Vec<_>>()
+                    .into_boxed_slice();
+                let mut input_mutable_borrow_refs = input_mutable_borrows
+                    .iter_mut()
+                    .map(|input_ref_option| input_ref_option.get_mut().unwrap())
+                    .collect::<Vec<_>>()
+                    .into_boxed_slice();
+
+                // Input values
+                let mut input_value_guards = task
+                    .inputs
+                    .iter()
+                    .map(|input| tasks_preceding[input.task_index].read().unwrap())
+                    .collect::<Vec<_>>()
+                    .into_boxed_slice();
+                let mut input_value_guards = input_value_guards
+                    .iter()
+                    .zip(&*task.inputs)
+                    .map(|(task_preceding, input)| {
+                        task_preceding.output_values[input.output_value_channel_index].write().unwrap()
+                    })
+                    .collect::<Vec<_>>()
+                    .into_boxed_slice();
+                let mut rcs = vec![(); input_value_guards.len()];
+                let mut input_values = input_value_guards
+                    .iter_mut()
+                    .zip(rcs.iter_mut())
+                    .map(|(input_value_guard, rc)| {
+                        let input_typed_bytes = input_value_guard.as_mut(rc);
+                        let input_ref_option =
+                            unsafe { BorrowedRefMut::<OptionType>::from_unchecked_type(input_typed_bytes) };
+                        input_ref_option
+                    })
+                    .collect::<Vec<_>>()
+                    .into_boxed_slice();
+
+                // Output values
+                let mut output_value_guards = current_task
+                    .output_values
+                    .iter_mut()
+                    .map(|output_value| output_value.write().unwrap())
+                    .collect::<Vec<_>>()
+                    .into_boxed_slice();
+                let mut rcs = vec![(); output_value_guards.len()];
+                let mut output_values = output_value_guards
+                    .iter_mut()
+                    .zip(rcs.iter_mut())
+                    .map(|(output_value, rc)| {
+                        let output_typed_bytes = output_value.as_mut(rc);
+                        unsafe { BorrowedRefMut::<OptionType>::from_unchecked_type(output_typed_bytes) }
+                    })
+                    .collect::<Vec<_>>()
+                    .into_boxed_slice();
+                // let ref_guards = HashMap::new();
+                let allocator_handle = unsafe { AllocatorHandle::with_node_index(task.node_index) };
+
+                {
+                    let execution_context = ExecutionContext {
+                        application_context: &context,
+                        allocator_handle,
+                        borrows: &*input_borrow_refs,
+                        mutable_borrows: &mut *input_mutable_borrow_refs,
+                        inputs: &mut *input_values,
+                        outputs: &mut *output_values,
+                    };
+
+                    // Execute task
+                    let borrow = current_task.state.as_mut().unwrap();
+                    borrow.execute(execution_context);
+                    drop(borrow);
+                    // (task.executor)(execution_context);
+                }
             }
 
+            // Borrows
+            let borrow_value_guards = task
+                .borrows
+                .iter()
+                .map(|input| tasks_preceding[input.task_index].read().unwrap())
+                .collect::<Vec<_>>()
+                .into_boxed_slice();
+            let borrow_value_guards = borrow_value_guards
+                .iter()
+                .zip(&*task.borrows)
+                .map(|(task_preceding, input)| {
+                    task_preceding.output_values[input.output_value_channel_index].read().unwrap()
+                })
+                .collect::<Vec<_>>()
+                .into_boxed_slice();
+            let input_borrows = borrow_value_guards
+                .iter()
+                .map(|borrow_value_guard| {
+                    let input_typed_bytes = borrow_value_guard.as_ref(&());
+                    let input_ref_option =
+                        unsafe { BorrowedRef::<OptionType>::from_unchecked_type(input_typed_bytes) };
+                    input_ref_option
+                })
+                .collect::<Vec<_>>()
+                .into_boxed_slice();
+            let input_borrow_refs = input_borrows
+                .iter()
+                .map(|input_ref_option| input_ref_option.get().unwrap())
+                .collect::<Vec<_>>()
+                .into_boxed_slice();
+
+            // Mutable borrows
+            let mut mutable_borrow_value_guards = task
+                .mutable_borrows
+                .iter()
+                .map(|input| tasks_preceding[input.task_index].read().unwrap())
+                .collect::<Vec<_>>()
+                .into_boxed_slice();
+            let mut mutable_borrow_value_guards = mutable_borrow_value_guards
+                .iter()
+                .zip(&*task.mutable_borrows)
+                .map(|(task_preceding, input)| {
+                    task_preceding.output_values[input.output_value_channel_index].write().unwrap()
+                })
+                .collect::<Vec<_>>()
+                .into_boxed_slice();
+            let mut rcs = vec![(); mutable_borrow_value_guards.len()];
+            let mut input_mutable_borrows = mutable_borrow_value_guards
+                .iter_mut()
+                .zip(rcs.iter_mut())
+                .map(|(mutable_borrow_value_guard, rc)| {
+                    let input_typed_bytes = mutable_borrow_value_guard.as_mut(rc);
+                    let input_ref_option =
+                        unsafe { BorrowedRefMut::<OptionType>::from_unchecked_type(input_typed_bytes) };
+                    input_ref_option
+                })
+                .collect::<Vec<_>>()
+                .into_boxed_slice();
+            let mut input_mutable_borrow_refs = input_mutable_borrows
+                .iter_mut()
+                .map(|input_ref_option| input_ref_option.get_mut().unwrap())
+                .collect::<Vec<_>>()
+                .into_boxed_slice();
+
+            // Input values
+            let mut input_value_guards = task
+                .inputs
+                .iter()
+                .map(|input| tasks_preceding[input.task_index].read().unwrap())
+                .collect::<Vec<_>>()
+                .into_boxed_slice();
+            let mut input_value_guards = input_value_guards
+                .iter()
+                .zip(&*task.inputs)
+                .map(|(task_preceding, input)| {
+                    task_preceding.output_values[input.output_value_channel_index].write().unwrap()
+                })
+                .collect::<Vec<_>>()
+                .into_boxed_slice();
+            let mut rcs = vec![(); input_value_guards.len()];
+            let mut input_values = input_value_guards
+                .iter_mut()
+                .zip(rcs.iter_mut())
+                .map(|(input_value_guard, rc)| {
+                    let input_typed_bytes = input_value_guard.as_mut(rc);
+                    let input_ref_option =
+                        unsafe { BorrowedRefMut::<OptionType>::from_unchecked_type(input_typed_bytes) };
+                    input_ref_option
+                })
+                .collect::<Vec<_>>()
+                .into_boxed_slice();
+
+            // Output values
+            let mut output_value_guards = current_task
+                .output_values
+                .iter_mut()
+                .map(|output_value| output_value.write().unwrap())
+                .collect::<Vec<_>>()
+                .into_boxed_slice();
+            let mut rcs = vec![(); output_value_guards.len()];
+            let mut output_values = output_value_guards
+                .iter_mut()
+                .zip(rcs.iter_mut())
+                .map(|(output_value, rc)| {
+                    let output_typed_bytes = output_value.as_mut(rc);
+                    unsafe { BorrowedRefMut::<OptionType>::from_unchecked_type(output_typed_bytes) }
+                })
+                .collect::<Vec<_>>()
+                .into_boxed_slice();
+
+            // Apply refcount deltas
+            let rc = NodeStateRefcounter(task.node_index);
+            output_values.iter().for_each(|output| unsafe { output.refcount_increment_recursive_for(&rc) });
+            input_borrow_refs.iter().for_each(|input| unsafe { input.refcount_decrement_recursive_for(&rc) });
+            input_mutable_borrow_refs
+                .iter()
+                .for_each(|input| unsafe { input.refcount_decrement_recursive_for(&rc) });
+            input_values.iter().for_each(|input| unsafe { input.refcount_decrement_recursive_for(&rc) });
+
             // Free allocations that are no longer needed.
-            unsafe { Allocator::get().apply_owned_and_output_refcounts(task.node_index, ()).unwrap() }
+            unsafe { Allocator::get().apply_owned_and_output_refcounts(task.node_index).unwrap() }
         }
     }
 }
 
+/// Refers to the output value storage of a task.
 #[derive(Clone, Debug)]
 pub struct TaskInput {
-    pub source_task_index: usize,
-    pub source_channel_index: usize,
+    /// The source task index.
+    pub task_index: usize,
+    /// The channel index of type `ChannelPassBy::Value`.
+    pub output_value_channel_index: usize,
 }
 
 #[derive(Clone, Debug)]
 pub struct Task {
     pub node_index: NodeIndex,
     pub configuration: NodeConfiguration,
+    pub borrows: Box<[TaskInput]>,
+    pub mutable_borrows: Box<[TaskInput]>,
     pub inputs: Box<[TaskInput]>,
     pub behaviour: Box<dyn NodeBehaviourContainer>,
 }
@@ -191,19 +447,22 @@ impl ExecutionGraph {
         for node_index in self.node_indices() {
             let node = self.node_weight(node_index);
             let node = node.as_ref().unwrap();
-            let mut input_channels =
-                (0..node.configuration.channels_input.len()).into_iter().collect::<HashSet<_>>();
+            let mut input_channels = node
+                .configuration
+                .channels(ChannelDirection::In)
+                .map(|channel_ref| channel_ref.edge_endpoint)
+                .collect::<HashSet<EdgeEndpoint>>();
 
             for edge_ref in self.edges_directed(node_index, Direction::Incoming) {
                 let edge = edge_ref.weight();
                 let source_index = edge_ref.source();
                 let source_node: &NodeData = self.node_weight(source_index).unwrap();
                 let source_channel =
-                    source_node.configuration.channel(ChannelDirection::Out, edge.channel_index_from);
-                let target_channel = node.configuration.channel(ChannelDirection::In, edge.channel_index_to);
+                    source_node.configuration.channel(ChannelDirection::Out, edge.endpoint_from);
+                let target_channel = node.configuration.channel(ChannelDirection::In, edge.endpoint_to);
 
                 if source_channel.ty.is_abi_compatible(&target_channel.ty) {
-                    input_channels.remove(&edge.channel_index_to);
+                    input_channels.remove(&edge.endpoint_to);
                 }
             }
 
@@ -233,51 +492,83 @@ impl ExecutionGraph {
             .map(|(enumeration_index, node_index)| (*node_index, enumeration_index))
             .collect();
 
-        let tasks = ordered_node_indices
-            .into_iter()
-            .map(|node_index| {
-                {
-                    let mut node = self.node_weight_mut(node_index);
-                    let node = node.as_mut().unwrap();
+        let mut tasks = Vec::<Task>::with_capacity(ordered_node_indices.len());
 
-                    node.ready_output_values();
-                }
+        for node_index in ordered_node_indices {
+            let node = self.node_weight(node_index);
+            let node = node.as_ref().unwrap();
+            let (borrows, mutable_borrows, inputs) = {
+                let mut borrows: Vec<Option<TaskInput>> =
+                    vec![None; node.configuration.channels_by_shared_reference.len()];
+                let mut mutable_borrows: Vec<Option<TaskInput>> =
+                    vec![None; node.configuration.channels_by_mutable_reference.len()];
+                let mut inputs: Vec<Option<TaskInput>> =
+                    vec![None; node.configuration.input_channels_by_value.len()];
 
-                let node = self.node_weight(node_index);
-                let node = node.as_ref().unwrap();
-                let inputs = {
-                    let mut inputs: Vec<Option<TaskInput>> =
-                        vec![None; node.configuration.channels_input.len()];
+                for edge_ref in self.edges_directed(node_index, Direction::Incoming) {
+                    let edge = edge_ref.weight();
+                    let global_input_channel_index =
+                        node.configuration.get_global_channel_index(edge.endpoint_to);
+                    let immediate_source_task_index = *node_index_map.get(&edge_ref.source()).unwrap();
 
-                    for edge_index in self.edge_indices() {
-                        let (from_index, to_index) = self.edge_endpoints(edge_index).unwrap();
-
-                        if to_index == node_index {
-                            let edge = self.edge_weight(edge_index).unwrap();
-
-                            inputs[edge.channel_index_to] = Some(TaskInput {
-                                source_task_index: *node_index_map.get(&from_index).unwrap(),
-                                source_channel_index: edge.channel_index_from,
-                            });
+                    // If the input is a reference, transitively derive the value storage.
+                    let task_input = if edge.endpoint_from.pass_by == ChannelPassBy::Value {
+                        TaskInput {
+                            task_index: immediate_source_task_index,
+                            output_value_channel_index: edge.endpoint_from.channel_index,
                         }
-                    }
+                    } else {
+                        let source_task = &mut tasks[immediate_source_task_index];
+                        let source_node = self.node_weight(source_task.node_index).unwrap();
+                        let global_output_channel_index =
+                            source_node.configuration.get_global_channel_index(edge.endpoint_from);
 
-                    inputs
-                        .into_iter()
-                        .map(|value| value.expect("An input channel is missing a value."))
-                        .collect::<Vec<_>>()
-                        .into_boxed_slice()
-                };
+                        let transitive_task_inputs = match edge.endpoint_from.pass_by {
+                            ChannelPassBy::SharedReference => &mut source_task.borrows,
+                            ChannelPassBy::MutableReference => &mut source_task.mutable_borrows,
+                            ChannelPassBy::Value => &mut source_task.inputs,
+                        };
 
-                Task {
-                    node_index,
-                    configuration: node.configuration.clone(),
-                    behaviour: node.behaviour.clone(),
-                    inputs,
+                        transitive_task_inputs[global_output_channel_index].clone()
+                    };
+
+                    let task_inputs = match edge.endpoint_to.pass_by {
+                        ChannelPassBy::SharedReference => &mut borrows,
+                        ChannelPassBy::MutableReference => &mut mutable_borrows,
+                        ChannelPassBy::Value => &mut inputs,
+                    };
+
+                    task_inputs[global_input_channel_index] = Some(task_input);
                 }
-            })
-            .collect::<Vec<_>>()
-            .into_boxed_slice();
+
+                let borrows = borrows
+                    .into_iter()
+                    .map(|value| value.expect("An input channel is missing a value."))
+                    .collect::<Vec<_>>()
+                    .into_boxed_slice();
+                let mutable_borrows = mutable_borrows
+                    .into_iter()
+                    .map(|value| value.expect("An input channel is missing a value."))
+                    .collect::<Vec<_>>()
+                    .into_boxed_slice();
+                let inputs = inputs
+                    .into_iter()
+                    .map(|value| value.expect("An input channel is missing a value."))
+                    .collect::<Vec<_>>()
+                    .into_boxed_slice();
+
+                (borrows, mutable_borrows, inputs)
+            };
+
+            tasks.push(Task {
+                node_index,
+                configuration: node.configuration.clone(),
+                behaviour: node.behaviour.clone(),
+                borrows,
+                mutable_borrows,
+                inputs,
+            });
+        }
 
         Ok(Schedule {
             generation: self
@@ -286,7 +577,7 @@ impl ExecutionGraph {
                 .as_ref()
                 .map(|schedule| schedule.generation.wrapping_add(1))
                 .unwrap_or(0),
-            tasks,
+            tasks: tasks.into_boxed_slice(),
         })
     }
 
@@ -451,8 +742,6 @@ pub struct NodeData {
     pub floating_pane_behaviour_state: FloatingPaneBehaviourState,
     pub behaviour: Box<dyn NodeBehaviourContainer>,
     pub configuration: NodeConfiguration,
-    /// Output values computed during graph execution.
-    pub execution_output_values: Option<RefCell<ChannelValues>>,
 }
 
 impl NodeData {
@@ -468,7 +757,6 @@ impl NodeData {
             floating_pane_behaviour_state: Default::default(),
             configuration: Default::default(),
             behaviour,
-            execution_output_values: None,
         };
 
         result.update(NodeEventContainer::Update);
@@ -482,11 +770,6 @@ impl NodeData {
                 NodeCommand::Configure(configuration) => self.configuration = configuration,
             }
         }
-    }
-
-    pub fn ready_output_values(&mut self) {
-        self.execution_output_values =
-            Some(RefCell::new(ChannelValues::zeroed(&self.configuration.channels_output)));
     }
 
     pub fn view(
@@ -503,11 +786,11 @@ impl NodeData {
             }),
         );
 
-        for input_channel in &self.configuration.channels_input {
+        for input_channel in self.configuration.channels(ChannelDirection::In) {
             builder = builder.push_input_channel(input_channel);
         }
 
-        for output_channel in &self.configuration.channels_output {
+        for output_channel in self.configuration.channels(ChannelDirection::Out) {
             builder = builder.push_output_channel(output_channel);
         }
 
@@ -536,17 +819,64 @@ impl NodeData {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct EdgeEndpoint {
+    pub channel_index: usize,
+    pub pass_by: ChannelPassBy,
+}
+
+impl EdgeEndpoint {
+    pub fn into_undirected_identifier(self, node_index: NodeIndex) -> UndirectedChannelIdentifier {
+        let Self { channel_index, pass_by } = self;
+        UndirectedChannelIdentifier { channel_index, pass_by, node_index }
+    }
+}
+
+impl<T> From<T> for EdgeEndpoint
+where T: Into<UndirectedChannelIdentifier>
+{
+    fn from(from: T) -> Self {
+        let UndirectedChannelIdentifier { channel_index, pass_by, .. } = from.into().into();
+        Self { channel_index, pass_by }
+    }
+}
+
 pub struct EdgeData {
-    pub channel_index_from: usize,
-    pub channel_index_to: usize,
+    pub endpoint_from: EdgeEndpoint,
+    pub endpoint_to: EdgeEndpoint,
 }
 
 impl EdgeData {
-    pub fn get_channel_index(&self, direction: ChannelDirection) -> usize {
+    pub fn get_endpoint(&self, direction: ChannelDirection) -> EdgeEndpoint {
         match direction {
-            ChannelDirection::In => self.channel_index_from,
-            ChannelDirection::Out => self.channel_index_to,
+            ChannelDirection::In => self.endpoint_from,
+            ChannelDirection::Out => self.endpoint_to,
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UndirectedChannelIdentifier {
+    pub node_index: NodeIndex,
+    pub channel_index: usize,
+    pub pass_by: ChannelPassBy,
+}
+
+impl UndirectedChannelIdentifier {
+    pub fn from_edge_endpoint(edge_endpoint: EdgeEndpoint, node_index: NodeIndex) -> Self {
+        edge_endpoint.into_undirected_identifier(node_index)
+    }
+
+    pub fn into_directed(self, channel_direction: ChannelDirection) -> ChannelIdentifier {
+        let Self { node_index, channel_index, pass_by } = self;
+        ChannelIdentifier { node_index, channel_index, pass_by, channel_direction }
+    }
+}
+
+impl From<ChannelIdentifier> for UndirectedChannelIdentifier {
+    fn from(id: ChannelIdentifier) -> Self {
+        let ChannelIdentifier { node_index, channel_index, pass_by, .. } = id;
+        Self { node_index, channel_index, pass_by }
     }
 }
 
@@ -555,10 +885,26 @@ pub struct ChannelIdentifier {
     pub node_index: NodeIndex,
     pub channel_direction: ChannelDirection,
     pub channel_index: usize,
+    pub pass_by: ChannelPassBy,
+}
+
+impl ChannelIdentifier {
+    pub fn from_undirected(
+        undirected: UndirectedChannelIdentifier,
+        channel_direction: ChannelDirection,
+    ) -> Self {
+        undirected.into_directed(channel_direction)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Connection(pub [(NodeIndex, usize); 2]);
+pub struct Connection(pub [UndirectedChannelIdentifier; 2]);
+
+impl From<[UndirectedChannelIdentifier; 2]> for Connection {
+    fn from(array: [UndirectedChannelIdentifier; 2]) -> Self {
+        Self(array)
+    }
+}
 
 impl Connection {
     pub fn try_from_identifiers([a, b]: [ChannelIdentifier; 2]) -> Option<Connection> {
@@ -566,9 +912,9 @@ impl Connection {
             None
         } else {
             Some(Self(if a.channel_direction == ChannelDirection::Out {
-                [(a.node_index, a.channel_index), (b.node_index, b.channel_index)]
+                [a.into(), b.into()]
             } else {
-                [(b.node_index, b.channel_index), (a.node_index, a.channel_index)]
+                [b.into(), a.into()]
             }))
         }
     }
@@ -580,7 +926,7 @@ impl Connection {
         };
         let current = &self.0[index];
 
-        current.0 == channel.node_index && current.1 == channel.channel_index
+        *current == UndirectedChannelIdentifier::from(channel)
     }
 
     pub fn channel(&self, direction: ChannelDirection) -> ChannelIdentifier {
@@ -588,11 +934,7 @@ impl Connection {
             ChannelDirection::In => 1,
             ChannelDirection::Out => 0,
         };
-        ChannelIdentifier {
-            node_index: self.0[index].0,
-            channel_direction: direction,
-            channel_index: self.0[index].1,
-        }
+        self.0[index].clone().into_directed(direction)
     }
 
     pub fn to(&self) -> ChannelIdentifier {

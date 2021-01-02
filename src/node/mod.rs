@@ -1,3 +1,5 @@
+use crate::graph::{ChannelIdentifier, EdgeEndpoint, NodeIndex};
+use std::cmp::Ordering;
 use std::fmt::Debug;
 use std::ops::{Deref, DerefMut, Index, IndexMut};
 
@@ -19,6 +21,24 @@ impl ChannelDirection {
             ChannelDirection::In => ChannelDirection::Out,
             ChannelDirection::Out => ChannelDirection::In,
         }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, PartialOrd, Ord, Hash)]
+#[repr(u8)]
+pub enum ChannelPassBy {
+    SharedReference,
+    MutableReference,
+    Value,
+}
+
+impl ChannelPassBy {
+    pub fn can_be_downgraded_to(self, to: Self) -> bool {
+        self >= to
+    }
+
+    pub fn get_category_index(self) -> usize {
+        self as u8 as usize
     }
 }
 
@@ -44,45 +64,221 @@ pub struct ChannelRef<'a> {
     pub title: &'a str,
     pub description: Option<&'a str>,
     pub ty: &'a TypeEnum,
+    pub edge_endpoint: EdgeEndpoint,
+    pub direction: ChannelDirection,
 }
 
-impl<'a> From<&'a Channel> for ChannelRef<'a> {
-    fn from(other: &'a Channel) -> Self {
+impl<'a> ChannelRef<'a> {
+    fn from(other: &'a Channel, edge_endpoint: EdgeEndpoint, direction: ChannelDirection) -> Self {
         Self {
             title: &other.title,
             description: other.description.as_ref().map(String::as_str),
             ty: &other.ty,
+            edge_endpoint,
+            direction,
         }
+    }
+
+    pub fn into_identifier(&self, node_index: NodeIndex) -> ChannelIdentifier {
+        self.edge_endpoint.into_undirected_identifier(node_index).into_directed(self.direction)
+    }
+}
+
+pub struct ChannelRefMut<'a> {
+    pub title: &'a mut str,
+    pub description: Option<&'a mut String>,
+    pub ty: &'a mut TypeEnum,
+    pub edge_endpoint: EdgeEndpoint,
+    pub direction: ChannelDirection,
+}
+
+impl<'a> ChannelRefMut<'a> {
+    fn from(other: &'a mut Channel, edge_endpoint: EdgeEndpoint, direction: ChannelDirection) -> Self {
+        Self {
+            title: &mut other.title,
+            description: other.description.as_mut(),
+            ty: &mut other.ty,
+            edge_endpoint,
+            direction,
+        }
+    }
+
+    pub fn into_identifier(&self, node_index: NodeIndex) -> ChannelIdentifier {
+        self.edge_endpoint.into_undirected_identifier(node_index).into_directed(self.direction)
     }
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct NodeConfiguration {
-    pub channels_input: Vec<Channel>,
-    pub channels_output: Vec<Channel>,
+    pub channels_by_shared_reference: Vec<Channel>,
+    pub channels_by_mutable_reference: Vec<Channel>,
+    pub input_channels_by_value: Vec<Channel>,
+    pub output_channels_by_value: Vec<Channel>,
 }
 
 impl NodeConfiguration {
-    pub fn channels(&self, direction: ChannelDirection) -> &Vec<Channel> {
-        match direction {
-            ChannelDirection::In => &self.channels_input,
-            ChannelDirection::Out => &self.channels_output,
+    pub fn with_borrow(mut self, channel: Channel) -> Self {
+        self.channels_by_shared_reference.push(channel);
+        self
+    }
+
+    pub fn with_borrow_mut(mut self, channel: Channel) -> Self {
+        self.channels_by_mutable_reference.push(channel);
+        self
+    }
+
+    pub fn with_input_value(mut self, channel: Channel) -> Self {
+        self.input_channels_by_value.push(channel);
+        self
+    }
+
+    pub fn with_output_value(mut self, channel: Channel) -> Self {
+        self.output_channels_by_value.push(channel);
+        self
+    }
+
+    pub fn get_global_channel_index(&self, endpoint: EdgeEndpoint) -> usize {
+        let mut index = endpoint.channel_index;
+
+        if endpoint.pass_by > ChannelPassBy::SharedReference {
+            index += self.channels_by_shared_reference.len();
+
+            if endpoint.pass_by > ChannelPassBy::MutableReference {
+                index += self.channels_by_mutable_reference.len();
+            }
+        }
+
+        index
+    }
+
+    pub fn channels(&self, direction: ChannelDirection) -> impl Iterator<Item = ChannelRef<'_>> {
+        self.channels_by_shared_reference
+            .iter()
+            .enumerate()
+            .map(move |(channel_index, channel)| {
+                ChannelRef::from(
+                    channel,
+                    EdgeEndpoint { channel_index, pass_by: ChannelPassBy::SharedReference },
+                    direction,
+                )
+            })
+            .chain(self.channels_by_mutable_reference.iter().enumerate().map(
+                move |(channel_index, channel)| {
+                    ChannelRef::from(
+                        channel,
+                        EdgeEndpoint { channel_index, pass_by: ChannelPassBy::MutableReference },
+                        direction,
+                    )
+                },
+            ))
+            .chain(
+                match direction {
+                    ChannelDirection::In => self.input_channels_by_value.iter(),
+                    ChannelDirection::Out => self.output_channels_by_value.iter(),
+                }
+                .enumerate()
+                .map(move |(channel_index, channel)| {
+                    ChannelRef::from(
+                        channel,
+                        EdgeEndpoint { channel_index, pass_by: ChannelPassBy::Value },
+                        direction,
+                    )
+                }),
+            )
+    }
+
+    pub fn channels_mut(&mut self, direction: ChannelDirection) -> impl Iterator<Item = ChannelRefMut<'_>> {
+        self.channels_by_shared_reference
+            .iter_mut()
+            .enumerate()
+            .map(move |(channel_index, channel)| {
+                ChannelRefMut::from(
+                    channel,
+                    EdgeEndpoint { channel_index, pass_by: ChannelPassBy::SharedReference },
+                    direction,
+                )
+            })
+            .chain(self.channels_by_mutable_reference.iter_mut().enumerate().map(
+                move |(channel_index, channel)| {
+                    ChannelRefMut::from(
+                        channel,
+                        EdgeEndpoint { channel_index, pass_by: ChannelPassBy::MutableReference },
+                        direction,
+                    )
+                },
+            ))
+            .chain(
+                match direction {
+                    ChannelDirection::In => self.input_channels_by_value.iter_mut(),
+                    ChannelDirection::Out => self.output_channels_by_value.iter_mut(),
+                }
+                .enumerate()
+                .map(move |(channel_index, channel)| {
+                    ChannelRefMut::from(
+                        channel,
+                        EdgeEndpoint { channel_index, pass_by: ChannelPassBy::Value },
+                        direction,
+                    )
+                }),
+            )
+    }
+
+    pub fn channel(&self, direction: ChannelDirection, edge_endpoint: EdgeEndpoint) -> ChannelRef<'_> {
+        match edge_endpoint.pass_by {
+            ChannelPassBy::SharedReference => ChannelRef::from(
+                &self.channels_by_shared_reference[edge_endpoint.channel_index],
+                edge_endpoint,
+                direction,
+            ),
+            ChannelPassBy::MutableReference => ChannelRef::from(
+                &self.channels_by_mutable_reference[edge_endpoint.channel_index],
+                edge_endpoint,
+                direction,
+            ),
+            ChannelPassBy::Value => match direction {
+                ChannelDirection::In => ChannelRef::from(
+                    &self.input_channels_by_value[edge_endpoint.channel_index],
+                    edge_endpoint,
+                    direction,
+                ),
+                ChannelDirection::Out => ChannelRef::from(
+                    &self.output_channels_by_value[edge_endpoint.channel_index],
+                    edge_endpoint,
+                    direction,
+                ),
+            },
         }
     }
 
-    pub fn channels_mut(&mut self, direction: ChannelDirection) -> &mut Vec<Channel> {
-        match direction {
-            ChannelDirection::In => &mut self.channels_input,
-            ChannelDirection::Out => &mut self.channels_output,
+    pub fn channel_mut(
+        &mut self,
+        direction: ChannelDirection,
+        edge_endpoint: EdgeEndpoint,
+    ) -> ChannelRefMut<'_> {
+        match edge_endpoint.pass_by {
+            ChannelPassBy::SharedReference => ChannelRefMut::from(
+                &mut self.channels_by_shared_reference[edge_endpoint.channel_index],
+                edge_endpoint,
+                direction,
+            ),
+            ChannelPassBy::MutableReference => ChannelRefMut::from(
+                &mut self.channels_by_mutable_reference[edge_endpoint.channel_index],
+                edge_endpoint,
+                direction,
+            ),
+            ChannelPassBy::Value => match direction {
+                ChannelDirection::In => ChannelRefMut::from(
+                    &mut self.input_channels_by_value[edge_endpoint.channel_index],
+                    edge_endpoint,
+                    direction,
+                ),
+                ChannelDirection::Out => ChannelRefMut::from(
+                    &mut self.output_channels_by_value[edge_endpoint.channel_index],
+                    edge_endpoint,
+                    direction,
+                ),
+            },
         }
-    }
-
-    pub fn channel(&self, direction: ChannelDirection, index: usize) -> &Channel {
-        &self.channels(direction)[index]
-    }
-
-    pub fn channel_mut(&mut self, direction: ChannelDirection, index: usize) -> &mut Channel {
-        &mut self.channels_mut(direction)[index]
     }
 }
 

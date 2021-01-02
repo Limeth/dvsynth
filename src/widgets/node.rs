@@ -1,6 +1,6 @@
 use super::*;
 use crate::node::{ChannelRef, NodeConfiguration, TypeEnum, TypeExt};
-use crate::util::{RectangleExt, Segments};
+use crate::util::{RectangleExt, Segments, StrokeType};
 use crate::{style, util, ChannelDirection, ChannelIdentifier, Connection};
 use iced::widget::Space;
 use iced_graphics::canvas::{Frame, LineCap, LineJoin, Path, Stroke};
@@ -16,6 +16,10 @@ use lyon_geom::QuadraticBezierSegment;
 use petgraph::graph::NodeIndex;
 use std::hash::Hash;
 use vek::Vec2;
+
+const STROKE_TYPE_REFERENCE_SHARED: StrokeType = StrokeType::Dotted { gap_length: 5.0 };
+const STROKE_TYPE_REFERENCE_MUTABLE: StrokeType = StrokeType::Dashed { filled_length: 10.0, gap_length: 5.0 };
+const STROKE_TYPE_VALUE: StrokeType = StrokeType::Contiguous;
 
 impl<'a> ChannelRef<'a> {
     pub fn render<M: 'a + Clone, R: 'a + WidgetRenderer>(&self) -> Element<'a, M, R> {
@@ -287,21 +291,19 @@ impl<M: Clone> FloatingPanesBehaviour<M> {
         from: ChannelIdentifier,
         to: ChannelIdentifier,
     ) -> bool {
-        // TODO: Add borrow checking and type checking
-        from.node_index != to.node_index && from.channel_direction != to.channel_direction && {
-            let pane_from = panes.children.get(&from.node_index).unwrap();
-            let pane_to = panes.children.get(&to.node_index).unwrap();
-            let channel_from = pane_from
-                .behaviour_data
-                .node_configuration
-                .channel(from.channel_direction, from.channel_index);
-            let channel_to =
-                pane_to.behaviour_data.node_configuration.channel(to.channel_direction, to.channel_index);
+        from.node_index != to.node_index
+            && from.channel_direction != to.channel_direction
+            && from.pass_by.can_be_downgraded_to(to.pass_by)
+            && {
+                let pane_from = panes.children.get(&from.node_index).unwrap();
+                let pane_to = panes.children.get(&to.node_index).unwrap();
+                let channel_from =
+                    pane_from.behaviour_data.node_configuration.channel(from.channel_direction, from.into());
+                let channel_to =
+                    pane_to.behaviour_data.node_configuration.channel(to.channel_direction, to.into());
 
-            TypeEnum::is_abi_compatible(&channel_from.ty, &channel_to.ty)
-        }
-        // Allow, but disconnect previous connection
-        // && self.connections.iter().any(|connection| connection.to() == to)
+                TypeEnum::is_abi_compatible(&channel_from.ty, &channel_to.ty)
+            }
     }
 
     fn is_connected(&self, channel: ChannelIdentifier) -> bool {
@@ -357,29 +359,31 @@ impl<'a, M: Clone + 'a, R: 'a + WidgetRenderer> floating_panes::FloatingPanesBeh
                         continue;
                     }
 
-                    let inputs_layout = pane_layout.content().channels_with_direction(ChannelDirection::In);
-                    let outputs_layout = pane_layout.content().channels_with_direction(ChannelDirection::Out);
-                    let channels = inputs_layout
+                    let node = panes.children.get(&node_index).unwrap();
+                    let inputs_layout = pane_layout
+                        .content()
+                        .channels_with_direction(ChannelDirection::In)
                         .channels()
-                        .enumerate()
-                        .map(|(index, layout)| (index, layout, ChannelDirection::In))
-                        .chain(
-                            outputs_layout
-                                .channels()
-                                .enumerate()
-                                .map(|(index, layout)| (index, layout, ChannelDirection::Out)),
-                        );
+                        .zip(node.behaviour_data.node_configuration.channels(ChannelDirection::In));
+                    let outputs_layout = pane_layout
+                        .content()
+                        .channels_with_direction(ChannelDirection::Out)
+                        .channels()
+                        .zip(node.behaviour_data.node_configuration.channels(ChannelDirection::Out));
+                    let channel_layouts = inputs_layout.chain(outputs_layout);
 
-                    let highlighted_channel = channels
-                        .filter(|(channel_index, channel_layout, channel_direction)| {
+                    let highlighted_channel = channel_layouts
+                        .filter(|(channel_layout, channel_ref)| {
                             // If a new connection is being formed, make sure the target channel
                             // can be connected to.
                             if let Some(selected_channel) = panes.behaviour_state.selected_channel.as_ref() {
-                                let channel = ChannelIdentifier {
-                                    node_index,
-                                    channel_index: *channel_index,
-                                    channel_direction: *channel_direction,
-                                };
+                                let node_configuration = &panes
+                                    .children
+                                    .get(&node_index)
+                                    .unwrap()
+                                    .behaviour_data
+                                    .node_configuration;
+                                let channel = channel_ref.into_identifier(node_index);
 
                                 if !FloatingPanesBehaviour::can_connect(panes, *selected_channel, channel) {
                                     return false;
@@ -388,18 +392,14 @@ impl<'a, M: Clone + 'a, R: 'a + WidgetRenderer> floating_panes::FloatingPanesBeh
 
                             NodeElement::<M, R>::is_channel_selected(
                                 channel_layout.clone(),
-                                channel_direction.clone(),
+                                channel_ref.direction,
                                 cursor_position,
                             )
                         })
                         .next();
 
-                    if let Some((channel_index, _, channel_direction)) = highlighted_channel {
-                        let channel = ChannelIdentifier {
-                            node_index: node_index.clone(),
-                            channel_index,
-                            channel_direction,
-                        };
+                    if let Some((channel_layout, channel_ref)) = highlighted_channel {
+                        let channel = channel_ref.into_identifier(node_index);
                         panes.behaviour_state.highlight = Some(Highlight::Channel(channel));
                     }
                 }
@@ -646,14 +646,14 @@ where B: Backend + iced_graphics::backend::Text
                 Stroke {
                     color: Color::from_rgba(0.5, 1.0, 0.0, 1.0),
                     width: 3.0,
-                    line_cap: LineCap::Butt,
+                    line_cap: LineCap::Round,
                     line_join: LineJoin::Round,
                 }
             } else {
                 Stroke {
                     color: Color::from_rgba(1.0, 1.0, 1.0, 1.0),
-                    width: 1.5,
-                    line_cap: LineCap::Butt,
+                    width: 2.0,
+                    line_cap: LineCap::Round,
                     line_join: LineJoin::Round,
                 }
             };
@@ -661,7 +661,7 @@ where B: Backend + iced_graphics::backend::Text
             // primitives.push(draw_point(from.into_array().into(), Color::from_rgb(1.0, 0.0, 0.0)));
             // primitives.push(draw_point(to.into_array().into(), Color::from_rgb(0.0, 0.0, 1.0)));
 
-            ConnectionCurve { from, to }.draw(&mut frame, stroke);
+            ConnectionCurve { from, to }.draw(&mut frame, stroke, STROKE_TYPE_REFERENCE_SHARED);
 
             // Code to visualize finding the closest point to the curve
             // {
@@ -725,11 +725,11 @@ where B: Backend + iced_graphics::backend::Text
             let stroke = Stroke {
                 color: Color::from_rgba(1.0, 0.6, 0.0, 1.0),
                 width: 3.0,
-                line_cap: LineCap::Butt,
+                line_cap: LineCap::Round,
                 line_join: LineJoin::Round,
             };
 
-            ConnectionCurve { from, to }.draw(&mut frame, stroke);
+            ConnectionCurve { from, to }.draw(&mut frame, stroke, STROKE_TYPE_REFERENCE_SHARED);
         }
 
         // Draw connection points
@@ -738,23 +738,23 @@ where B: Backend + iced_graphics::backend::Text
             const CONNECTION_POINT_RADIUS_HIGHLIGHTED: f32 = 4.5;
 
             for (pane_layout, node_index) in layout.panes().zip(panes.children.keys().copied()) {
-                let inputs_layout = pane_layout.content().channels_with_direction(ChannelDirection::In);
-                let outputs_layout = pane_layout.content().channels_with_direction(ChannelDirection::Out);
-                let channel_layouts = inputs_layout
+                let node = panes.children.get(&node_index).unwrap();
+                let inputs_layout = pane_layout
+                    .content()
+                    .channels_with_direction(ChannelDirection::In)
                     .channels()
-                    .enumerate()
-                    .map(|(index, layout)| (index, layout, ChannelDirection::In))
-                    .chain(
-                        outputs_layout
-                            .channels()
-                            .enumerate()
-                            .map(|(index, layout)| (index, layout, ChannelDirection::Out)),
-                    );
+                    .zip(node.behaviour_data.node_configuration.channels(ChannelDirection::In));
+                let outputs_layout = pane_layout
+                    .content()
+                    .channels_with_direction(ChannelDirection::Out)
+                    .channels()
+                    .zip(node.behaviour_data.node_configuration.channels(ChannelDirection::Out));
+                let channel_layouts = inputs_layout.chain(outputs_layout);
 
-                for (channel_index, channel_layout, channel_direction) in channel_layouts {
+                for (channel_layout, channel_ref) in channel_layouts {
                     let position =
-                        NodeElement::<M, Self>::get_connection_point(channel_layout, channel_direction);
-                    let channel = ChannelIdentifier { node_index, channel_index, channel_direction };
+                        NodeElement::<M, Self>::get_connection_point(channel_layout, channel_ref.direction);
+                    let channel = channel_ref.into_identifier(node_index);
                     let highlighted = if let Some(Highlight::Channel(highlighted_channel)) =
                         panes.behaviour_state.highlight.as_ref()
                     {
@@ -797,11 +797,12 @@ impl ConnectionCurve {
         Self { from, to }
     }
 
-    fn draw(&self, frame: &mut Frame, stroke: Stroke) {
+    fn draw(&self, frame: &mut Frame, stroke: Stroke, stroke_type: StrokeType) {
         let segments = util::get_connection_curve(self.from, self.to);
         let path = Path::new(|builder| {
             builder.move_to(self.from.into_array().into());
-            segments.build_segments(builder);
+            // segments.build_segments(builder);
+            segments.stroke(builder, stroke_type);
 
             // Debug control points
             // for segment in &segments.segments {

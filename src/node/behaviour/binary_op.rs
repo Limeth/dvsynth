@@ -5,7 +5,7 @@ use crate::{
             ApplicationContext, ExecutionContext, ExecutorClosure, NodeBehaviour, NodeCommand, NodeEvent,
             NodeStateClosure,
         },
-        Channel, NodeConfiguration, PrimitiveType, PrimitiveTypeEnum,
+        BytesRefExt, Channel, NodeConfiguration, OptionRefMutExt, PrimitiveType, PrimitiveTypeEnum,
     },
     style::{Theme, Themeable},
 };
@@ -45,13 +45,12 @@ impl Default for BinaryOpNodeBehaviour {
 
 impl BinaryOpNodeBehaviour {
     pub fn get_configure_command(&self) -> NodeCommand {
-        NodeCommand::Configure(NodeConfiguration {
-            channels_input: vec![
-                Channel::new("lhs", self.pick_list_ty_value),
-                Channel::new("rhs", self.pick_list_ty_value),
-            ],
-            channels_output: vec![Channel::new("result", self.pick_list_ty_value)],
-        })
+        NodeCommand::Configure(
+            NodeConfiguration::default()
+                .with_input_value(Channel::new("lhs", self.pick_list_ty_value))
+                .with_input_value(Channel::new("rhs", self.pick_list_ty_value))
+                .with_output_value(Channel::new("result", self.pick_list_ty_value)),
+        )
     }
 }
 
@@ -132,16 +131,22 @@ impl NodeBehaviour for BinaryOpNodeBehaviour {
 
                 Box::new(move |context: ExecutionContext<'_, 'state>, _persistent: &mut ()| {
                     // Executed once per graph execution.
-                    let lhs =
-                        pick_list_ty_value.read::<LittleEndian, _>(&context.inputs[0].as_ref()).unwrap();
-                    let rhs =
-                        pick_list_ty_value.read::<LittleEndian, _>(&context.inputs[1].as_ref()).unwrap();
+                    let lhs = pick_list_ty_value
+                        .read::<LittleEndian, _>(&context.inputs[0].as_bytes().unwrap())
+                        .unwrap();
+                    let rhs = pick_list_ty_value
+                        .read::<LittleEndian, _>(&context.inputs[1].as_bytes().unwrap())
+                        .unwrap();
                     let result = op.apply_dyn(lhs, rhs);
-                    let mut output_cursor = Cursor::new(context.outputs[0].as_mut());
+                    context.outputs[0]
+                        .replace_with_bytes(context.allocator_handle, |bytes| {
+                            let mut output_cursor = Cursor::new(bytes);
 
-                    // dbg!(result);
+                            // dbg!(result);
 
-                    result.write::<LittleEndian>(&mut output_cursor).unwrap();
+                            result.write::<LittleEndian>(&mut output_cursor).unwrap();
+                        })
+                        .unwrap();
                 }) as Box<dyn ExecutorClosure<'state> + 'state>
             },
         )

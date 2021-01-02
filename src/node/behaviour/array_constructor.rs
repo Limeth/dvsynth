@@ -4,7 +4,8 @@ use crate::{
             ApplicationContext, ExecutionContext, ExecutorClosure, NodeBehaviour, NodeCommand, NodeEvent,
             NodeStateClosure,
         },
-        ArrayType, Channel, NodeConfiguration, PrimitiveType, PrimitiveTypeEnum,
+        ArrayType, BytesRefExt, Channel, NodeConfiguration, OptionRefMutExt, PrimitiveType,
+        PrimitiveTypeEnum,
     },
     style::{self, Themeable},
 };
@@ -49,14 +50,15 @@ impl Default for ArrayConstructorNodeBehaviour {
 impl ArrayConstructorNodeBehaviour {
     pub fn get_configure_command(&self) -> NodeCommand {
         NodeCommand::Configure(NodeConfiguration {
-            channels_input: (0..self.channel_count.get())
+            input_channels_by_value: (0..self.channel_count.get())
                 .into_iter()
                 .map(|channel_index| Channel::new(format!("item #{}", channel_index), self.ty))
                 .collect(),
-            channels_output: vec![Channel::new(
+            output_channels_by_value: vec![Channel::new(
                 "array",
                 ArrayType::new_if_sized(self.ty, self.channel_count.get()).unwrap(),
             )],
+            ..Default::default()
         })
     }
 }
@@ -136,11 +138,16 @@ impl NodeBehaviour for ArrayConstructorNodeBehaviour {
                 // executor closure.
                 Box::new(move |context: ExecutionContext<'_, 'state>, _persistent: &mut ()| {
                     // Executed once per graph execution.
-                    let mut cursor = Cursor::new(context.outputs[0].as_mut());
+                    let inputs = &context.inputs;
+                    context.outputs[0]
+                        .replace_with_bytes(context.allocator_handle, |bytes| {
+                            let mut cursor = Cursor::new(bytes);
 
-                    for input in context.inputs.values.iter() {
-                        cursor.write(input).unwrap();
-                    }
+                            for input in inputs.iter() {
+                                cursor.write(input.as_bytes().unwrap()).unwrap();
+                            }
+                        })
+                        .unwrap();
                 }) as Box<dyn ExecutorClosure<'state> + 'state>
             },
         )

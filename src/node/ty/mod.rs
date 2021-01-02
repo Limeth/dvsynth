@@ -62,9 +62,9 @@ pub mod prelude {
     pub use super::reference::prelude::*;
     pub use super::texture::prelude::*;
     pub use super::{
-        CloneTypeExt, CloneableTypeExt, DowncastFromTypeEnum, DowncastFromTypeEnumExt,
-        SafeBinaryRepresentationTypeExt, SizeRefExt, SizeRefMutExt, SizeTypeExt, SizedRefExt, SizedRefMutExt,
-        SizedTypeExt, TypeDesc, TypeExt,
+        BytesRefExt, BytesRefMutExt, CloneTypeExt, CloneableTypeExt, DowncastFromTypeEnum,
+        DowncastFromTypeEnumExt, SafeBinaryRepresentationTypeExt, SizeRefExt, SizeRefMutExt, SizeTypeExt,
+        SizedRefExt, SizedRefMutExt, SizedTypeExt, TypeDesc, TypeExt,
     };
 }
 
@@ -1101,6 +1101,44 @@ where R: RefAny<'a>
             Some(typed_bytes.bytes().bytes().as_ref().unwrap())
         } else {
             None
+        }
+    }
+}
+
+pub trait BytesRefExt {
+    fn as_bytes(&self) -> Result<&[u8], ()>;
+}
+
+impl<'a, R> BytesRefExt for R
+where R: RefAny<'a>
+{
+    fn as_bytes(&self) -> Result<&[u8], ()> {
+        let typed_bytes = unsafe { self.typed_bytes() };
+        let ty = typed_bytes.borrow().ty();
+
+        if ty.is_sized() && ty.has_safe_binary_representation() {
+            Ok(typed_bytes.bytes().bytes().unwrap())
+        } else {
+            Err(())
+        }
+    }
+}
+
+pub trait BytesRefMutExt {
+    fn as_bytes_mut(&mut self) -> Result<&mut [u8], ()>;
+}
+
+impl<'a, R> BytesRefMutExt for R
+where R: RefMutAny<'a>
+{
+    fn as_bytes_mut(&mut self) -> Result<&mut [u8], ()> {
+        let typed_bytes = unsafe { self.typed_bytes_mut() };
+        let ty = typed_bytes.borrow().ty();
+
+        if ty.is_sized() && ty.has_safe_binary_representation() {
+            Ok(typed_bytes.bytes_mut().bytes_mut().unwrap())
+        } else {
+            Err(())
         }
     }
 }

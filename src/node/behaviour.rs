@@ -1,5 +1,7 @@
 use crate::graph::{ApplicationContext, NodeIndex};
-use crate::node::{ChannelValueRefs, ChannelValues, DynTypeTrait, NodeConfiguration};
+use crate::node::{
+    BorrowedRef, BorrowedRefMut, ChannelValueRefs, ChannelValues, DynTypeTrait, NodeConfiguration, OptionType,
+};
 use crate::style::Theme;
 use downcast_rs::{impl_downcast, Downcast};
 use dyn_clone::DynClone;
@@ -17,11 +19,6 @@ pub use list_constructor::*;
 pub use window::*;
 
 use super::{OwnedRefMut, SizedTypeExt, TypeEnum, TypeTrait, Unique};
-
-pub struct Input {
-    pub data: Box<[u8]>,
-    pub ty: TypeEnum,
-}
 
 pub struct Inputs {}
 
@@ -106,6 +103,10 @@ impl<'state> NodeStateContainer<'state> {
     where 'state: 'invocation {
         self.ptr.execute(context);
     }
+
+    // pub fn borrow_mut<'a>(&'a mut self) -> &'a mut NodeStateContainer<'a> {
+    //     unsafe { std::mem::transmute(self) }
+    // }
 }
 
 pub trait NodeExecutor<'state>: Debug + Send + Sync {
@@ -255,8 +256,14 @@ impl<'invocation, 'state: 'invocation> AllocatorHandle<'invocation, 'state> {
 pub struct ExecutionContext<'invocation, 'state: 'invocation> {
     pub application_context: &'invocation ApplicationContext,
     pub allocator_handle: AllocatorHandle<'invocation, 'state>,
-    pub inputs: &'invocation ChannelValueRefs<'invocation>,
-    pub outputs: &'invocation mut ChannelValues,
+    /// By-shared-reference inputs.
+    pub borrows: &'invocation [BorrowedRef<'invocation>], // [&T]
+    /// By-mutable-reference inputs.
+    pub mutable_borrows: &'invocation mut [BorrowedRefMut<'invocation>], // [&mut T]
+    /// By-value inputs.
+    pub inputs: &'invocation mut [BorrowedRefMut<'invocation, OptionType>], // [&mut Option<T>]
+    /// By-value outputs.
+    pub outputs: &'invocation mut [BorrowedRefMut<'invocation, OptionType>], // [&mut Option<T>]
 }
 
 pub type MainThreadTask = dyn Send + FnOnce(&EventLoopWindowTarget<crate::Message>);

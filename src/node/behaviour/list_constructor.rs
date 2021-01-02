@@ -50,14 +50,15 @@ impl Default for ListConstructorNodeBehaviour {
 impl ListConstructorNodeBehaviour {
     pub fn get_configure_command(&self) -> NodeCommand {
         NodeCommand::Configure(NodeConfiguration {
-            channels_input: (0..self.channel_count.get())
+            input_channels_by_value: (0..self.channel_count.get())
                 .into_iter()
                 .map(|channel_index| Channel::new(format!("item #{}", channel_index), self.ty))
                 .collect(),
-            channels_output: vec![Channel::new(
+            output_channels_by_value: vec![Channel::new(
                 "list",
                 Unique::new(ListType::new_if_sized(self.ty).unwrap()),
             )],
+            ..Default::default()
         })
     }
 }
@@ -180,11 +181,11 @@ impl NodeBehaviour for ListConstructorNodeBehaviour {
                         dbg!(list.get(1).unwrap().bytes_if_sized());
                         dbg!(list.len());
                     }
-                    let mut cursor = Cursor::new(context.outputs[0].as_mut());
+                    // let mut cursor = Cursor::new(context.outputs[0].as_mut());
 
-                    for input in context.inputs.values.iter() {
-                        cursor.write(input).unwrap();
-                    }
+                    // for input in context.inputs.iter_mut() {
+                    //     cursor.write(input).unwrap();
+                    // }
                 }) as Box<dyn ExecutorClosure<'state>>
             },
         )

@@ -5,7 +5,7 @@ use crate::{
         behaviour::{
             ExecutionContext, ExecutorClosure, NodeBehaviour, NodeCommand, NodeEvent, NodeStateClosure,
         },
-        Channel, NodeConfiguration, PrimitiveType, PrimitiveTypeEnum,
+        Channel, NodeConfiguration, OptionRefMutExt, PrimitiveType, PrimitiveTypeEnum,
     },
     style::{Theme, Themeable},
 };
@@ -59,10 +59,9 @@ impl ConstantNodeBehaviour {
     }
 
     pub fn get_configure_command(&self) -> NodeCommand {
-        NodeCommand::Configure(NodeConfiguration {
-            channels_input: Vec::new(),
-            channels_output: vec![Channel::new("value", self.value.ty())],
-        })
+        NodeCommand::Configure(
+            NodeConfiguration::default().with_output_value(Channel::new("value", self.value.ty())),
+        )
     }
 }
 
@@ -144,12 +143,16 @@ impl NodeBehaviour for ConstantNodeBehaviour {
                 // Copy the constant value from the GUI settings.
                 let value = behaviour.value;
 
-                Box::new(move |execution_context: ExecutionContext<'_, 'state>, _persistent: &mut ()| {
+                Box::new(move |context: ExecutionContext<'_, 'state>, _persistent: &mut ()| {
                     // Executed once per graph execution.
-                    let mut cursor = Cursor::new(execution_context.outputs[0].as_mut());
+                    context.outputs[0]
+                        .replace_with_bytes(context.allocator_handle, |bytes| {
+                            let mut cursor = Cursor::new(bytes);
 
-                    value.write::<LittleEndian>(&mut cursor).unwrap();
-                    dbg!(value);
+                            value.write::<LittleEndian>(&mut cursor).unwrap();
+                            dbg!(value);
+                        })
+                        .unwrap();
                 }) as Box<dyn ExecutorClosure<'state> + 'state>
             },
         )

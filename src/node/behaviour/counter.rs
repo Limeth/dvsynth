@@ -4,7 +4,7 @@ use crate::{
             ApplicationContext, ExecutionContext, ExecutorClosure, NodeBehaviour, NodeCommand, NodeEvent,
             NodeStateClosure,
         },
-        Channel, NodeConfiguration, PrimitiveType, PrimitiveTypeEnum,
+        Channel, NodeConfiguration, OptionRefMutExt, PrimitiveType, PrimitiveTypeEnum,
     },
     style::Theme,
 };
@@ -24,10 +24,9 @@ impl NodeBehaviour for CounterNodeBehaviour {
 
     fn update(&mut self, event: NodeEvent<Self::Message>) -> Vec<NodeCommand> {
         match event {
-            NodeEvent::Update => vec![NodeCommand::Configure(NodeConfiguration {
-                channels_input: vec![],
-                channels_output: vec![Channel::new("count", PrimitiveTypeEnum::U32)],
-            })],
+            NodeEvent::Update => vec![NodeCommand::Configure(
+                NodeConfiguration::default().with_output_value(Channel::new("count", PrimitiveTypeEnum::U32)),
+            )],
             NodeEvent::Message(_) => vec![],
         }
     }
@@ -48,9 +47,13 @@ impl NodeBehaviour for CounterNodeBehaviour {
                 // executor closure.
                 Box::new(move |context: ExecutionContext<'_, 'state>, persistent: &mut Persistent| {
                     // Executed once per graph execution.
-                    let mut cursor = Cursor::new(context.outputs[0].as_mut());
+                    context.outputs[0]
+                        .replace_with_bytes(context.allocator_handle, |bytes| {
+                            let mut cursor = Cursor::new(bytes);
 
-                    cursor.write_u32::<LittleEndian>(persistent.count).unwrap();
+                            cursor.write_u32::<LittleEndian>(persistent.count).unwrap();
+                        })
+                        .unwrap();
 
                     persistent.count += 1;
                 }) as Box<dyn ExecutorClosure<'state, Persistent> + 'state>

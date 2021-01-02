@@ -4,7 +4,7 @@ use crate::{
             ApplicationContext, ExecutionContext, ExecutorClosure, NodeBehaviour, NodeCommand, NodeEvent,
             NodeStateClosure,
         },
-        Channel, NodeConfiguration, PrimitiveType, PrimitiveTypeEnum,
+        BytesRefExt, Channel, NodeConfiguration, PrimitiveType, PrimitiveTypeEnum,
     },
     style::{Theme, Themeable},
 };
@@ -34,10 +34,7 @@ impl Default for DebugNodeBehaviour {
 
 impl DebugNodeBehaviour {
     pub fn get_configure_command(&self) -> NodeCommand {
-        NodeCommand::Configure(NodeConfiguration {
-            channels_input: vec![Channel::new("value", self.ty)],
-            channels_output: vec![],
-        })
+        NodeCommand::Configure(NodeConfiguration::default().with_borrow(Channel::new("value", self.ty)))
     }
 }
 
@@ -98,8 +95,8 @@ impl NodeBehaviour for DebugNodeBehaviour {
 
                 Box::new(move |context: ExecutionContext<'_, 'state>, _persistent: &mut ()| {
                     // Executed once per graph execution.
-                    let value = ty.read::<LittleEndian, _>(&context.inputs[0].as_ref()).unwrap();
-                    println!("{:?}", value);
+                    let value = ty.read::<LittleEndian, _>(&context.borrows[0].as_bytes().unwrap()).unwrap();
+                    println!("Debug node: {:?}", value);
                 }) as Box<dyn ExecutorClosure<'state> + 'state>
             },
         )

@@ -112,10 +112,32 @@ pub trait RefMutAny<'a>: RefAny<'a> {
     // unsafe fn into_typed_bytes(self) -> TypedBytesMut<'a>;
 }
 
-// TODO: Remove if remain unused
-pub trait RefAnyExt<'a>: RefAny<'a> {}
+pub trait RefAnyExt<'a>: RefAny<'a> {
+    unsafe fn refcount_increment_recursive_for(&self, rc: &dyn Refcounter);
+    unsafe fn refcount_decrement_recursive_for(&self, rc: &dyn Refcounter);
+    unsafe fn refcount_increment_recursive(&self);
+    unsafe fn refcount_decrement_recursive(&self);
+}
 
-impl<'a, R> RefAnyExt<'a> for R where R: RefAny<'a> {}
+impl<'a, R> RefAnyExt<'a> for R
+where R: RefAny<'a>
+{
+    unsafe fn refcount_increment_recursive_for(&self, rc: &dyn Refcounter) {
+        self.typed_bytes().refcount_increment_recursive_for(rc)
+    }
+
+    unsafe fn refcount_decrement_recursive_for(&self, rc: &dyn Refcounter) {
+        self.typed_bytes().refcount_decrement_recursive_for(rc)
+    }
+
+    unsafe fn refcount_increment_recursive(&self) {
+        self.typed_bytes().refcount_increment_recursive()
+    }
+
+    unsafe fn refcount_decrement_recursive(&self) {
+        self.typed_bytes().refcount_decrement_recursive()
+    }
+}
 
 // TODO: Remove if remain unused
 pub trait RefMutAnyExt<'a>: RefMutAny<'a> {}

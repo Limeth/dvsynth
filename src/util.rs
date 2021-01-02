@@ -6,12 +6,19 @@ use iced_graphics::{self, Primitive};
 use iced_native::layout::Layout;
 use iced_native::Color;
 use iced_native::{self, Background, Rectangle};
-use lyon_geom::{QuadraticBezierSegment, Scalar, Segment};
+use lyon_geom::{math::Point, LineSegment, QuadraticBezierSegment, Scalar, Segment};
 use smallvec::{smallvec, Array, SmallVec};
 use std::borrow::Cow;
 use std::ops::Deref;
 use std::ops::DerefMut;
+use std::ops::Range;
 use vek::Vec2;
+
+pub enum StrokeType {
+    Contiguous,
+    Dashed { filled_length: f32, gap_length: f32 },
+    Dotted { gap_length: f32 },
+}
 
 #[derive(Debug)]
 pub struct ProjectionResult {
@@ -20,7 +27,11 @@ pub struct ProjectionResult {
 }
 
 pub trait ConnectionSegment {
+    type Flattened: Iterator<Item = Point>;
+
     fn build_segment(&self, builder: &mut Builder);
+    fn approx_length(&self) -> f32;
+    fn flattened(&self, tolerance: f32) -> Self::Flattened;
 
     /// Find the closest point on the segment to the provided point
     fn project_point(&self, query: Vec2<f32>) -> ProjectionResult;
@@ -36,9 +47,19 @@ pub trait ConnectionSegment {
 /// \mathbf{B}_{2}(t) = (1-t)^2\mathbf{P}_0 + 2t(1-t)\mathbf{P}_1 + t^2\mathbf{P}_2
 /// ```
 impl ConnectionSegment for QuadraticBezierSegment<f32> {
+    type Flattened = lyon_geom::quadratic_bezier::Flattened<f32>;
+
     fn build_segment(&self, builder: &mut Builder) {
         builder.move_to(self.from.to_array().into());
         builder.quadratic_curve_to(self.ctrl.to_array().into(), self.to.to_array().into());
+    }
+
+    fn approx_length(&self) -> f32 {
+        self.approximate_length(0.01)
+    }
+
+    fn flattened(&self, tolerance: f32) -> Self::Flattened {
+        self.flattened(tolerance)
     }
 
     /// The task of finding the closest point on the curve $`\mathbf{B}_n(t)`$ to point $`\mathbf{Q}`$ consists of finding
@@ -140,10 +161,81 @@ impl<T: Segment> DerefMut for Segments<T> {
     }
 }
 
-impl<T: Segment + ConnectionSegment> Segments<T> {
+impl<T: Segment<Scalar = f32> + ConnectionSegment> Segments<T> {
+    pub fn flattened(&self, tolerance: f32) -> Vec<Point> {
+        let mut points = Vec::<Point>::new();
+
+        for (index, segment) in self.segments.iter().enumerate() {
+            if index == 0 {
+                points.push(segment.from());
+            } else {
+                points.pop();
+            }
+
+            points.extend(segment.flattened(tolerance));
+        }
+
+        points
+    }
+
     pub fn build_segments(&self, builder: &mut Builder) {
         for segment in &self.segments {
             segment.build_segment(builder);
+        }
+    }
+
+    pub fn stroke(&self, builder: &mut Builder, stroke_type: StrokeType) {
+        const TOLERANCE: f32 = 0.1;
+
+        let (filled_length, gap_length) = match stroke_type {
+            StrokeType::Contiguous => {
+                self.build_segments(builder);
+                return;
+            }
+            StrokeType::Dashed { filled_length, gap_length } => (filled_length, gap_length),
+            StrokeType::Dotted { gap_length } => (0.0, gap_length),
+        };
+
+        let line_points = self.flattened(TOLERANCE);
+        let line_segments =
+            line_points.array_windows::<2>().map(|[from, to]| LineSegment { from: *from, to: *to });
+
+        let mut segment_length_remaining = filled_length;
+        let mut fill_segment = true;
+
+        for segment in line_segments {
+            let segment_length = segment.length();
+            let mut segment_offset = 0.0;
+
+            loop {
+                let from_t = partial_max(0.0, segment_offset) / segment_length;
+                let to_t = (segment_offset + segment_length_remaining) / segment_length;
+
+                if to_t < 1.0 {
+                    // Dash ends before the end of the segment
+                    if fill_segment {
+                        let dash = segment.split_range(from_t..to_t);
+
+                        builder.line_to(dash.to.to_array().into());
+                    } else {
+                        builder.move_to(segment.sample(to_t).to_array().into());
+                    }
+
+                    segment_offset += segment_length_remaining;
+                    fill_segment ^= true;
+                    segment_length_remaining = if fill_segment { filled_length } else { gap_length };
+                } else {
+                    // Dash continues in the next segment
+                    if fill_segment {
+                        let dash = segment.after_split(from_t);
+
+                        builder.line_to(dash.to.to_array().into());
+                    }
+
+                    segment_length_remaining -= (1.0 - from_t) * segment_length;
+                    break;
+                }
+            }
         }
     }
 
@@ -289,22 +381,6 @@ pub fn draw_rectangle(rectangle: Rectangle<f32>, color: Color) -> Primitive {
 
 pub fn draw_bounds(layout: Layout<'_>, color: Color) -> Primitive {
     draw_rectangle(layout.bounds(), color)
-}
-
-pub fn partial_min<T: PartialOrd>(a: T, b: T) -> T {
-    if a < b {
-        a
-    } else {
-        b
-    }
-}
-
-pub fn partial_max<T: PartialOrd>(a: T, b: T) -> T {
-    if a < b {
-        b
-    } else {
-        a
-    }
 }
 
 pub trait RectangleExt: Sized {
@@ -492,4 +568,24 @@ where A::Item: Clone
     fn clone(&self) -> Self {
         Self(self.0.clone())
     }
+}
+
+pub fn partial_max<T: PartialOrd>(a: T, b: T) -> T {
+    if a > b {
+        a
+    } else {
+        b
+    }
+}
+
+pub fn partial_min<T: PartialOrd>(a: T, b: T) -> T {
+    if a < b {
+        a
+    } else {
+        b
+    }
+}
+
+pub fn partial_clamp<T: PartialOrd>(x: T, [min, max]: [T; 2]) -> T {
+    partial_max(min, partial_min(max, x))
 }

@@ -203,6 +203,11 @@ pub trait OptionRefMutExt<'a, C: TypeDesc> {
         item: impl Into<Option<OwnedRefMut<'b, C>>>,
         handle: AllocatorHandle<'_, 'state>,
     ) -> Result<Option<OwnedRefMut<'state, C>>, ()>;
+    fn replace_with_bytes<'state, 'b>(
+        &mut self,
+        handle: AllocatorHandle<'_, 'state>,
+        replace: impl FnOnce(&mut [u8]),
+    ) -> Result<Option<OwnedRefMut<'state, C>>, ()>;
 }
 
 impl<'a, T, C> OptionRefExt<'a, C> for T
@@ -328,6 +333,41 @@ where
             unsafe {
                 inner_typed_bytes.refcount_increment_recursive();
             }
+        }
+
+        Ok(result)
+    }
+
+    fn replace_with_bytes<'state, 'b>(
+        &mut self,
+        handle: AllocatorHandle<'_, 'state>,
+        replace: impl FnOnce(&mut [u8]),
+    ) -> Result<Option<OwnedRefMut<'state, C>>, ()> {
+        {
+            let typed_bytes = unsafe { self.typed_bytes_mut() };
+            let ty = typed_bytes.borrow().ty();
+
+            if ty.value_size_if_sized().is_none() || !ty.has_safe_binary_representation() {
+                return Err(());
+            }
+        }
+
+        let result = self.take(handle);
+        let mut typed_bytes: TypedBytesMut = {
+            let typed_bytes = unsafe { self.typed_bytes_mut() };
+            let (mut bytes, ty, rc) = typed_bytes.into();
+            let option_ty = ty.downcast_ref::<OptionType>().unwrap();
+
+            option_ty.set_flags(bytes.borrow_mut(), OptionFlags::Some);
+
+            (bytes, ty, rc).into()
+        };
+        let bytes = typed_bytes.borrow_mut().bytes_mut().bytes_mut().unwrap();
+
+        (replace)(bytes);
+
+        unsafe {
+            typed_bytes.refcount_increment_recursive();
         }
 
         Ok(result)

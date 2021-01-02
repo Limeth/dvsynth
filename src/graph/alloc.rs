@@ -176,6 +176,15 @@ impl AllocationInner {
         Self { ty: ty_enum, inner }
     }
 
+    pub fn from_enum_if_sized(ty: impl Into<TypeEnum>) -> Option<Self> {
+        let ty = ty.into();
+        let data: Vec<u8> = std::iter::repeat(0u8).take(ty.value_size_if_sized()?).collect();
+        let data: Box<[u8]> = data.into_boxed_slice();
+        let inner = AllocationType::Bytes(data);
+
+        Some(Self { ty, inner })
+    }
+
     pub fn as_ref<'a>(&'a self, rc: &'a dyn Refcounter) -> TypedBytes<'a> {
         TypedBytes::from(self.inner.as_ref(), Cow::Borrowed(&self.ty), rc)
     }
@@ -389,16 +398,11 @@ impl Allocator {
         debugln!("Deallocated: {:?}", allocation_ptr);
     }
 
-    pub unsafe fn apply_owned_and_output_refcounts(
-        &self,
-        node: NodeIndex,
-        output_delta: (),
-    ) -> Result<(), ()> {
+    pub unsafe fn apply_owned_and_output_refcounts(&self, node: NodeIndex) -> Result<(), ()> {
         let task_ref_counters = self.task_ref_counters.counters.write().map_err(|_| ())?;
 
         {
             let mut task_ref_counter = task_ref_counters[&node].lock().map_err(|_| ())?;
-            // TODO: combine output delta with these
             let altered_ptrs: HashSet<AllocationPointer> =
                 task_ref_counter.refcount_deltas.keys().copied().collect();
 
