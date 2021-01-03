@@ -1,22 +1,30 @@
 use super::*;
-use crate::graph::GraphValidationErrors;
+use crate::graph::{GraphValidationErrorAffectedElement, GraphValidationErrors};
 use crate::node::{ChannelPassBy, ChannelRef, ConnectionPassBy, NodeConfiguration, TypeEnum, TypeExt};
+use crate::style::InteractionStatus;
 use crate::util::{RectangleExt, Segments, StrokeType};
 use crate::{style, util, ChannelDirection, ChannelIdentifier, Connection};
 use iced::widget::canvas::{Fill, FillRule};
 use iced::widget::Space;
+use iced::Size;
 use iced_graphics::canvas::{Frame, LineCap, LineJoin, Path, Stroke};
 use iced_graphics::{self, Backend, Primitive};
 use iced_native::event::Status;
 use iced_native::layout::{Layout, Limits, Node};
 use iced_native::mouse::{self, Button as MouseButton, Event as MouseEvent};
+use iced_native::widget::container::Container;
 use iced_native::widget::Widget;
 use iced_native::Color;
 use iced_native::{self, Align, Clipboard, Column, Event, Hasher, Length, Point, Rectangle, Row, Text};
-use iced_native::{overlay, Element};
+use iced_native::{
+    overlay::{self, Overlay},
+    Element,
+};
 use lyon_geom::QuadraticBezierSegment;
+use ordered_float::OrderedFloat;
 use petgraph::graph::NodeIndex;
 use std::hash::Hash;
+use std::marker::PhantomData;
 use vek::Vec2;
 
 impl<'a> ChannelRef<'a> {
@@ -210,7 +218,7 @@ impl<'a, M: 'a + Clone, R: 'a + WidgetRenderer> NodeElement<'a, M, R> {
     }
 
     pub fn get_layout_index_from_channel(
-        panes: &FloatingPanes<'a, M, R, FloatingPanesBehaviour<M>>,
+        panes: &FloatingPanes<'a, M, R, FloatingPanesBehaviour<M, R>>,
         channel: ChannelIdentifier,
     ) -> Option<usize> {
         panes.get_layout_index_from_pane_index(&channel.node_index)
@@ -276,12 +284,13 @@ impl<'a, M: 'a + Clone, R: 'a + WidgetRenderer> From<NodeElement<'a, M, R>> for 
     }
 }
 
-pub struct FloatingPanesBehaviour<M> {
+pub struct FloatingPanesBehaviour<M, R: WidgetRenderer> {
     pub on_channel_disconnect: fn(ChannelIdentifier) -> M,
     pub on_connection_create: fn(Connection) -> M,
     pub connections: Vec<Connection>,
     // FIXME: Make it possible to store references instead of cloning
     pub graph_validation_errors: GraphValidationErrors,
+    pub tooltip_style: Option<<R as WidgetRenderer>::StyleTooltip>,
 }
 
 macro_rules! get_is_aliased {
@@ -292,9 +301,9 @@ macro_rules! get_is_aliased {
     };
 }
 
-impl<M: Clone> FloatingPanesBehaviour<M> {
+impl<M: Clone, R: WidgetRenderer> FloatingPanesBehaviour<M, R> {
     /// A reflexive function to check whether two channels can be connected
-    fn can_connect<'a, R: 'a + WidgetRenderer>(
+    fn can_connect<'a>(
         panes: &FloatingPanes<'a, M, R, Self>,
         from: ChannelIdentifier,
         to: ChannelIdentifier,
@@ -316,7 +325,7 @@ impl<M: Clone> FloatingPanesBehaviour<M> {
 }
 
 impl<'a, M: Clone + 'a, R: 'a + WidgetRenderer> floating_panes::FloatingPanesBehaviour<'a, M, R>
-    for FloatingPanesBehaviour<M>
+    for FloatingPanesBehaviour<M, R>
 {
     type FloatingPaneIndex = NodeIndex;
     type FloatingPaneBehaviourData = FloatingPaneBehaviourData;
@@ -381,12 +390,6 @@ impl<'a, M: Clone + 'a, R: 'a + WidgetRenderer> floating_panes::FloatingPanesBeh
                             // If a new connection is being formed, make sure the target channel
                             // can be connected to.
                             if let Some(selected_channel) = panes.behaviour_state.selected_channel.as_ref() {
-                                let node_configuration = &panes
-                                    .children
-                                    .get(&node_index)
-                                    .unwrap()
-                                    .behaviour_data
-                                    .node_configuration;
                                 let channel = channel_ref.into_identifier(node_index);
 
                                 if !FloatingPanesBehaviour::can_connect(panes, *selected_channel, channel) {
@@ -402,7 +405,7 @@ impl<'a, M: Clone + 'a, R: 'a + WidgetRenderer> floating_panes::FloatingPanesBeh
                         })
                         .next();
 
-                    if let Some((channel_layout, channel_ref)) = highlighted_channel {
+                    if let Some((_channel_layout, channel_ref)) = highlighted_channel {
                         let channel = channel_ref.into_identifier(node_index);
                         panes.behaviour_state.highlight = Some(Highlight::Channel(channel));
                     }
@@ -539,6 +542,79 @@ impl<'a, M: Clone + 'a, R: 'a + WidgetRenderer> floating_panes::FloatingPanesBeh
 
         Status::Ignored
     }
+
+    fn overlay<'b>(
+        panes: &'b mut FloatingPanes<'a, M, R, Self>,
+        layout: Layout<'_>,
+    ) -> Option<overlay::Element<'b, M, R>> {
+        let mut errors = panes
+            .behaviour_state
+            .highlight
+            .as_ref()
+            .map(|highlight| {
+                panes
+                    .behaviour
+                    .graph_validation_errors
+                    .get_related_errors(highlight.clone().into_graph_validation_error_affected_element())
+            })
+            .unwrap_or(&[]);
+
+        if errors.is_empty() {
+            errors = panes
+                .children
+                .iter()
+                .find_map(|(pane_index, pane)| {
+                    if pane.state.title_bar_status > InteractionStatus::Idle {
+                        let errors = panes.behaviour.graph_validation_errors.get_related_errors(*pane_index);
+
+                        Some(errors)
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or(&[]);
+        }
+
+        if !errors.is_empty() {
+            let mut column = Column::<M, R>::new();
+
+            for error in errors {
+                let display = error.display();
+                let mut error_element = Column::<M, R>::new()
+                    .max_width(512)
+                    .push(Text::new(display.title.to_string()).size(style::consts::TEXT_SIZE_TITLE))
+                    .push(Text::new(display.description.to_string()).size(style::consts::TEXT_SIZE_REGULAR));
+
+                if let Some(suggestion) = display.suggestion.as_ref() {
+                    error_element = error_element.push(
+                        Text::new(format!("Suggestion: {}", suggestion))
+                            .size(style::consts::TEXT_SIZE_REGULAR),
+                    );
+                }
+
+                let mut container = Container::new(Margin::new(error_element, style::consts::SPACING));
+
+                if let Some(style) = panes.behaviour.tooltip_style.as_ref() {
+                    container = container.style(style.container_style());
+                }
+
+                column = column.push(container);
+            }
+
+            let position: Point = panes.state.cursor_position.into_array().into();
+            let overlay =
+                WidgetOverlay::<M, R, _>::new(column, WidgetOverlayAlignment { top: true, left: false });
+
+            return Some(overlay::Element::new(position, Box::new(overlay)));
+        }
+
+        panes
+            .children
+            .iter_mut()
+            .zip(layout.children())
+            .filter_map(|((_, pane), layout)| pane.element_tree.overlay(layout))
+            .next()
+    }
 }
 
 pub struct FloatingPaneBehaviourData {
@@ -548,10 +624,20 @@ pub struct FloatingPaneBehaviourData {
 #[derive(Default)]
 pub struct FloatingPaneBehaviourState {}
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Highlight {
     Channel(ChannelIdentifier),
     Connection(Connection),
+}
+
+impl Highlight {
+    pub fn into_graph_validation_error_affected_element(self) -> GraphValidationErrorAffectedElement {
+        use Highlight::*;
+        match self {
+            Channel(channel) => GraphValidationErrorAffectedElement::Channel(channel),
+            Connection(connection) => GraphValidationErrorAffectedElement::Connection(connection),
+        }
+    }
 }
 
 #[derive(Default)]
@@ -572,9 +658,11 @@ pub trait WidgetRenderer:
     + iced_native::widget::text_input::Renderer
     + Sized
 {
+    type StyleTooltip: StyleTooltipBounds<Self>;
+
     fn draw_panes<M: Clone>(
         &mut self,
-        panes: &FloatingPanes<'_, M, Self, FloatingPanesBehaviour<M>>,
+        panes: &FloatingPanes<'_, M, Self, FloatingPanesBehaviour<M, Self>>,
         defaults: &Self::Defaults,
         layout: FloatingPanesLayout<'_>,
         cursor_position: Point,
@@ -585,9 +673,11 @@ pub trait WidgetRenderer:
 impl<B> WidgetRenderer for iced_graphics::Renderer<B>
 where B: Backend + iced_graphics::backend::Text
 {
+    type StyleTooltip = Box<dyn TooltipStyleSheet>;
+
     fn draw_panes<M: Clone>(
         &mut self,
-        panes: &FloatingPanes<'_, M, Self, FloatingPanesBehaviour<M>>,
+        panes: &FloatingPanes<'_, M, Self, FloatingPanesBehaviour<M, Self>>,
         defaults: &Self::Defaults,
         layout: FloatingPanesLayout<'_>,
         cursor_position: Point,
@@ -821,8 +911,33 @@ where B: Backend + iced_graphics::backend::Text
     }
 }
 
+pub trait StyleTooltipBounds<R: WidgetRenderer> {
+    fn container_style(&self) -> <R as iced_native::widget::container::Renderer>::Style;
+}
+
+pub trait TooltipStyleSheet {
+    fn style(&self) -> TooltipStyle;
+}
+
+impl<B> StyleTooltipBounds<iced_graphics::Renderer<B>> for Box<dyn TooltipStyleSheet>
+where B: Backend + iced_graphics::backend::Text
+{
+    fn container_style(&self) -> Box<(dyn iced::container::StyleSheet + 'static)> {
+        self.style().container
+    }
+}
+
+pub struct TooltipStyle {
+    pub container: Box<(dyn iced::container::StyleSheet + 'static)>,
+}
+
 fn draw_connection_point<M: Clone, B>(
-    panes: &FloatingPanes<'_, M, iced_graphics::Renderer<B>, FloatingPanesBehaviour<M>>,
+    panes: &FloatingPanes<
+        '_,
+        M,
+        iced_graphics::Renderer<B>,
+        FloatingPanesBehaviour<M, iced_graphics::Renderer<B>>,
+    >,
     primitives: &mut Vec<Primitive>,
     node_index: NodeIndex,
     position: Vec2<f32>,
@@ -844,7 +959,7 @@ fn draw_connection_point<M: Clone, B>(
 
     if !solid {
         let pane = panes.children.get(&node_index).unwrap();
-        let color = pane.style.as_ref().unwrap().style().body_background_color;
+        let color = pane.style.as_ref().unwrap().style(style::InteractionStatus::Idle).body_background_color;
 
         primitives.push(util::draw_point(position, color, radius * (2.0 / 3.0)));
     }
@@ -935,6 +1050,58 @@ impl ConnectionCurve {
         }
 
         None
+    }
+}
+
+pub struct WidgetOverlayAlignment {
+    pub top: bool,
+    pub left: bool,
+}
+
+struct WidgetOverlay<M: Clone, R: WidgetRenderer, W: Widget<M, R>> {
+    pub widget: W,
+    pub alignment: WidgetOverlayAlignment,
+    __marker: PhantomData<(M, R)>,
+}
+
+impl<M: Clone, R: WidgetRenderer, W: Widget<M, R>> WidgetOverlay<M, R, W> {
+    pub fn new(widget: W, alignment: WidgetOverlayAlignment) -> Self {
+        Self { widget, alignment, __marker: Default::default() }
+    }
+}
+
+impl<M: Clone, R: WidgetRenderer, W: Widget<M, R>> Overlay<M, R> for WidgetOverlay<M, R, W> {
+    fn layout(&self, renderer: &R, bounds: Size, mut position: Point) -> Node {
+        let mut node = self.widget.layout(renderer, &Limits::new(Size::ZERO, bounds));
+        let node_bounds = node.bounds();
+
+        if self.alignment.left {
+            position.x -= node_bounds.width;
+        }
+
+        if self.alignment.top {
+            position.y -= node_bounds.height;
+        }
+
+        node.move_to(position);
+
+        node
+    }
+
+    fn draw(
+        &self,
+        renderer: &mut R,
+        defaults: &R::Defaults,
+        layout: Layout<'_>,
+        cursor_position: Point,
+    ) -> R::Output {
+        self.widget.draw(renderer, defaults, layout, cursor_position, &layout.bounds())
+    }
+
+    fn hash_layout(&self, state: &mut Hasher, position: Point) {
+        OrderedFloat::from(position.x).hash(state);
+        OrderedFloat::from(position.y).hash(state);
+        self.widget.hash_layout(state)
     }
 }
 

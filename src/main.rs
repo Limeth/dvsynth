@@ -16,16 +16,6 @@
 //! * Explore the usage of associated types to avoid dynamic allocation for
 //!   owned references of sized channel types.
 //! * Node generics
-//! * Add by-value connections (when outputs are connected to a single input).
-//!     * Allows for passing by-mutable-reference or by-value.
-//!       -[    &T]-
-//!       -[&mut T]-
-//!       -[     T]
-//!        [     T]-
-//!     * Adjust channel definitions, identifiers and storage in nodes.
-//!     * Adjust UI rendering.
-//!     * Add type resolution/downgrading based on the number of connections and target channel.
-//!     * Adjust `ExecutionContext` to include `&mut T` and `T`.
 //! * Window node:
 //!     * Make window size accessible only when resizable is false
 //!     * Fullscreen modes
@@ -187,6 +177,7 @@ impl Application for ApplicationState {
                 on_connection_create: |connection| Message::InsertConnection { connection },
                 connections,
                 graph_validation_errors: self.graph_validation_errors.clone(),
+                tooltip_style: Some(theme.tooltip()),
             },
             Box::new(|| Message::RecomputeLayout),
         )

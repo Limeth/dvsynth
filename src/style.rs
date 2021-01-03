@@ -1,5 +1,5 @@
 use crate::util::rgb;
-use crate::widgets::floating_panes;
+use crate::widgets::{floating_panes, node};
 use crate::Spacing;
 use iced::{checkbox, container, pick_list, text_input, widget, Color};
 
@@ -24,6 +24,7 @@ pub trait StyleSheetProvider: std::fmt::Debug {
     fn checkbox(&self) -> Box<dyn checkbox::StyleSheet>;
     fn floating_panes(&self) -> Box<dyn floating_panes::FloatingPanesStyleSheet>;
     fn floating_pane(&self) -> Box<dyn floating_panes::FloatingPaneStyleSheet>;
+    fn tooltip(&self) -> Box<dyn node::TooltipStyleSheet>;
 }
 
 pub trait Theme: StyleSheetProvider {}
@@ -54,7 +55,9 @@ macro_rules! themes {
                 pub const TEXT_INPUT_COLOR: Color = TEXT_COLOR;
                 pub const TEXT_INPUT_COLOR_PLACEHOLDER: Color = COLORS[4];
                 pub const TEXT_INPUT_COLOR_SELECTION: Color = COLORS[5];
-                pub const FLOATING_PANE_TITLE_COLOR_BACKGROUND: Color = COLORS[4];
+                pub const FLOATING_PANE_TITLE_COLOR_BACKGROUND_IDLE: Color = COLORS[4];
+                pub const FLOATING_PANE_TITLE_COLOR_BACKGROUND_HOVERED: Color = COLORS[5];
+                pub const FLOATING_PANE_TITLE_COLOR_BACKGROUND_FOCUSED: Color = COLORS[6];
                 pub const FLOATING_PANE_BODY_COLOR_BACKGROUND: Color = COLORS[3];
                 pub const FLOATING_PANES_COLOR_BACKGROUND: Color = COLORS[1];
                 pub const BORDER_WIDTH: u16 = 1;
@@ -211,9 +214,13 @@ macro_rules! themes {
                         pub struct FloatingPane;
 
                         impl floating_panes::FloatingPaneStyleSheet for FloatingPane {
-                            fn style(&self) -> floating_panes::FloatingPaneStyle {
+                            fn style(&self, title_bar_status: InteractionStatus) -> floating_panes::FloatingPaneStyle {
                                 floating_panes::FloatingPaneStyle {
-                                    title_background_color: FLOATING_PANE_TITLE_COLOR_BACKGROUND,
+                                    title_background_color: match title_bar_status {
+                                        InteractionStatus::Idle => FLOATING_PANE_TITLE_COLOR_BACKGROUND_IDLE,
+                                        InteractionStatus::Hovered => FLOATING_PANE_TITLE_COLOR_BACKGROUND_HOVERED,
+                                        InteractionStatus::Focused => FLOATING_PANE_TITLE_COLOR_BACKGROUND_FOCUSED,
+                                    },
                                     title_text_color: TEXT_COLOR,
                                     body_background_color: FLOATING_PANE_BODY_COLOR_BACKGROUND,
                                 }
@@ -236,9 +243,54 @@ macro_rules! themes {
 
                         Box::new(FloatingPanes)
                     }
+
+                    fn tooltip(&self) -> Box<dyn node::TooltipStyleSheet> {
+                        pub struct Tooltip;
+
+                        impl node::TooltipStyleSheet for Tooltip {
+                            fn style(&self) -> node::TooltipStyle {
+                                node::TooltipStyle {
+                                    container: {
+                                        pub struct Container;
+
+                                        impl container::StyleSheet for Container {
+                                            fn style(&self) -> container::Style {
+                                                container::Style {
+                                                    background: {
+                                                        let mut color = COLORS[1];
+                                                        color.a = 0.9;
+                                                        color.into()
+                                                    },
+                                                    text_color: rgb(0xFF0000).into(),
+                                                    ..container::Style::default()
+                                                }
+                                            }
+                                        }
+
+                                        Box::new(Container)
+                                    }
+                                }
+                            }
+                        }
+
+                        Box::new(Tooltip)
+                    }
                 }
             }
         )*
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash, PartialOrd, Ord)]
+pub enum InteractionStatus {
+    Idle,
+    Hovered,
+    Focused,
+}
+
+impl Default for InteractionStatus {
+    fn default() -> Self {
+        InteractionStatus::Idle
     }
 }
 

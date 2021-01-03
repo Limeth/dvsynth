@@ -1,4 +1,5 @@
 use super::*;
+use crate::style::InteractionStatus;
 use crate::util::RectangleExt;
 use iced_graphics::{self, Backend, Background, Color, Primitive, Rectangle};
 use iced_native::event::Status;
@@ -56,10 +57,10 @@ pub trait FloatingPanesBehaviour<'a, M: 'a, R: 'a + WidgetRenderer>: Sized {
         clipboard: Option<&dyn Clipboard>,
     ) -> Status;
 
-    // fn overlay<'b: 'a>(
-    //     panes: &mut FloatingPanes<'a, M, R, Self>,
-    //     layout: Layout<'b>
-    // ) -> Option<overlay::Element<'b, M, R>>;
+    fn overlay<'b>(
+        panes: &'b mut FloatingPanes<'a, M, R, Self>,
+        layout: Layout<'_>,
+    ) -> Option<overlay::Element<'b, M, R>>;
 }
 
 pub struct FloatingPanesBehaviourDefault;
@@ -126,16 +127,17 @@ impl<'a, M: 'a, B: 'a + Backend + iced_graphics::backend::Text>
         Status::Ignored
     }
 
-    // fn overlay<'b: 'a>(
-    //     panes: &mut FloatingPanes<'a, M, iced_graphics::Renderer<B>, Self>,
-    //     layout: Layout<'b>
-    // ) -> Option<overlay::Element<'b, M, iced_graphics::Renderer<B>>> {
-    //     panes.children
-    //         .iter_mut()
-    //         .zip(layout.children())
-    //         .filter_map(|(child, layout)| child.element_tree.overlay(layout))
-    //         .next()
-    // }
+    fn overlay<'b>(
+        panes: &'b mut FloatingPanes<'a, M, iced_graphics::Renderer<B>, Self>,
+        layout: Layout<'_>,
+    ) -> Option<overlay::Element<'b, M, iced_graphics::Renderer<B>>> {
+        panes
+            .children
+            .iter_mut()
+            .zip(layout.children())
+            .filter_map(|((_, pane), layout)| pane.element_tree.overlay(layout))
+            .next()
+    }
 }
 
 #[derive(PartialEq, Eq, Debug, Clone, Copy, Hash)]
@@ -257,13 +259,14 @@ impl<'a, M: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a, M, R>
                 let mut element_container = Container::new(self.content);
 
                 if let Some(style) = self.style.as_ref() {
-                    element_container = element_container.style(style.content_container_style());
+                    element_container =
+                        element_container.style(style.content_container_style(self.state.title_bar_status));
                 }
 
                 let mut container = Container::new(column.push(element_container));
 
                 if let Some(style) = self.style.as_ref() {
-                    container = container.style(style.root_container_style());
+                    container = container.style(style.root_container_style(self.state.title_bar_status));
                 }
 
                 container = match self.state.size[0] {
@@ -289,6 +292,7 @@ impl<'a, M: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a, M, R>
 pub struct FloatingPaneState {
     pub position: Vec2<f32>,
     pub size: Vec2<FloatingPaneLength>,
+    pub title_bar_status: InteractionStatus,
 }
 
 impl Hash for FloatingPaneState {
@@ -296,6 +300,7 @@ impl Hash for FloatingPaneState {
     where H: std::hash::Hasher {
         self.position.map(OrderedFloat::from).as_slice().hash(state);
         self.size.hash(state);
+        self.title_bar_status.hash(state);
     }
 }
 
@@ -629,7 +634,25 @@ impl<'a, M: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a, M, R>
         self.children.get_index_of(pane_index)
     }
 
-    pub fn update_pending_gestures(&mut self, layout: FloatingPanesLayout) {
+    pub fn update_pending_gestures(&mut self, layout: FloatingPanesLayout, messages: &mut Vec<M>) {
+        // Update the interaction status of title bars
+        for ((_, (_, pane)), pane_layout) in self.children.iter_mut().enumerate().zip(layout.panes()) {
+            let content_layout = pane_layout.content();
+            let pane_bounds = pane_layout.bounds();
+            let cursor_on_pane = pane_bounds.contains(self.state.cursor_position.into_array().into());
+            let cursor_on_title = cursor_on_pane
+                && !content_layout.bounds().contains(self.state.cursor_position.into_array().into());
+
+            let new_title_bar_status =
+                if cursor_on_title { InteractionStatus::Hovered } else { InteractionStatus::Idle };
+
+            if new_title_bar_status != pane.state.title_bar_status {
+                pane.state.title_bar_status = new_title_bar_status;
+
+                messages.push((self.on_layout_change)());
+            }
+        }
+
         self.state.gesture = self.children.iter_mut().enumerate().zip(layout.panes()).find_map({
             let panes_state = &self.state;
             move |((pane_index, (_, pane)), pane_layout)| {
@@ -805,30 +828,22 @@ impl<'a, M: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a, M, R>
                         }
                     }
                     _ => {
-                        self.update_pending_gestures(layout);
+                        self.update_pending_gestures(layout, messages);
                     }
                 }
             }
             Event::Mouse(MouseEvent::ButtonPressed(MouseButton::Left)) => {
-                self.state.gesture = self.children.iter_mut().enumerate().zip(layout.panes()).find_map({
+                self.state.gesture = self.children.iter_mut().enumerate().find_map({
                     let panes_state = &self.state;
-                    move |((pane_index, (_, pane)), pane_layout)| {
-                        let content_layout = pane_layout.content();
-                        let pane_bounds = pane_layout.bounds();
-                        let cursor_on_pane =
-                            pane_bounds.contains(panes_state.cursor_position.into_array().into());
-
+                    move |(pane_index, (_, pane))| {
                         if let Some(Gesture::ResizePane { pane_index, grab_state, directions, .. }) =
                             panes_state.gesture.clone()
                         {
                             Some(Gesture::ResizePane { pending: false, pane_index, grab_state, directions })
                         } else {
-                            let cursor_on_title = cursor_on_pane
-                                && !content_layout
-                                    .bounds()
-                                    .contains(panes_state.cursor_position.into_array().into());
+                            if pane.state.title_bar_status == InteractionStatus::Hovered {
+                                pane.state.title_bar_status = InteractionStatus::Focused;
 
-                            if cursor_on_title {
                                 Some(Gesture::GrabPane {
                                     pane_index,
                                     grab_state: GrabStateMove {
@@ -856,12 +871,12 @@ impl<'a, M: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a, M, R>
                             grab_element_position: self.state.panes_offset,
                         }));
                     }
+                } else {
+                    messages.push((self.on_layout_change)());
                 }
-
-                if !self.state.gesture.is_none() {}
             }
             Event::Mouse(MouseEvent::ButtonReleased(MouseButton::Left)) => {
-                self.update_pending_gestures(layout);
+                self.update_pending_gestures(layout, messages);
             }
             _ => (),
         }
@@ -886,11 +901,7 @@ impl<'a, M: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a, M, R>
     }
 
     fn overlay(&mut self, layout: Layout<'_>) -> Option<overlay::Element<'_, M, R>> {
-        self.children
-            .iter_mut()
-            .zip(layout.children())
-            .filter_map(|((_, child), layout)| child.element_tree.overlay(layout))
-            .next()
+        C::overlay(self, layout)
     }
 }
 
@@ -985,18 +996,27 @@ pub struct FloatingPaneStyle {
 }
 
 pub trait StyleFloatingPaneBounds<R: WidgetRenderer> {
-    fn root_container_style(&self) -> <R as iced_native::widget::container::Renderer>::Style;
-    fn content_container_style(&self) -> <R as iced_native::widget::container::Renderer>::Style;
+    fn root_container_style(
+        &self,
+        title_bar_status: InteractionStatus,
+    ) -> <R as iced_native::widget::container::Renderer>::Style;
+    fn content_container_style(
+        &self,
+        title_bar_status: InteractionStatus,
+    ) -> <R as iced_native::widget::container::Renderer>::Style;
 }
 
 pub trait FloatingPaneStyleSheet {
-    fn style(&self) -> FloatingPaneStyle;
+    fn style(&self, title_bar_status: InteractionStatus) -> FloatingPaneStyle;
 }
 
 impl<B> StyleFloatingPaneBounds<iced_graphics::Renderer<B>> for Box<dyn FloatingPaneStyleSheet>
 where B: Backend + iced_graphics::backend::Text
 {
-    fn root_container_style(&self) -> Box<(dyn iced::container::StyleSheet + 'static)> {
+    fn root_container_style(
+        &self,
+        title_bar_status: InteractionStatus,
+    ) -> Box<(dyn iced::container::StyleSheet + 'static)> {
         struct StyleSheet(FloatingPaneStyle);
 
         impl iced::container::StyleSheet for StyleSheet {
@@ -1009,10 +1029,13 @@ where B: Backend + iced_graphics::backend::Text
             }
         }
 
-        Box::new(StyleSheet(self.style()))
+        Box::new(StyleSheet(self.style(title_bar_status)))
     }
 
-    fn content_container_style(&self) -> Box<(dyn iced::container::StyleSheet + 'static)> {
+    fn content_container_style(
+        &self,
+        title_bar_status: InteractionStatus,
+    ) -> Box<(dyn iced::container::StyleSheet + 'static)> {
         struct StyleSheet(FloatingPaneStyle);
 
         impl iced::container::StyleSheet for StyleSheet {
@@ -1024,7 +1047,7 @@ where B: Backend + iced_graphics::backend::Text
             }
         }
 
-        Box::new(StyleSheet(self.style()))
+        Box::new(StyleSheet(self.style(title_bar_status)))
     }
 }
 

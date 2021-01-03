@@ -22,9 +22,11 @@ use iced::{Element, Settings};
 use iced_futures::futures;
 use iced_wgpu::wgpu;
 use petgraph::{algo::Cycle, stable_graph::StableGraph, visit::EdgeRef, Directed, Direction};
+use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::{hash_map::Entry, HashMap, HashSet};
 use std::fmt::Debug;
+use std::fmt::Display;
 use std::ops::{Deref, DerefMut};
 use std::rc::Rc;
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -454,6 +456,28 @@ pub struct Schedule {
     pub tasks: Box<[Option<Task>]>,
 }
 
+pub struct GraphValidationErrorDisplay<'a> {
+    pub title: Cow<'a, str>,
+    pub description: Cow<'a, str>,
+    pub suggestion: Option<Cow<'a, str>>,
+}
+
+impl<'a> Display for GraphValidationErrorDisplay<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!(
+            "[{title}] Description: {description}",
+            title = &self.title,
+            description = &self.description
+        ))?;
+
+        if let Some(suggestion) = self.suggestion.as_ref() {
+            f.write_fmt(format_args!("; Suggestion: {suggestion}", suggestion = suggestion))?;
+        }
+
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum GraphValidationError {
     IncompleteInput(UndirectedChannelIdentifier),
@@ -462,29 +486,55 @@ pub enum GraphValidationError {
 }
 
 impl GraphValidationError {
-    pub fn collect(
-        self: Rc<Self>,
-        collect: &mut dyn FnMut(GraphValidationErrorAffectedElement, Rc<GraphValidationError>),
-    ) {
+    pub fn collect(&self, collect: &mut dyn FnMut(GraphValidationErrorAffectedElement)) {
         use GraphValidationError::*;
-        match self.as_ref() {
+        match self {
             IncompleteInput(undirected_channel_id) => {
                 let channel = undirected_channel_id.into_directed(ChannelDirection::In);
-                (collect)(channel.into(), self);
+                (collect)(channel.into());
+                (collect)(channel.node_index.into());
             }
             StronglyConnectedComponent { nodes, connections } => {
                 for node in nodes {
-                    (collect)((*node).into(), self.clone());
+                    (collect)((*node).into());
                 }
 
                 for connection in connections {
-                    (collect)(connection.clone().into(), self.clone());
+                    (collect)(connection.clone().into());
+                    (collect)(connection.from().into());
+                    (collect)(connection.to().into());
                 }
             }
-            InvalidConnection { connection, .. } => {
-                (collect)(connection.clone().into(), self);
+            InvalidConnection { connection, error } => {
+                ConnectionValidityError::collect(error, connection, collect);
             }
         }
+    }
+
+    pub fn display(&self) -> GraphValidationErrorDisplay<'_> {
+        use GraphValidationError::*;
+        match self {
+            IncompleteInput(undirected_channel_id) => GraphValidationErrorDisplay {
+                title: Cow::Borrowed("Incomplete input"),
+                // TODO: Specify which exact channel is missing the connection.
+                description: Cow::Borrowed("Missing a connection for input channel."),
+                suggestion: Some(Cow::Borrowed(
+                    "Add a connection or disconnect all inputs to disable the node.",
+                )),
+            },
+            StronglyConnectedComponent { nodes, connections } => GraphValidationErrorDisplay {
+                title: Cow::Borrowed("Graph not acyclic"),
+                description: Cow::Borrowed("The graph contains one or more loops."),
+                suggestion: Some(Cow::Borrowed("Remove highlighted loops.")),
+            },
+            InvalidConnection { connection, error } => error.display(connection),
+        }
+    }
+}
+
+impl Display for GraphValidationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.display().fmt(f)
     }
 }
 
@@ -520,6 +570,13 @@ pub struct GraphValidationErrors(
 );
 
 impl GraphValidationErrors {
+    pub fn get_related_errors(
+        &self,
+        element: impl Into<GraphValidationErrorAffectedElement>,
+    ) -> &[Rc<GraphValidationError>] {
+        self.get(&element.into()).map(|vec| &vec[..]).unwrap_or(&[])
+    }
+
     pub fn is_invalid(&self, element: impl Into<GraphValidationErrorAffectedElement>) -> bool {
         self.contains_key(&element.into())
     }
@@ -530,12 +587,13 @@ impl From<Vec<GraphValidationError>> for GraphValidationErrors {
         let mut result = Self::default();
 
         for error in vec {
-            Rc::new(error).collect(&mut |element, error| match result.entry(element) {
+            let error = Rc::new(error);
+            error.collect(&mut |element| match result.entry(element) {
                 Entry::Vacant(entry) => {
-                    entry.insert(vec![error]);
+                    entry.insert(vec![error.clone()]);
                 }
                 Entry::Occupied(mut entry) => {
-                    entry.get_mut().push(error);
+                    entry.get_mut().push(error.clone());
                 }
             })
         }
@@ -980,7 +1038,8 @@ impl NodeData {
         &mut self,
         index: NodeIndex,
         theme: &dyn Theme,
-    ) -> FloatingPane<'_, Message, iced_wgpu::Renderer, FloatingPanesBehaviour<Message>> {
+    ) -> FloatingPane<'_, Message, iced_wgpu::Renderer, FloatingPanesBehaviour<Message, iced_wgpu::Renderer>>
+    {
         let mut builder = NodeElement::builder(index, &mut self.element_state).node_behaviour_element(
             self.behaviour.view(theme).map(Element::from).map(move |element| {
                 element.map(move |message| Message::NodeMessage {
@@ -1109,6 +1168,77 @@ pub enum ConnectionValidityError {
     IncompatiblePassBy,
     /// The types of the channels are incompatible.
     IncompatibleType,
+}
+
+impl ConnectionValidityError {
+    pub fn collect(
+        &self,
+        connection: &Connection,
+        collect: &mut dyn FnMut(GraphValidationErrorAffectedElement),
+    ) {
+        use ConnectionValidityError::*;
+        match self {
+            Loop => {
+                // Highlight the affected connection
+                (collect)(connection.clone().into());
+
+                // Highlight the affected channels
+                (collect)(connection.from().into());
+                (collect)(connection.to().into());
+
+                // Highlight the affected node (from == to)
+                (collect)(connection.to().node_index.into());
+            }
+            IncompatiblePassBy => {
+                // Highlight the affected connection
+                (collect)(connection.clone().into());
+
+                // Highlight the affected channels
+                (collect)(connection.to().into());
+
+                // Highlight the affected nodes
+                (collect)(connection.to().node_index.into());
+            }
+            IncompatibleType => {
+                // Highlight the affected connection
+                (collect)(connection.clone().into());
+
+                // Highlight the affected channels
+                (collect)(connection.from().into());
+                (collect)(connection.to().into());
+
+                // Highlight the affected nodes
+                (collect)(connection.to().node_index.into());
+            }
+        }
+    }
+
+    pub fn display(&self, connection: &Connection) -> GraphValidationErrorDisplay<'_> {
+        use ConnectionValidityError::*;
+        match self {
+            Loop => GraphValidationErrorDisplay {
+                title: Cow::Borrowed("Connection loop"),
+                description: Cow::Borrowed("Connection leads to the node it originates in."),
+                suggestion: Some(Cow::Borrowed("Remove this connection.")),
+            },
+            IncompatiblePassBy => GraphValidationErrorDisplay {
+                title: Cow::Borrowed("Incompatible method of value passing"),
+                description: Cow::Borrowed(
+                    "Cannot pass a shared value to a channel that requires exclusive access.",
+                ),
+                suggestion: Some(Cow::Borrowed(
+                    "Make sure the connection leading into this channel is solid and not dotted.",
+                )),
+            },
+            IncompatibleType => GraphValidationErrorDisplay {
+                title: Cow::Borrowed("Incompatible channel types"),
+                description: Cow::Borrowed(
+                    "The type of the input channel is incompatible with the type of the output channel.",
+                ),
+                suggestion: None,
+            },
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
