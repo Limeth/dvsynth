@@ -1,7 +1,7 @@
 # DVSynth — Digital Video Synthesizer
 DVSynth is a real-time graph-based video compositor for broadcasting and creative coding.
 
-[![demo](demos/demo-linting.png)](demos/demo-linting.mov?raw=true)
+[![demo](demos/demo-linting.webp)](demos/demo-linting.mov?raw=true)
 
 ## Development
 ### Generating Documentation
