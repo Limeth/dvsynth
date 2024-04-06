@@ -5,8 +5,8 @@ use crate::node::behaviour::{
 };
 use crate::node::ty::{BorrowedRef, BorrowedRefMut, OptionRefExt, OptionType, TypeEnum, TypeExt};
 use crate::node::{
-    ChannelDirection, ChannelPassBy, ChannelRef, ChannelValueRefs, ChannelValues, ConnectionPassBy,
-    DynTypeTrait, ListDescriptor, NodeConfiguration, NodeStateRefcounter, OptionRefMutExt, RefAnyExt,
+    ChannelDirection, ChannelPassBy, ChannelRef, ConnectionPassBy, DynTypeTrait, NodeConfiguration,
+    NodeStateRefcounter, OptionRefMutExt, RefAnyExt,
 };
 use crate::style::{self, consts, Theme, Themeable};
 use crate::widgets::{
@@ -21,9 +21,8 @@ use arc_swap::ArcSwapOption;
 use iced::{Element, Settings};
 use iced_futures::futures;
 use iced_wgpu::wgpu;
-use petgraph::{algo::Cycle, stable_graph::StableGraph, visit::EdgeRef, Directed, Direction};
+use petgraph::{stable_graph::StableGraph, visit::EdgeRef, Directed, Direction};
 use std::borrow::Cow;
-use std::cell::RefCell;
 use std::collections::{hash_map::Entry, HashMap, HashSet};
 use std::fmt::Debug;
 use std::fmt::Display;
@@ -988,10 +987,8 @@ impl GraphExecutor {
                 let prepared_execution = prepared_execution.as_mut().unwrap();
 
                 prepared_execution.execute(active_schedule, &mut self.application_context);
-            } else {
-                if let Some(prepared_execution) = prepared_execution.take() {
-                    last_prepared_execution = Some(prepared_execution);
-                }
+            } else if let Some(prepared_execution) = prepared_execution.take() {
+                last_prepared_execution = Some(prepared_execution);
             }
         }
     }

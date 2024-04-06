@@ -1,12 +1,9 @@
 #![feature(array_windows)]
 #![feature(associated_type_bounds)]
 #![feature(never_type)]
-#![feature(raw)]
-#![feature(generic_associated_types)]
+#![feature(ptr_metadata)]
 #![feature(negative_impls)]
 #![feature(const_fn_floating_point_arithmetic)]
-#![feature(bindings_after_at)]
-#![feature(iterator_fold_self)]
 #![feature(trivial_bounds)]
 #![feature(associated_type_defaults)]
 #![feature(trait_alias)]
@@ -33,6 +30,7 @@ use graph::{
 };
 use iced::{window, Application, Command, Settings};
 use iced_winit::winit;
+use node::behaviour::counter::CounterNodeBehaviour;
 use node::behaviour::*;
 use node::*;
 use petgraph::graph::NodeIndex;

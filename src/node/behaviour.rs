@@ -1,24 +1,22 @@
 use crate::graph::{ApplicationContext, NodeIndex};
-use crate::node::{
-    BorrowedRef, BorrowedRefMut, ChannelValueRefs, ChannelValues, DynTypeTrait, NodeConfiguration, OptionType,
-};
+use crate::node::{BorrowedRef, BorrowedRefMut, DynTypeTrait, NodeConfiguration, OptionType};
 use crate::style::Theme;
 use downcast_rs::{impl_downcast, Downcast};
 use dyn_clone::DynClone;
 use iced::Element;
 use iced_winit::winit::event_loop::EventLoopWindowTarget;
+use std::any::Any;
 use std::fmt::Debug;
 use std::marker::PhantomData;
 
 pub use array_constructor::*;
 pub use binary_op::*;
 pub use constant::*;
-pub use counter::*;
 pub use debug::*;
 pub use list_constructor::*;
 pub use window::*;
 
-use super::{OwnedRefMut, SizedTypeExt, TypeEnum, TypeTrait, Unique};
+use super::{OwnedRefMut, Unique};
 
 pub struct Inputs {}
 
@@ -67,7 +65,7 @@ impl<M: NodeBehaviourMessage> NodeEvent<M> {
 
 // FIXME: Maybe just store `Box<dyn NodeExecutor<'static>>` instead?
 pub struct NodeStateContainer<'state> {
-    ptr: Box<dyn NodeExecutor<'state> + 'state>,
+    ptr: Box<dyn NodeExecutor<'state> + 'static>,
 }
 
 impl<'state> NodeStateContainer<'state> {
@@ -75,16 +73,24 @@ impl<'state> NodeStateContainer<'state> {
         Self { ptr: Box::new(state) as Box<dyn NodeExecutor<'state> + 'state> }
     }
 
-    /// Safety: The returned value must not outlive self.
-    unsafe fn as_trait_object(&mut self) -> std::raw::TraitObject {
-        let raw: *mut dyn NodeExecutor<'state> = &mut *self.ptr as *mut _;
+    // /// Safety: The returned value must not outlive self.
+    // unsafe fn as_trait_object(&mut self) -> std::raw::TraitObject {
+    //     let raw: *mut dyn NodeExecutor<'state> = &mut *self.ptr as *mut _;
 
-        std::mem::transmute(raw)
-    }
+    //     std::mem::transmute(raw)
+    // }
+
+    // unsafe fn downcast_mut<T: NodeBehaviour>(&mut self) -> &mut T::State<'state> {
+    //     let trait_object = self.as_trait_object();
+    //     &mut *(trait_object.data as *mut T::State<'state>)
+    // }
 
     unsafe fn downcast_mut<T: NodeBehaviour>(&mut self) -> &mut T::State<'state> {
-        let trait_object = self.as_trait_object();
-        &mut *(trait_object.data as *mut T::State<'state>)
+        //let reference: &mut dyn NodeExecutor<'state> = &mut *self.ptr;
+        let mut reference = self.ptr.as_mut();
+        reference.as_any_mut().downcast_mut().unwrap()
+        //let raw: *mut dyn NodeExecutor<'state> = &mut *self.ptr as *mut _;
+        //&mut *(trait_object.data as *mut T::State<'state>)
     }
 
     pub fn update<'invocation, T: NodeBehaviour>(
@@ -109,7 +115,7 @@ impl<'state> NodeStateContainer<'state> {
     // }
 }
 
-pub trait NodeExecutor<'state>: Debug + Send + Sync {
+pub trait NodeExecutor<'state>: Debug + Send + Sync + Any {
     fn execute<'invocation>(&'invocation mut self, context: ExecutionContext<'invocation, 'state>)
     where 'state: 'invocation;
 }
@@ -129,10 +135,9 @@ pub trait TransientTrait: Debug + Send + Sync {}
 impl<T> TransientTrait for T where T: Debug + Send + Sync {}
 
 /// Constructs an executor. Invoked every time the execution graph is recreated.
-pub trait ExecutorClosureConstructor<'state, T, Transient: TransientTrait + 'state = ()> =
-    Fn(&T, &ApplicationContext, &mut Transient) -> Box<dyn ExecutorClosure<'state, Transient> + 'state>
-        + Send
-        + Sync;
+pub trait ExecutorClosureConstructor<'state, T, Transient: TransientTrait + 'state = ()> = Fn(&T, &ApplicationContext, &mut Transient) -> Box<dyn ExecutorClosure<'state, Transient> + 'state>
+    + Send
+    + Sync;
 
 /// Invoked once per node per graph execution.
 pub trait ExecutorClosure<'state, Transient: TransientTrait + 'state = ()> =

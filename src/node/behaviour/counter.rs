@@ -4,7 +4,7 @@ use crate::{
             ApplicationContext, ExecutionContext, ExecutorClosure, NodeBehaviour, NodeCommand, NodeEvent,
             NodeStateClosure,
         },
-        Channel, NodeConfiguration, OptionRefMutExt, PrimitiveType, PrimitiveTypeEnum,
+        Channel, NodeConfiguration, OptionRefMutExt, PrimitiveTypeEnum,
     },
     style::Theme,
 };
