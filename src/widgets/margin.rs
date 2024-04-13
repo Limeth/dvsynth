@@ -65,18 +65,20 @@ impl<'a, M: 'a, R: WidgetRenderer + 'a> Widget<M, R> for Margin<'a, M, R> {
 
     fn draw(
         &self,
+        state: &iced_native::widget::Tree,
         renderer: &mut R,
-        defaults: &R::Defaults,
+        theme: &<R as iced_native::Renderer>::Theme,
+        style: &iced_native::renderer::Style,
         layout: Layout<'_>,
         cursor_position: Point,
         viewport: &Rectangle,
-    ) -> R::Output {
-        self.child.draw(renderer, defaults, layout, cursor_position, viewport)
+    ) {
+        self.child.as_widget().draw(state, renderer, theme, style, layout, cursor_position, viewport)
     }
 
-    fn hash_layout(&self, state: &mut Hasher) {
-        self.child.hash_layout(state)
-    }
+    // fn hash_layout(&self, state: &mut Hasher) {
+    //     self.child.hash_layout(state)
+    // }
 
     fn on_event(
         &mut self,
@@ -103,11 +105,16 @@ impl<'a, M: 'a, R: WidgetRenderer + 'a> From<Margin<'a, M, R>> for Element<'a, M
 
 pub trait WidgetRenderer:
     iced_native::Renderer
-    + iced_native::space::Renderer
-    + iced_native::column::Renderer
-    + iced_native::row::Renderer
+    // + iced_native::space::Renderer
+    // + iced_native::column::Renderer
+    // + iced_native::row::Renderer
     + Sized
 {
 }
 
-impl<B> WidgetRenderer for iced_graphics::Renderer<B> where B: Backend + iced_graphics::backend::Text {}
+impl<B> WidgetRenderer for iced_graphics::Renderer<B>
+where
+    iced_graphics::Renderer<B>: iced_native::Renderer,
+    B: Backend, // + iced_graphics::backend::Text,
+{
+}

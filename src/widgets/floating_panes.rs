@@ -716,31 +716,42 @@ impl<'a, M: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a, M, R>
 
     fn draw(
         &self,
+        state: &iced_native::widget::Tree,
         renderer: &mut R,
-        defaults: &<R as iced_native::Renderer>::Defaults,
+        theme: &<R as iced_native::Renderer>::Theme,
+        style: &iced_native::renderer::Style,
         layout: Layout<'_>,
         cursor_position: Point,
         viewport: &Rectangle,
-    ) -> <R as iced_native::Renderer>::Output {
-        <R as WidgetRenderer>::draw(renderer, self, defaults, layout.into(), cursor_position, viewport)
+    ) {
+        <R as WidgetRenderer>::draw(
+            renderer,
+            self,
+            state,
+            theme,
+            style,
+            layout.into(),
+            cursor_position,
+            viewport,
+        )
     }
 
-    fn hash_layout(&self, state: &mut Hasher) {
-        struct Marker;
-        std::any::TypeId::of::<Marker>().hash(state);
+    // fn hash_layout(&self, state: &mut Hasher) {
+    //     struct Marker;
+    //     std::any::TypeId::of::<Marker>().hash(state);
 
-        self.state.hash(state);
-        self.width.hash(state);
-        self.height.hash(state);
-        self.extents.hash(state);
+    //     self.state.hash(state);
+    //     self.width.hash(state);
+    //     self.height.hash(state);
+    //     self.extents.hash(state);
 
-        for (_, child) in &self.children {
-            child.state.hash(state);
-            child.element_tree.hash_layout(state);
-        }
+    //     for (_, child) in &self.children {
+    //         child.state.hash(state);
+    //         child.element_tree.hash_layout(state);
+    //     }
 
-        C::hash_panes(&self, state);
-    }
+    //     C::hash_panes(&self, state);
+    // }
 
     fn on_event(
         &mut self,
@@ -765,7 +776,7 @@ impl<'a, M: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a, M, R>
         // TODO: Make it possible to bind keyboard/mouse buttons to pan regardless of whether the
         // cursor is on top of a pane.
         match &event {
-            Event::Mouse(MouseEvent::CursorMoved { x, y }) => {
+            Event::Mouse(mouse::Event::CursorMoved { position: Point { x, y } }) => {
                 self.state.cursor_position = [*x, *y].into();
 
                 match self.state.gesture.clone() {
@@ -919,8 +930,8 @@ pub trait WidgetRenderer:
     margin::WidgetRenderer
     + iced_native::Renderer
     + iced_native::text::Renderer
-    + iced_native::column::Renderer
-    + iced_native::widget::container::Renderer
+    // + iced_native::column::Renderer
+    // + iced_native::widget::container::Renderer
     + Sized
 {
     type StyleFloatingPane: StyleFloatingPaneBounds<Self>;
@@ -929,8 +940,10 @@ pub trait WidgetRenderer:
     fn draw<'a, M: 'a, C: 'a + FloatingPanesBehaviour<'a, M, Self>>(
         &mut self,
         element: &FloatingPanes<'a, M, Self, C>,
-        defaults: &Self::Defaults,
-        layout: FloatingPanesLayout<'_>,
+        state: &iced_native::widget::Tree,
+        theme: &<Self as iced_native::Renderer>::Theme,
+        style: &iced_native::renderer::Style,
+        layout: Layout<'_>,
         cursor_position: Point,
         viewport: &Rectangle,
     ) -> Self::Output;
@@ -966,9 +979,8 @@ where B: Backend + iced_graphics::backend::Text
                     .map(|style| style.style().background_color)
                     .unwrap_or(Color::TRANSPARENT),
             ),
-            border_radius: 0,
-            border_width: 0,
-            border_color: Color::BLACK,
+            border: iced::Border::default(),
+            shadow: iced::Shadow::default(),
         };
 
         let ContentDrawResult {
@@ -999,11 +1011,11 @@ pub trait StyleFloatingPaneBounds<R: WidgetRenderer> {
     fn root_container_style(
         &self,
         title_bar_status: InteractionStatus,
-    ) -> <R as iced_native::widget::container::Renderer>::Style;
+    ) -> <R as iced_native::widget::container::StyleSheet>::Style;
     fn content_container_style(
         &self,
         title_bar_status: InteractionStatus,
-    ) -> <R as iced_native::widget::container::Renderer>::Style;
+    ) -> <R as iced_native::widget::container::StyleSheet>::Style;
 }
 
 pub trait FloatingPaneStyleSheet {
@@ -1016,12 +1028,14 @@ where B: Backend + iced_graphics::backend::Text
     fn root_container_style(
         &self,
         title_bar_status: InteractionStatus,
-    ) -> Box<(dyn iced::container::StyleSheet + 'static)> {
+    ) -> Box<(dyn iced::widget::container::StyleSheet + 'static)> {
         struct StyleSheet(FloatingPaneStyle);
 
-        impl iced::container::StyleSheet for StyleSheet {
-            fn style(&self) -> iced::container::Style {
-                iced::container::Style {
+        impl iced::widget::container::StyleSheet for StyleSheet {
+            type Style = FloatingPaneStyle;
+
+            fn appearance(&self, style: &Self::Style) -> iced::widget::container::Appearance {
+                iced::widget::container::Appearance {
                     background: Some(Background::Color(self.0.title_background_color)),
                     text_color: Some(self.0.title_text_color),
                     ..Default::default()
@@ -1035,12 +1049,14 @@ where B: Backend + iced_graphics::backend::Text
     fn content_container_style(
         &self,
         title_bar_status: InteractionStatus,
-    ) -> Box<(dyn iced::container::StyleSheet + 'static)> {
+    ) -> Box<(dyn iced::widget::container::StyleSheet + 'static)> {
         struct StyleSheet(FloatingPaneStyle);
 
-        impl iced::container::StyleSheet for StyleSheet {
-            fn style(&self) -> iced::container::Style {
-                iced::container::Style {
+        impl iced::widget::container::StyleSheet for StyleSheet {
+            type Style = FloatingPaneStyle;
+
+            fn appearance(&self, style: &Self::Style) -> iced::widget::container::Appearance {
+                iced::widget::container::Appearance {
                     background: Some(Background::Color(self.0.body_background_color)),
                     ..Default::default()
                 }

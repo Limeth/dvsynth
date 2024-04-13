@@ -12,26 +12,32 @@ default = []
 debug = ["iced/debug"]
 
 [dependencies]
-iced = { git = "https://github.com/Limeth/iced.git", branch = "feature-event-handler", features = ["canvas"] }
-iced_graphics = { git = "https://github.com/Limeth/iced.git", branch = "feature-event-handler", features = ["canvas"] }
-iced_native = { git = "https://github.com/Limeth/iced.git", branch = "feature-event-handler" }
-iced_wgpu = { git = "https://github.com/Limeth/iced.git", branch = "feature-event-handler", features = ["canvas"] }
-iced_winit = { git = "https://github.com/Limeth/iced.git", branch = "feature-event-handler" }
-iced_futures = { git = "https://github.com/Limeth/iced.git", branch = "feature-event-handler" }
-arc-swap = "0.4.7"
+iced = { version = "0.12", features = ["canvas"] }
+iced_graphics = "0.12"
+iced_native = "0.10"
+iced_wgpu = "0.12"
+iced_winit = "0.12"
+iced_futures = "0.12"
+# iced = { git = "https://github.com/Limeth/iced.git", branch = "feature-event-handler", features = ["canvas"] }
+# iced_graphics = { git = "https://github.com/Limeth/iced.git", branch = "feature-event-handler", features = ["canvas"] }
+# iced_native = { git = "https://github.com/Limeth/iced.git", branch = "feature-event-handler" }
+# iced_wgpu = { git = "https://github.com/Limeth/iced.git", branch = "feature-event-handler", features = ["canvas"] }
+# iced_winit = { git = "https://github.com/Limeth/iced.git", branch = "feature-event-handler" }
+# iced_futures = { git = "https://github.com/Limeth/iced.git", branch = "feature-event-handler" }
+arc-swap = "1.7.1"
 byteorder = "1"
 downcast-rs = "1.2.0"
 dyn-clone = "1.0.3"
-flume = { version = "0.9.1", default-features = false }
-indexmap = "1.6"
-lyon_geom = "0.16"
-ordered-float = "2"
+flume = { version = "0.11.0", default-features = false }
+indexmap = "2.2.6"
+lyon_geom = "1.0.5"
+ordered-float = "4.2.0"
 paste = "1.0"
-petgraph = "0.5"
+petgraph = "0.6.4"
 roots = "*"
 smallvec = "1.4"
 static_assertions = "1.1.0"
-vek = "0.12"
+vek = "0.16.1"
 sharded-slab = "0.1.0"
 lazy_static = "1.4.0"
 crossbeam = "0.8.0"

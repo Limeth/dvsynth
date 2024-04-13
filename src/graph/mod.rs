@@ -20,7 +20,8 @@ use alloc::Allocator;
 use arc_swap::ArcSwapOption;
 use iced::{Element, Settings};
 use iced_futures::futures;
-use iced_wgpu::wgpu;
+use iced_wgpu::wgpu::{self, TextureFormat};
+use iced_winit::winit::window::Window;
 use petgraph::{stable_graph::StableGraph, visit::EdgeRef, Directed, Direction};
 use std::borrow::Cow;
 use std::collections::{hash_map::Entry, HashMap, HashSet};
@@ -878,39 +879,84 @@ impl DerefMut for ExecutionGraph {
 
 pub struct Renderer {
     pub instance: Arc<wgpu::Instance>,
+    pub adapter: Arc<wgpu::Adapter>,
     pub device: Arc<wgpu::Device>,
     pub queue: Arc<wgpu::Queue>,
+    pub surface_format: TextureFormat,
+    pub surface: Arc<wgpu::Surface<'static>>,
 }
 
 impl Renderer {
-    pub fn new(settings: &Settings<ApplicationFlags>) -> Self {
-        let instance = Arc::new(wgpu::Instance::new(wgpu::BackendBit::PRIMARY));
-        let (device, queue) = {
-            let adapter =
-                futures::executor::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-                    power_preference: if !settings.antialiasing {
-                        wgpu::PowerPreference::Default
-                    } else {
-                        wgpu::PowerPreference::HighPerformance
-                    },
-                    compatible_surface: None,
-                }))
-                .expect("No wgpu compatible adapter available.");
+    pub async fn new(settings: &Settings<ApplicationFlags>, window: Arc<Window>) -> Self {
+        let backends = wgpu::util::backend_bits_from_env().unwrap_or(wgpu::BackendBit::PRIMARY);
+        let instance =
+            Arc::new(wgpu::Instance::new(wgpu::InstanceDescriptor { backends, ..Default::default() }));
+        let surface = instance.create_surface(window.clone()).expect("Could not create surface.");
+        let adapter = wgpu::util::initialize_adapter_from_env_or_default(&instance, Some(&surface))
+            .await
+            .expect("Failed to create a WGPU adapter.");
+        // let adapter = instance
+        //     .request_adapter(&wgpu::RequestAdapterOptions {
+        //         power_preference: if !settings.antialiasing {
+        //             wgpu::PowerPreference::Default
+        //         } else {
+        //             wgpu::PowerPreference::HighPerformance
+        //         },
+        //         force_fallback_adapter: false,
+        //         compatible_surface: None,
+        //     })
+        //     .await
+        //     .expect("No wgpu compatible adapter available.");
 
-            let (device, queue) = futures::executor::block_on(adapter.request_device(
+        let adapter_features = adapter.features();
+        let required_limits = wgpu::Limits::default();
+        let capabilities = surface.get_capabilities(&adapter);
+
+        let (device, queue) = adapter
+            .request_device(
                 &wgpu::DeviceDescriptor {
-                    features: wgpu::Features::empty(),
-                    limits: wgpu::Limits { max_bind_groups: 2, ..wgpu::Limits::default() },
-                    shader_validation: false,
+                    label: None,
+                    required_features: adapter_features & wgpu::Features::default(),
+                    required_limits: required_limits,
+                    // features: wgpu::Features::empty(),
+                    // limits: wgpu::Limits { max_bind_groups: 2, ..wgpu::Limits::default() },
+                    // shader_validation: false,
                 },
                 None,
-            ))
+            )
+            .await
             .expect("No wgpu compatible device available.");
 
-            (Arc::new(device), Arc::new(queue))
-        };
+        let surface_format = capabilities
+            .formats
+            .iter()
+            .copied()
+            .find(wgpu::TextureFormat::is_srgb)
+            .or_else(|| capabilities.formats.first().copied())
+            .expect("Get preferred format");
 
-        Self { instance, device, queue }
+        surface.configure(
+            &device,
+            &wgpu::SurfaceConfiguration {
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                format: surface_format,
+                width: physical_size.width,
+                height: physical_size.height,
+                present_mode: wgpu::PresentMode::AutoVsync,
+                alpha_mode: wgpu::CompositeAlphaMode::Auto,
+                view_formats: vec![],
+                desired_maximum_frame_latency: 2,
+            },
+        );
+
+        Self {
+            instance,
+            adapter: Arc::new(adapter),
+            device: Arc::new(device),
+            queue: Arc::new(queue),
+            surface_format,
+            surface: Arc::new(surface),
+        }
     }
 }
 
@@ -943,8 +989,11 @@ impl ApplicationContext {
         (context, main_thread_task_receiver)
     }
 
-    pub fn from_settings(settings: &Settings<ApplicationFlags>) -> (Self, Receiver<Box<MainThreadTask>>) {
-        Self::new(Renderer::new(settings))
+    pub async fn from_settings(
+        settings: &Settings<ApplicationFlags>,
+        window: Arc<Window>,
+    ) -> (Self, Receiver<Box<MainThreadTask>>) {
+        Self::new(Renderer::new(settings, window).await)
     }
 }
 

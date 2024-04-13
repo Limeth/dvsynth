@@ -28,8 +28,9 @@ use graph::{
     ApplicationContext, ChannelIdentifier, Connection, EdgeData, ExecutionGraph, Graph, GraphExecutor,
     GraphValidationErrors, NodeData,
 };
-use iced::{window, Application, Command, Settings};
+use iced::{window, Application, Command, Pixels, Settings};
 use iced_winit::winit;
+use iced_winit::winit::window::Window;
 use node::behaviour::counter::CounterNodeBehaviour;
 use node::behaviour::*;
 use node::*;
@@ -78,10 +79,10 @@ pub struct ApplicationState {
     graph_validation_errors: GraphValidationErrors,
 }
 
-impl Application for ApplicationState {
-    type Executor = iced::executor::Default;
-    type Message = Message;
-    type Flags = ApplicationFlags; // The data needed to initialize your Application.
+impl ApplicationState {
+    // type Executor = iced::executor::Default;
+    // type Message = Message;
+    // type Flags = ApplicationFlags; // The data needed to initialize your Application.
 
     fn new(flags: ApplicationFlags) -> (Self, Command<Self::Message>) {
         (
@@ -246,20 +247,175 @@ fn main() {
         antialiasing: true,
         ..Settings::with_flags(ApplicationFlags { graph })
     };
-    let (execution_context, main_thread_task_receiver) = ApplicationContext::from_settings(&settings);
+    let event_loop = EventLoop::new().unwrap("Failed to create event loop.");
+    let window = Window::new(&event_loop);
+    let (execution_context, main_thread_task_receiver) =
+        ApplicationContext::from_settings(&settings, window.clone());
     let renderer_settings = iced_wgpu::Settings {
         default_font: settings.default_font,
         default_text_size: settings.default_text_size,
         // because anti-aliasing is enabled in the settings
         antialiasing: Some(iced_wgpu::Antialiasing::MSAAx4),
-        instance: Some(execution_context.renderer.instance.clone()),
-        device_queue: Some((
-            execution_context.renderer.device.clone(),
-            execution_context.renderer.queue.clone(),
-        )),
         ..iced_wgpu::Settings::default()
     };
     let _join_handle = GraphExecutor::spawn(execution_context, active_schedule);
+
+    let scene = Scene::new(&execution_context.renderer.device, execution_context.renderer.surface_format);
+    let mut iced_renderer = iced_wgpu::Renderer::new(
+        Backend::new(
+            &execution_context.renderer.device,
+            &execution_context.renderer.queue,
+            iced_wgpu::Settings::default(),
+            execution_context.renderer.surface_format,
+        ),
+        iced_wgpu::Font::default(),
+        Pixels(16.0),
+    );
+
+    // Main loop
+    {
+        let mut resized = false;
+
+        event_loop
+            .run(move |event, window_target| {
+                // You should change this if you want to render continuosly
+                window_target.set_control_flow(ControlFlow::Wait);
+
+                match event {
+                    Event::WindowEvent { event: WindowEvent::RedrawRequested, .. } => {
+                        if resized {
+                            let size = window.inner_size();
+
+                            viewport = Viewport::with_physical_size(
+                                Size::new(size.width, size.height),
+                                window.scale_factor(),
+                            );
+
+                            surface.configure(
+                                &device,
+                                &wgpu::SurfaceConfiguration {
+                                    format,
+                                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                                    width: size.width,
+                                    height: size.height,
+                                    present_mode: wgpu::PresentMode::AutoVsync,
+                                    alpha_mode: wgpu::CompositeAlphaMode::Auto,
+                                    view_formats: vec![],
+                                    desired_maximum_frame_latency: 2,
+                                },
+                            );
+
+                            resized = false;
+                        }
+
+                        match surface.get_current_texture() {
+                            Ok(frame) => {
+                                let mut encoder = device
+                                    .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+
+                                let program = state.program();
+
+                                let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+                                {
+                                    // We clear the frame
+                                    let mut render_pass =
+                                        Scene::clear(&view, &mut encoder, program.background_color());
+
+                                    // Draw the scene
+                                    scene.draw(&mut render_pass);
+                                }
+
+                                // And then iced on top
+                                renderer.with_primitives(|backend, primitive| {
+                                    backend.present(
+                                        &device,
+                                        &queue,
+                                        &mut encoder,
+                                        None,
+                                        frame.texture.format(),
+                                        &view,
+                                        primitive,
+                                        &viewport,
+                                        &debug.overlay(),
+                                    );
+                                });
+
+                                // Then we submit the work
+                                queue.submit(Some(encoder.finish()));
+                                frame.present();
+
+                                // Update the mouse cursor
+                                window.set_cursor_icon(iced_winit::conversion::mouse_interaction(
+                                    state.mouse_interaction(),
+                                ));
+                            }
+                            Err(error) => match error {
+                                wgpu::SurfaceError::OutOfMemory => {
+                                    panic!(
+                                        "Swapchain error: {error}. \
+                                Rendering cannot continue."
+                                    )
+                                }
+                                _ => {
+                                    // Try rendering again next frame.
+                                    window.request_redraw();
+                                }
+                            },
+                        }
+                    }
+                    Event::WindowEvent { event, .. } => {
+                        match event {
+                            WindowEvent::CursorMoved { position, .. } => {
+                                cursor_position = Some(position);
+                            }
+                            WindowEvent::ModifiersChanged(new_modifiers) => {
+                                modifiers = new_modifiers.state();
+                            }
+                            WindowEvent::Resized(_) => {
+                                resized = true;
+                            }
+                            WindowEvent::CloseRequested => {
+                                window_target.exit();
+                            }
+                            _ => {}
+                        }
+
+                        // Map window event to iced event
+                        if let Some(event) = iced_winit::conversion::window_event(
+                            window::Id::MAIN,
+                            event,
+                            window.scale_factor(),
+                            modifiers,
+                        ) {
+                            state.queue_event(event);
+                        }
+                    }
+                    _ => {}
+                }
+
+                // If there are events pending
+                if !state.is_queue_empty() {
+                    // We update iced
+                    let _ = state.update(
+                        viewport.logical_size(),
+                        cursor_position
+                            .map(|p| conversion::cursor_position(p, viewport.scale_factor()))
+                            .map(mouse::Cursor::Available)
+                            .unwrap_or(mouse::Cursor::Unavailable),
+                        &mut renderer,
+                        &Theme::Dark,
+                        &renderer::Style { text_color: Color::WHITE },
+                        &mut clipboard,
+                        &mut debug,
+                    );
+
+                    // and request a redraw
+                    window.request_redraw();
+                }
+            })
+            .unwrap();
+    }
 
     ApplicationState::run_with_event_handler_and_renderer_settings(
         settings,
