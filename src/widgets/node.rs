@@ -1,25 +1,24 @@
 use super::*;
 use crate::graph::{GraphValidationErrorAffectedElement, GraphValidationErrors};
 use crate::node::{ChannelPassBy, ChannelRef, ConnectionPassBy, NodeConfiguration, TypeEnum, TypeExt};
-use crate::style::InteractionStatus;
 use crate::util::{RectangleExt, Segments, StrokeType};
 use crate::{style, util, ChannelDirection, ChannelIdentifier, Connection};
-use iced::widget::canvas::{Fill, FillRule};
-use iced::widget::Space;
+use iced::alignment::Horizontal;
+use iced::mouse::Cursor;
+use iced::widget::canvas::{Fill, Frame};
+use iced::widget::{Column, Container, Row, Space};
 use iced::Size;
-use iced_graphics::canvas::{Frame, LineCap, LineJoin, Path, Stroke};
-use iced_graphics::{self, Backend, Primitive};
-use iced_runtime::event::Status;
-use iced_runtime::layout::{Layout, Limits, Node};
-use iced_runtime::mouse::{self, Button as MouseButton, Event as MouseEvent};
-use iced_runtime::widget::container::Container;
-use iced_runtime::widget::Widget;
-use iced_runtime::Color;
-use iced_runtime::{self, Align, Clipboard, Column, Event, Hasher, Length, Point, Rectangle, Row, Text};
-use iced_runtime::{
+use iced_core::event::Status;
+use iced_core::layout::{Layout, Limits, Node};
+use iced_core::mouse::{self, Button as MouseButton, Event as MouseEvent};
+use iced_core::widget::{Tree, Widget};
+use iced_core::{self, Clipboard, Event, Length, Point, Rectangle, Text};
+use iced_core::{
     overlay::{self, Overlay},
     Element,
 };
+use iced_core::{Color, Shell};
+use iced_graphics::geometry::{Path, Stroke};
 use lyon_geom::QuadraticBezierSegment;
 use ordered_float::OrderedFloat;
 use petgraph::graph::NodeIndex;
@@ -42,6 +41,7 @@ pub struct NodeElementBuilder<'a, M: 'a + Clone, R: 'a + WidgetRenderer> {
     index: NodeIndex,
     state: &'a mut NodeElementState,
     node_behaviour_element: Option<Element<'a, M, R>>,
+    // TODO: Change to Size
     width: Length,
     height: Length,
     input_channels: Vec<ChannelRef<'a>>,
@@ -52,12 +52,12 @@ pub struct NodeElementBuilder<'a, M: 'a + Clone, R: 'a + WidgetRenderer> {
 /// A widget specifically made to be used as the child of the [`FloatingPanes`] widget alongside the
 /// custom behaviour [`FloatingPanesBehaviour`] to function as a node graph editor.
 #[allow(dead_code)]
-pub struct NodeElement<'a, M: 'a + Clone, R: 'a + WidgetRenderer> {
+pub struct NodeElement<'a, M: 'a + Clone, T: 'a, R: 'a + WidgetRenderer> {
     index: NodeIndex,
     state: &'a mut NodeElementState,
     width: Length,
     height: Length,
-    element_tree: Element<'a, M, R>,
+    element_tree: Element<'a, M, T, R>,
 }
 
 impl<'a, M: 'a + Clone, R: 'a + WidgetRenderer> NodeElementBuilder<'a, M, R> {
@@ -129,7 +129,7 @@ impl<'a, M: 'a + Clone, R: 'a + WidgetRenderer> NodeElementBuilder<'a, M, R> {
                                     // input channels
                                     let mut column = Column::new()
                                         .spacing(style::consts::SPACING_VERTICAL)
-                                        .align_items(Align::Start);
+                                        .align_x(Horizontal::Left);
 
                                     for input_channel in &self.input_channels {
                                         column = column.push(input_channel.render());
@@ -142,7 +142,7 @@ impl<'a, M: 'a + Clone, R: 'a + WidgetRenderer> NodeElementBuilder<'a, M, R> {
                                     // output channels
                                     let mut column = Column::new()
                                         .spacing(style::consts::SPACING_VERTICAL)
-                                        .align_items(Align::End);
+                                        .align_x(Horizontal::Right);
 
                                     for output_channel in &self.output_channels {
                                         column = column.push(output_channel.render());
@@ -162,7 +162,7 @@ impl<'a, M: 'a + Clone, R: 'a + WidgetRenderer> NodeElementBuilder<'a, M, R> {
     }
 }
 
-impl<'a, M: 'a + Clone, R: 'a + WidgetRenderer> NodeElement<'a, M, R> {
+impl<'a, M: 'a + Clone, T: 'a, R: 'a + WidgetRenderer> NodeElement<'a, M, T, R> {
     pub fn builder(index: NodeIndex, state: &'a mut NodeElementState) -> NodeElementBuilder<'a, M, R> {
         NodeElementBuilder::new(index, state)
     }
@@ -225,13 +225,9 @@ impl<'a, M: 'a + Clone, R: 'a + WidgetRenderer> NodeElement<'a, M, R> {
     }
 }
 
-impl<'a, M: 'a + Clone, R: 'a + WidgetRenderer> Widget<M, R> for NodeElement<'a, M, R> {
-    fn width(&self) -> Length {
-        self.width
-    }
-
-    fn height(&self) -> Length {
-        self.height
+impl<'a, M: 'a + Clone, T: 'a, R: 'a + WidgetRenderer> Widget<M, T, R> for NodeElement<'a, M, T, R> {
+    fn size(&self) -> Size<iced::Length> {
+        Size::new(self.width, self.height)
     }
 
     fn layout(&self, renderer: &R, limits: &Limits) -> Node {
@@ -245,30 +241,27 @@ impl<'a, M: 'a + Clone, R: 'a + WidgetRenderer> Widget<M, R> for NodeElement<'a,
 
     fn draw(
         &self,
+        tree: &Tree,
         renderer: &mut R,
-        defaults: &<R as iced_runtime::Renderer>::Defaults,
+        theme: &T,
+        style: &iced_core::renderer::Style,
         layout: Layout<'_>,
-        cursor_position: Point,
+        cursor: mouse::Cursor,
         viewport: &Rectangle,
-    ) -> <R as iced_runtime::Renderer>::Output {
-        self.element_tree.draw(renderer, defaults, layout, cursor_position, viewport)
-    }
-
-    fn hash_layout(&self, state: &mut Hasher) {
-        struct Marker;
-        std::any::TypeId::of::<Marker>().hash(state);
-
-        self.element_tree.hash_layout(state);
+    ) {
+        self.element_tree.as_widget().draw(tree, renderer, theme, style, layout, cursor, viewport)
     }
 
     fn on_event(
         &mut self,
+        tree: &mut Tree,
         event: Event,
         layout: Layout<'_>,
-        cursor_position: Point,
-        messages: &mut Vec<M>,
+        cursor: Cursor,
         renderer: &R,
-        clipboard: Option<&dyn Clipboard>,
+        clipboard: &mut dyn Clipboard,
+        shell: &mut Shell<'_, M>,
+        viewport: &Rectangle,
     ) -> Status {
         self.element_tree.on_event(event, layout, cursor_position, messages, renderer, clipboard)
     }
@@ -278,7 +271,9 @@ impl<'a, M: 'a + Clone, R: 'a + WidgetRenderer> Widget<M, R> for NodeElement<'a,
     }
 }
 
-impl<'a, M: 'a + Clone, R: 'a + WidgetRenderer> From<NodeElement<'a, M, R>> for Element<'a, M, R> {
+impl<'a, M: 'a + Clone, T: 'a, R: 'a + WidgetRenderer> From<NodeElement<'a, M, T, R>>
+    for Element<'a, M, T, R>
+{
     fn from(other: NodeElement<'a, M, R>) -> Self {
         Element::new(other)
     }
@@ -324,7 +319,7 @@ impl<M: Clone, R: WidgetRenderer> FloatingPanesBehaviour<M, R> {
     }
 }
 
-impl<'a, M: Clone + 'a, R: 'a + WidgetRenderer> floating_panes::FloatingPanesBehaviour<'a, M, R>
+impl<'a, M: Clone + 'a, T: 'a, R: 'a + WidgetRenderer> floating_panes::FloatingPanesBehaviour<'a, M, T, R>
     for FloatingPanesBehaviour<M, R>
 {
     type FloatingPaneIndex = NodeIndex;
@@ -333,7 +328,7 @@ impl<'a, M: Clone + 'a, R: 'a + WidgetRenderer> floating_panes::FloatingPanesBeh
     type FloatingPanesBehaviourState = FloatingPanesBehaviourState;
 
     fn draw_panes(
-        panes: &FloatingPanes<'a, M, R, Self>,
+        panes: &FloatingPanes<'a, M, T, R, Self>,
         renderer: &mut R,
         defaults: &<R as iced_runtime::Renderer>::Defaults,
         layout: FloatingPanesLayout<'_>,
@@ -341,11 +336,6 @@ impl<'a, M: Clone + 'a, R: 'a + WidgetRenderer> floating_panes::FloatingPanesBeh
         viewport: &Rectangle,
     ) -> ContentDrawResult<R> {
         <R as WidgetRenderer>::draw_panes(renderer, panes, defaults, layout, cursor_position, viewport)
-    }
-
-    fn hash_panes(_panes: &FloatingPanes<'a, M, R, Self>, _state: &mut Hasher) {
-        // This implementation of [`floating_panes::FloatingPanesBehaviour`] does not influence the
-        // layout of the floating panes.
     }
 
     fn on_event(
@@ -358,7 +348,7 @@ impl<'a, M: Clone + 'a, R: 'a + WidgetRenderer> floating_panes::FloatingPanesBeh
         clipboard: Option<&dyn Clipboard>,
     ) -> Status {
         match event {
-            Event::Mouse(MouseEvent::CursorMoved { x, y }) => {
+            Event::Mouse(MouseEvent::CursorMoved { position: Point { x, y } }) => {
                 let cursor_position = Vec2::new(x, y);
 
                 panes.behaviour_state.highlight = None;
@@ -523,8 +513,10 @@ impl<'a, M: Clone + 'a, R: 'a + WidgetRenderer> floating_panes::FloatingPanesBeh
                     Self::on_event(
                         panes,
                         Event::Mouse(MouseEvent::CursorMoved {
-                            x: panes.state.cursor_position.x,
-                            y: panes.state.cursor_position.y,
+                            position: Point {
+                                x: panes.state.cursor_position.x,
+                                y: panes.state.cursor_position.y,
+                            },
                         }),
                         layout,
                         cursor_position,
@@ -602,10 +594,13 @@ impl<'a, M: Clone + 'a, R: 'a + WidgetRenderer> floating_panes::FloatingPanesBeh
             }
 
             let position: Point = panes.state.cursor_position.into_array().into();
-            let overlay =
-                WidgetOverlay::<M, R, _>::new(column, WidgetOverlayAlignment { top: true, left: false });
+            let overlay = WidgetOverlay::<M, R, _>::new(
+                column,
+                WidgetOverlayAlignment { top: true, left: false },
+                position,
+            );
 
-            return Some(overlay::Element::new(position, Box::new(overlay)));
+            return Some(overlay::Element::new(Box::new(overlay)));
         }
 
         panes
@@ -651,11 +646,8 @@ pub struct FloatingPanesBehaviourState {
 pub trait WidgetRenderer:
     margin::WidgetRenderer
     + floating_panes::WidgetRenderer
-    + iced_runtime::Renderer
-    + iced_runtime::text::Renderer
-    + iced_runtime::column::Renderer
-    + iced_runtime::widget::container::Renderer
-    + iced_runtime::widget::text_input::Renderer
+    + iced_core::Renderer
+    + iced_core::text::Renderer
     + Sized
 {
     type StyleTooltip: StyleTooltipBounds<Self>;
@@ -911,42 +903,33 @@ where B: Backend + iced_graphics::backend::Text
     }
 }
 
-pub trait StyleTooltipBounds<R: WidgetRenderer> {
-    fn container_style(&self) -> <R as iced_runtime::widget::container::Renderer>::Style;
-}
+// pub trait StyleTooltipBounds<R: WidgetRenderer> {
+//     fn container_style(&self) -> <R as iced_runtime::widget::container::Renderer>::Style;
+// }
 
-pub trait TooltipStyleSheet {
-    fn style(&self) -> TooltipStyle;
-}
+// pub trait TooltipStyleSheet {
+//     fn style(&self) -> TooltipStyle;
+// }
 
-impl<B> StyleTooltipBounds<iced_graphics::Renderer<B>> for Box<dyn TooltipStyleSheet>
-where B: Backend + iced_graphics::backend::Text
-{
-    fn container_style(&self) -> Box<(dyn iced::container::StyleSheet + 'static)> {
-        self.style().container
-    }
-}
+// impl<R> StyleTooltipBounds<R> for Box<dyn TooltipStyleSheet> {
+//     fn container_style(&self) -> Box<(dyn iced::container::StyleSheet + 'static)> {
+//         self.style().container
+//     }
+// }
 
-pub struct TooltipStyle {
-    pub container: Box<(dyn iced::container::StyleSheet + 'static)>,
-}
+// pub struct TooltipStyle {
+//     pub container: Box<(dyn iced::container::StyleSheet + 'static)>,
+// }
 
-fn draw_connection_point<M: Clone, B>(
-    panes: &FloatingPanes<
-        '_,
-        M,
-        iced_graphics::Renderer<B>,
-        FloatingPanesBehaviour<M, iced_graphics::Renderer<B>>,
-    >,
-    primitives: &mut Vec<Primitive>,
+fn draw_connection_point<M: Clone, R>(
+    panes: &FloatingPanes<'_, M, R, FloatingPanesBehaviour<M, R>>,
+    primitives: &mut Vec<PrimitiveEnum>,
     node_index: NodeIndex,
     position: Vec2<f32>,
     channel_pass_by: ChannelPassBy,
     highlighted: bool,
     error: bool,
-) where
-    B: Backend + iced_graphics::backend::Text,
-{
+) {
     let solid = channel_pass_by > ChannelPassBy::SharedReference;
     let (radius, mut color) =
         if highlighted { (5.0, Color::from_rgb(0.5, 1.0, 0.0)) } else { (3.5, Color::WHITE) };
@@ -1058,22 +1041,28 @@ pub struct WidgetOverlayAlignment {
     pub left: bool,
 }
 
-struct WidgetOverlay<M: Clone, R: WidgetRenderer, W: Widget<M, R>> {
+struct WidgetOverlay<M: Clone, T, R: WidgetRenderer, W: Widget<M, T, R>> {
     pub widget: W,
     pub alignment: WidgetOverlayAlignment,
-    __marker: PhantomData<(M, R)>,
+    pub position: Point,
+    __marker: PhantomData<(M, T, R)>,
 }
 
-impl<M: Clone, R: WidgetRenderer, W: Widget<M, R>> WidgetOverlay<M, R, W> {
-    pub fn new(widget: W, alignment: WidgetOverlayAlignment) -> Self {
-        Self { widget, alignment, __marker: Default::default() }
+impl<M: Clone, T, R: WidgetRenderer, W: Widget<M, T, R>> WidgetOverlay<M, T, R, W> {
+    pub fn new(widget: W, alignment: WidgetOverlayAlignment, position: Point) -> Self {
+        Self { widget, alignment, position, __marker: Default::default() }
+    }
+
+    pub fn tree(&self) -> Tree {
+        Tree::new(&self.widget)
     }
 }
 
-impl<M: Clone, R: WidgetRenderer, W: Widget<M, R>> Overlay<M, R> for WidgetOverlay<M, R, W> {
-    fn layout(&self, renderer: &R, bounds: Size, mut position: Point) -> Node {
-        let mut node = self.widget.layout(renderer, &Limits::new(Size::ZERO, bounds));
+impl<M: Clone, T, R: WidgetRenderer, W: Widget<M, T, R>> Overlay<M, T, R> for WidgetOverlay<M, T, R, W> {
+    fn layout(&mut self, renderer: &R, bounds: Size) -> Node {
+        let mut node = self.widget.layout(self.tree(), renderer, &Limits::new(Size::ZERO, bounds));
         let node_bounds = node.bounds();
+        let mut position = self.position;
 
         if self.alignment.left {
             position.x -= node_bounds.width;
@@ -1091,17 +1080,12 @@ impl<M: Clone, R: WidgetRenderer, W: Widget<M, R>> Overlay<M, R> for WidgetOverl
     fn draw(
         &self,
         renderer: &mut R,
-        defaults: &R::Defaults,
+        theme: &T,
+        style: &R::Style,
         layout: Layout<'_>,
-        cursor_position: Point,
+        cursor: Cursor,
     ) -> R::Output {
-        self.widget.draw(renderer, defaults, layout, cursor_position, &layout.bounds())
-    }
-
-    fn hash_layout(&self, state: &mut Hasher, position: Point) {
-        OrderedFloat::from(position.x).hash(state);
-        OrderedFloat::from(position.y).hash(state);
-        self.widget.hash_layout(state)
+        self.widget.draw(self.tree(), renderer, theme, style, layout, cursor, &layout.bounds())
     }
 }
 

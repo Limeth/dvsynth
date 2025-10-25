@@ -1,11 +1,9 @@
-use iced::Rectangle;
-use iced_graphics::Backend;
-use iced_runtime::event::Status;
-use iced_runtime::layout::{Layout, Limits, Node};
-use iced_runtime::widget::Widget;
-use iced_runtime::widget::{Column, Row, Space};
-use iced_runtime::{overlay, Element};
-use iced_runtime::{Clipboard, Event, Hasher, Length, Point};
+use iced::event::Status;
+use iced::widget::{Column, Row, Space};
+use iced::{Element, Event, Length, Point, Rectangle};
+use iced_core::layout::{Limits, Node};
+use iced_core::widget::Tree;
+use iced_core::{Clipboard, Layout, Renderer, Widget};
 
 #[derive(Default, PartialEq, Eq, Clone)]
 pub struct Spacing {
@@ -25,11 +23,11 @@ impl Spacing {
     }
 }
 
-pub struct Margin<'a, M, R: WidgetRenderer + 'a> {
-    child: Element<'a, M, R>,
+pub struct Margin<'a, M, T, R: WidgetRenderer + 'a> {
+    child: Element<'a, M, T, R>,
 }
 
-impl<'a, M: 'a, R: WidgetRenderer + 'a> Margin<'a, M, R> {
+impl<'a, M: 'a, T, R: WidgetRenderer + 'a> Margin<'a, M, T, R> {
     pub fn new(element: impl Into<Element<'a, M, R>>, spacing: Spacing) -> Self {
         if spacing == Spacing::default() {
             return Self { child: element.into() };
@@ -50,13 +48,9 @@ impl<'a, M: 'a, R: WidgetRenderer + 'a> Margin<'a, M, R> {
     }
 }
 
-impl<'a, M: 'a, T: Theme, R: WidgetRenderer + 'a> Widget<M, T, R> for Margin<'a, M, R> {
-    fn width(&self) -> Length {
-        self.child.width()
-    }
-
-    fn height(&self) -> Length {
-        self.child.height()
+impl<'a, M: 'a, T, R: WidgetRenderer + 'a> Widget<M, T, R> for Margin<'a, M, T, R> {
+    fn size(&self) -> iced::Size<iced::Length> {
+        self.child.size()
     }
 
     fn layout(&self, renderer: &R, limits: &Limits) -> Node {
@@ -65,10 +59,10 @@ impl<'a, M: 'a, T: Theme, R: WidgetRenderer + 'a> Widget<M, T, R> for Margin<'a,
 
     fn draw(
         &self,
-        state: &iced_runtime::widget::Tree,
+        state: &Tree,
         renderer: &mut R,
-        theme: &<R as iced_runtime::Renderer>::Theme,
-        style: &iced_runtime::renderer::Style,
+        theme: &T,
+        style: &R::Style,
         layout: Layout<'_>,
         cursor_position: Point,
         viewport: &Rectangle,
@@ -92,19 +86,20 @@ impl<'a, M: 'a, T: Theme, R: WidgetRenderer + 'a> Widget<M, T, R> for Margin<'a,
         self.child.on_event(event, layout, cursor_position, messages, renderer, clipboard)
     }
 
-    fn overlay(&mut self, layout: Layout<'_>) -> Option<overlay::Element<'_, M, R>> {
+    fn overlay(&mut self, layout: Layout<'_>) -> Option<Element<'_, M, R>> {
         self.child.overlay(layout)
     }
 }
 
-impl<'a, M: 'a, R: WidgetRenderer + 'a> From<Margin<'a, M, R>> for Element<'a, M, R> {
+impl<'a, M: 'a, T, R: WidgetRenderer + 'a> From<Margin<'a, M, T, R>> for Element<'a, M, R> {
     fn from(other: Margin<'a, M, R>) -> Self {
         Element::new(other)
     }
 }
 
+// TODO: Is this necessary?
 pub trait WidgetRenderer:
-    iced_runtime::Renderer
+    Renderer
     // + iced_runtime::space::Renderer
     // + iced_runtime::column::Renderer
     // + iced_runtime::row::Renderer
@@ -112,10 +107,10 @@ pub trait WidgetRenderer:
 {
 }
 
-impl WidgetRenderer for R
-where
-    R: iced_core::Renderer + iced_core::text::Renderer + iced_core::
-    iced_graphics::Renderer<B>: iced_runtime::Renderer,
-    B: Backend, // + iced_graphics::backend::Text,
-{
-}
+// impl WidgetRenderer for R
+// where
+//     R: iced_core::Renderer + iced_core::text::Renderer + iced_core::
+//     iced_graphics::Renderer<B>: iced_runtime::Renderer,
+//     B: Backend, // + iced_graphics::backend::Text,
+// {
+// }

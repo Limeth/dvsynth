@@ -1,26 +1,23 @@
 use crate::graph::ApplicationContext;
-use crate::{
-    node::{
-        behaviour::{
-            ExecutionContext, ExecutorClosure, NodeBehaviour, NodeCommand, NodeEvent, NodeStateClosure,
-        },
-        NodeConfiguration,
-    },
-    style::{Theme, Themeable},
+use crate::node::{
+    behaviour::{ExecutionContext, ExecutorClosure, NodeBehaviour, NodeCommand, NodeEvent, NodeStateClosure},
+    NodeConfiguration,
 };
 use flume::{self, Receiver};
 use iced::widget::checkbox::Checkbox;
 use iced::widget::text_input::{self, TextInput};
-use iced::{Column, Element, Row};
+use iced::Element;
+use iced_graphics::text::Paragraph;
 use iced_wgpu::wgpu;
 use iced_winit::winit;
+use iced_winit::winit::window::WindowAttributes;
 use std::borrow::Cow;
 use std::fmt::Debug;
 use std::sync::Arc;
 use vek::Vec2;
 use winit::dpi::PhysicalSize;
-use winit::event_loop::EventLoopWindowTarget;
-use winit::window::{Fullscreen, Window, WindowBuilder};
+use winit::event_loop::EventLoop;
+use winit::window::{Fullscreen, Window};
 
 #[derive(Clone)]
 pub enum WindowMessage {
@@ -70,8 +67,8 @@ impl Default for WindowSettings {
 }
 
 impl WindowSettings {
-    pub fn get_builder(&self) -> WindowBuilder {
-        WindowBuilder::new()
+    pub fn get_builder(&self) -> WindowAttributes {
+        WindowAttributes::default()
             .with_title(self.title.as_ref())
             .with_inner_size({
                 let inner_size = self.inner_size.map(|x| std::cmp::max(1, x));
@@ -137,10 +134,10 @@ impl WindowSettings {
 
 #[derive(Clone, Debug)]
 pub struct UiState {
-    title_state: text_input::State,
-    width_state: text_input::State,
+    title_state: text_input::State<Paragraph>,
+    width_state: text_input::State<Paragraph>,
     width_string: String,
-    height_state: text_input::State,
+    height_state: text_input::State<Paragraph>,
     height_string: String,
 }
 
@@ -349,13 +346,12 @@ impl NodeBehaviour for WindowNodeBehaviour {
                             // If the window creation task was not sent yet, send it.
                             let window_attributes = settings.get_builder().window;
                             let (window_sender, window_receiver) = flume::unbounded();
-                            let task =
-                                Box::new(move |window_target: &EventLoopWindowTarget<crate::Message>| {
-                                    let mut builder = WindowBuilder::new();
-                                    builder.window = window_attributes;
-                                    let window = builder.build(window_target).unwrap();
-                                    let _result = window_sender.send(window);
-                                });
+                            let task = Box::new(move |window_target: &EventLoop<crate::Message>| {
+                                let mut builder = WindowAttributes::default();
+                                builder.window = window_attributes;
+                                let window = builder.build(window_target).unwrap();
+                                let _result = window_sender.send(window);
+                            });
                             let _result = context.application_context.main_thread_task_sender.send(task);
                             persistent.window_receiver = Some(window_receiver);
                         }

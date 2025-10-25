@@ -14,6 +14,20 @@ pub mod consts {
     pub const SPACING: Spacing = Spacing::from_axes(SPACING_HORIZONTAL, SPACING_VERTICAL);
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash, PartialOrd, Ord)]
+pub enum InteractionStatus {
+    Idle,
+    Hovered,
+    Focused,
+}
+
+impl Default for InteractionStatus {
+    fn default() -> Self {
+        InteractionStatus::Idle
+    }
+}
+
+/*
 pub trait Themeable: Sized {
     fn theme(self, theme: &dyn Theme) -> Self;
 }
@@ -282,19 +296,6 @@ macro_rules! themes {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash, PartialOrd, Ord)]
-pub enum InteractionStatus {
-    Idle,
-    Hovered,
-    Focused,
-}
-
-impl Default for InteractionStatus {
-    fn default() -> Self {
-        InteractionStatus::Idle
-    }
-}
-
 impl<'a, M> Themeable for container::Container<'a, M> {
     fn theme(self, theme: &dyn Theme) -> Self {
         self.style(theme.container())
@@ -397,3 +398,4 @@ themes! {
         ];
     }
 }
+*/

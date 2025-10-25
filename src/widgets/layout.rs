@@ -1,4 +1,4 @@
-use iced_runtime::{Point, Rectangle};
+use iced_core::{Point, Rectangle};
 use std::fmt::Debug;
 
 pub trait TypedLayout: Clone + Copy + Debug {
@@ -33,14 +33,14 @@ macro_rules! typed_layout {
     } => {
         paste::item! {
             #[derive(Clone, Copy, Debug)]
-            pub struct [< $type_name Layout >]<'a>(::iced_runtime::Layout<'a>);
+            pub struct [< $type_name Layout >]<'a>(::iced_core::Layout<'a>);
 
             impl<'a> TypedLayout for [< $type_name Layout >]<'a> {
-                fn position(&self) -> ::iced_runtime::Point {
+                fn position(&self) -> ::iced_core::Point {
                     self.0.position()
                 }
 
-                fn bounds(&self) -> ::iced_runtime::Rectangle {
+                fn bounds(&self) -> ::iced_core::Rectangle {
                     self.0.bounds()
                 }
             }
@@ -53,13 +53,13 @@ macro_rules! typed_layout {
             //     }
             // }
 
-            impl<'a> From<::iced_runtime::Layout<'a>> for [< $type_name Layout >]<'a> {
-                fn from(layout: ::iced_runtime::Layout<'a>) -> Self {
+            impl<'a> From<::iced_core::Layout<'a>> for [< $type_name Layout >]<'a> {
+                fn from(layout: ::iced_core::Layout<'a>) -> Self {
                     Self(layout)
                 }
             }
 
-            impl<'a> From<[< $type_name Layout >]<'a>> for ::iced_runtime::Layout<'a> {
+            impl<'a> From<[< $type_name Layout >]<'a>> for ::iced_core::Layout<'a> {
                 fn from(layout: [< $type_name Layout >]<'a>) -> Self {
                     layout.0
                 }
@@ -72,7 +72,7 @@ macro_rules! typed_layout {
                             self,
                             $($traverse_fn_arg_name: $traverse_fn_arg_ty, )*
                         ) -> [< $type_name Layout >]<'a> {
-                            use ::iced_runtime::Layout;
+                            use ::iced_core::Layout;
                             // let [< $traverse_parent_type_name Layout >](parent) = self;
                             let parent = self.into();
                             let layout = ($traverse_fn)(parent, $($traverse_fn_arg_name, )*);

@@ -1,10 +1,9 @@
 use crate::graph::{ApplicationContext, NodeIndex};
 use crate::node::{BorrowedRef, BorrowedRefMut, DynTypeTrait, NodeConfiguration, OptionType};
-use crate::style::Theme;
 use downcast_rs::{impl_downcast, Downcast};
 use dyn_clone::DynClone;
 use iced::Element;
-use iced_winit::winit::event_loop::EventLoopWindowTarget;
+use iced_winit::winit::event_loop::EventLoop;
 use std::any::Any;
 use std::fmt::Debug;
 use std::marker::PhantomData;
@@ -271,7 +270,7 @@ pub struct ExecutionContext<'invocation, 'state: 'invocation> {
     pub outputs: &'invocation mut [BorrowedRefMut<'invocation, OptionType>], // [&mut Option<T>]
 }
 
-pub type MainThreadTask = dyn Send + FnOnce(&EventLoopWindowTarget<crate::Message>);
+pub type MainThreadTask = dyn Send + FnOnce(&EventLoop<crate::Message>);
 
 pub trait NodeBehaviourContainer: DynClone + std::fmt::Debug + Send + Sync + 'static {
     fn name(&self) -> &str;

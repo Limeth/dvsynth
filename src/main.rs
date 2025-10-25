@@ -28,7 +28,11 @@ use graph::{
     ApplicationContext, ChannelIdentifier, Connection, EdgeData, ExecutionGraph, Graph, GraphExecutor,
     GraphValidationErrors, NodeData,
 };
-use iced::{window, Application, Pixels, Settings};
+use iced::application::Title;
+use iced::{window, Application, Font, Pixels, Settings, Task};
+use iced_futures::Runtime;
+use iced_graphics::Antialiasing;
+use iced_wgpu::Engine;
 use iced_winit::winit;
 use iced_winit::winit::event_loop::EventLoop;
 use iced_winit::winit::window::Window;
@@ -43,7 +47,7 @@ pub mod util;
 
 pub mod graph;
 pub mod node;
-// pub mod style;
+pub mod style;
 pub mod widgets;
 
 #[derive(Debug, Clone)]
@@ -83,7 +87,7 @@ impl ApplicationState {
     // type Message = Message;
     // type Flags = ApplicationFlags; // The data needed to initialize your Application.
 
-    fn new(flags: ApplicationFlags) -> (Self, Command<Self::Message>) {
+    fn new(flags: ApplicationFlags) -> (Self, Task<Self::Message>) {
         (
             Self {
                 graph: flags.graph,
@@ -91,7 +95,7 @@ impl ApplicationState {
                 floating_panes_content_state: FloatingPanesBehaviourState::default(),
                 graph_validation_errors: Default::default(),
             },
-            Command::none(),
+            Task::none(),
         )
     }
 
@@ -99,7 +103,7 @@ impl ApplicationState {
         String::from("DVSynth")
     }
 
-    fn update(&mut self, message: Self::Message) -> Command<Self::Message> {
+    fn update(&mut self, message: Self::Message) -> Task<Self::Message> {
         let mut update_schedule = false;
 
         match message {
@@ -159,7 +163,7 @@ impl ApplicationState {
             }
         }
 
-        Command::none()
+        Task::none()
     }
 
     fn view(&mut self) -> iced::Element<Message> {
@@ -239,10 +243,10 @@ fn main() {
 
     let active_schedule = graph.active_schedule.clone();
     let settings = Settings {
-        window: window::Settings {
-            icon: None, // TODO
-            ..window::Settings::default()
-        },
+        // window: window::Settings {
+        //     icon: None, // TODO
+        //     ..window::Settings::default()
+        // },
         antialiasing: true,
         ..Settings::with_flags(ApplicationFlags { graph })
     };
@@ -259,19 +263,32 @@ fn main() {
     };
     let _join_handle = GraphExecutor::spawn(execution_context, active_schedule);
 
-    let scene = Scene::new(&execution_context.renderer.device, execution_context.renderer.surface_format);
+    let mut engine = Engine::new(
+        &execution_context.renderer.adapter,
+        &execution_context.renderer.device,
+        &execution_context.renderer.queue,
+        execution_context.renderer.surface_format,
+        Some(Antialiasing::MSAAx16),
+    );
     let mut iced_renderer = iced_wgpu::Renderer::new(
-        Backend::new(
+        Runtime::new(
             &execution_context.renderer.device,
             &execution_context.renderer.queue,
-            iced_wgpu::Settings::default(),
-            execution_context.renderer.surface_format,
+            // iced_wgpu::Settings::default(),
+            // execution_context.renderer.surface_format,
         ),
-        iced_wgpu::Font::default(),
+        &engine,
+        Font::DEFAULT,
         Pixels(16.0),
     );
 
+    iced::application(ApplicationState::title, ApplicationState::update, ApplicationState::view)
+        .subscription(ApplicationState::subscription)
+        .theme(ApplicationState::theme)
+        .run_with(|(x, y)| ApplicationState::new(ApplicationFlags { graph }));
+
     // Main loop
+    /*
     {
         let mut resized = false;
 
@@ -414,18 +431,18 @@ fn main() {
                 }
             })
             .unwrap();
-    }
+    } */
 
-    ApplicationState::run_with_event_handler_and_renderer_settings(
-        settings,
-        renderer_settings,
-        Some(Box::new(move |event, window_target, _control_flow| {
-            if event == winit::event::Event::MainEventsCleared {
-                for main_thread_task in main_thread_task_receiver.try_iter() {
-                    (main_thread_task)(window_target);
-                }
-            }
-        })),
-    )
-    .unwrap();
+    // ApplicationState::run_with_event_handler_and_renderer_settings(
+    //     settings,
+    //     renderer_settings,
+    //     Some(Box::new(move |event, window_target, _control_flow| {
+    //         if event == winit::event::Event::MainEventsCleared {
+    //             for main_thread_task in main_thread_task_receiver.try_iter() {
+    //                 (main_thread_task)(window_target);
+    //             }
+    //         }
+    //     })),
+    // )
+    // .unwrap();
 }
