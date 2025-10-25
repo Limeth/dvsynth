@@ -28,15 +28,14 @@ use graph::{
     ApplicationContext, ChannelIdentifier, Connection, EdgeData, ExecutionGraph, Graph, GraphExecutor,
     GraphValidationErrors, NodeData,
 };
-use iced::{window, Application, Command, Pixels, Settings};
+use iced::{window, Application, Pixels, Settings};
 use iced_winit::winit;
+use iced_winit::winit::event_loop::EventLoop;
 use iced_winit::winit::window::Window;
 use node::behaviour::counter::CounterNodeBehaviour;
 use node::behaviour::*;
 use node::*;
 use petgraph::graph::NodeIndex;
-use style::Themeable;
-use style::*;
 use widgets::*;
 
 #[macro_use]
@@ -44,7 +43,7 @@ pub mod util;
 
 pub mod graph;
 pub mod node;
-pub mod style;
+// pub mod style;
 pub mod widgets;
 
 #[derive(Debug, Clone)]
@@ -164,7 +163,7 @@ impl ApplicationState {
     }
 
     fn view(&mut self) -> iced::Element<Message> {
-        let theme: Box<dyn Theme> = Box::new(style::Dark);
+        // let theme: Box<dyn Theme> = Box::new(style::Dark);
         let node_indices = self.graph.node_indices().collect::<Vec<_>>();
         let connections = self.graph.get_connections();
 
@@ -247,7 +246,7 @@ fn main() {
         antialiasing: true,
         ..Settings::with_flags(ApplicationFlags { graph })
     };
-    let event_loop = EventLoop::new().unwrap("Failed to create event loop.");
+    let event_loop = EventLoop::new().expect("Failed to create event loop.");
     let window = Window::new(&event_loop);
     let (execution_context, main_thread_task_receiver) =
         ApplicationContext::from_settings(&settings, window.clone());
@@ -255,7 +254,7 @@ fn main() {
         default_font: settings.default_font,
         default_text_size: settings.default_text_size,
         // because anti-aliasing is enabled in the settings
-        antialiasing: Some(iced_wgpu::Antialiasing::MSAAx4),
+        antialiasing: Some(iced_graphics::Antialiasing::MSAAx4),
         ..iced_wgpu::Settings::default()
     };
     let _join_handle = GraphExecutor::spawn(execution_context, active_schedule);

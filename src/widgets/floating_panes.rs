@@ -1,18 +1,24 @@
 use super::*;
 use crate::style::InteractionStatus;
 use crate::util::RectangleExt;
+use iced_core::renderer::Quad;
 use iced_graphics::{self, Backend, Background, Color, Primitive, Rectangle};
-use iced_native::event::Status;
-use iced_native::layout::{Layout, Limits, Node};
-use iced_native::mouse::{self, Button as MouseButton, Event as MouseEvent};
-use iced_native::widget::{Container, Widget};
-use iced_native::{self, Clipboard, Column, Event, Hasher, Length, Point, Size, Text};
-use iced_native::{overlay, Element};
+use iced_runtime::event::Status;
+use iced_runtime::layout::{Layout, Limits, Node};
+use iced_runtime::mouse::{self, Button as MouseButton, Event as MouseEvent};
+use iced_runtime::widget::{Container, Widget};
+use iced_runtime::{self, Clipboard, Column, Event, Hasher, Length, Point, Size, Text};
+use iced_runtime::{overlay, Element};
 use indexmap::IndexMap;
 use ordered_float::OrderedFloat;
 use std::hash::Hash;
 use std::ops::{Deref, DerefMut};
 use vek::Vec2;
+
+pub enum PrimitiveEnum {
+    Quad(Quad),
+    Group(Vec<PrimitiveEnum>),
+}
 
 pub struct ContentDrawResult<R: WidgetRenderer> {
     pub override_parent_cursor: bool,
@@ -65,8 +71,8 @@ pub trait FloatingPanesBehaviour<'a, M: 'a, R: 'a + WidgetRenderer>: Sized {
 
 pub struct FloatingPanesBehaviourDefault;
 
-impl<'a, M: 'a, B: 'a + Backend + iced_graphics::backend::Text>
-    FloatingPanesBehaviour<'a, M, iced_graphics::Renderer<B>> for FloatingPanesBehaviourDefault
+impl<'a, M: 'a, R: 'a + iced_core::Renderer + iced_core::text::Renderer> FloatingPanesBehaviour<'a, M, R>
+    for FloatingPanesBehaviourDefault
 {
     type FloatingPaneIndex = u32;
     type FloatingPaneBehaviourData = ();
@@ -74,9 +80,9 @@ impl<'a, M: 'a, B: 'a + Backend + iced_graphics::backend::Text>
     type FloatingPanesBehaviourState = ();
 
     fn draw_panes(
-        panes: &FloatingPanes<'a, M, iced_graphics::Renderer<B>, Self>,
-        renderer: &mut iced_graphics::Renderer<B>,
-        defaults: &<iced_graphics::Renderer<B> as iced_native::Renderer>::Defaults,
+        panes: &FloatingPanes<'a, M, R, Self>,
+        renderer: &mut R,
+        defaults: &<R as iced_core::Renderer>::Defaults,
         layout: FloatingPanesLayout<'_>,
         cursor_position: Point,
         viewport: &Rectangle,
@@ -86,8 +92,8 @@ impl<'a, M: 'a, B: 'a + Backend + iced_graphics::backend::Text>
         ContentDrawResult {
             override_parent_cursor: false,
             output: (
-                Primitive::Group {
-                    primitives: panes
+                PrimitiveEnum::Group(
+                    panes
                         .children
                         .iter()
                         .zip(layout.panes())
@@ -107,7 +113,7 @@ impl<'a, M: 'a, B: 'a + Backend + iced_graphics::backend::Text>
                             primitive
                         })
                         .collect(),
-                },
+                ),
                 mouse_interaction,
             ),
         }
@@ -716,10 +722,10 @@ impl<'a, M: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a, M, R>
 
     fn draw(
         &self,
-        state: &iced_native::widget::Tree,
+        state: &iced_runtime::widget::Tree,
         renderer: &mut R,
-        theme: &<R as iced_native::Renderer>::Theme,
-        style: &iced_native::renderer::Style,
+        theme: &<R as iced_runtime::Renderer>::Theme,
+        style: &iced_runtime::renderer::Style,
         layout: Layout<'_>,
         cursor_position: Point,
         viewport: &Rectangle,
@@ -928,10 +934,11 @@ impl<'a, M: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a, M, R>
 /// is to be implemented on the specific `Renderer`.
 pub trait WidgetRenderer:
     margin::WidgetRenderer
-    + iced_native::Renderer
-    + iced_native::text::Renderer
-    // + iced_native::column::Renderer
-    // + iced_native::widget::container::Renderer
+    + iced_core::Renderer
+    + iced_runtime::Renderer
+    + iced_runtime::text::Renderer
+    // + iced_runtime::column::Renderer
+    // + iced_runtime::widget::container::Renderer
     + Sized
 {
     type StyleFloatingPane: StyleFloatingPaneBounds<Self>;
@@ -940,9 +947,9 @@ pub trait WidgetRenderer:
     fn draw<'a, M: 'a, C: 'a + FloatingPanesBehaviour<'a, M, Self>>(
         &mut self,
         element: &FloatingPanes<'a, M, Self, C>,
-        state: &iced_native::widget::Tree,
-        theme: &<Self as iced_native::Renderer>::Theme,
-        style: &iced_native::renderer::Style,
+        state: &iced_runtime::widget::Tree,
+        theme: &<Self as iced_runtime::Renderer>::Theme,
+        style: &iced_runtime::renderer::Style,
         layout: Layout<'_>,
         cursor_position: Point,
         viewport: &Rectangle,
@@ -1011,11 +1018,11 @@ pub trait StyleFloatingPaneBounds<R: WidgetRenderer> {
     fn root_container_style(
         &self,
         title_bar_status: InteractionStatus,
-    ) -> <R as iced_native::widget::container::StyleSheet>::Style;
+    ) -> <R as iced_runtime::widget::container::StyleSheet>::Style;
     fn content_container_style(
         &self,
         title_bar_status: InteractionStatus,
-    ) -> <R as iced_native::widget::container::StyleSheet>::Style;
+    ) -> <R as iced_runtime::widget::container::StyleSheet>::Style;
 }
 
 pub trait FloatingPaneStyleSheet {

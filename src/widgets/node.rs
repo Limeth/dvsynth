@@ -9,14 +9,14 @@ use iced::widget::Space;
 use iced::Size;
 use iced_graphics::canvas::{Frame, LineCap, LineJoin, Path, Stroke};
 use iced_graphics::{self, Backend, Primitive};
-use iced_native::event::Status;
-use iced_native::layout::{Layout, Limits, Node};
-use iced_native::mouse::{self, Button as MouseButton, Event as MouseEvent};
-use iced_native::widget::container::Container;
-use iced_native::widget::Widget;
-use iced_native::Color;
-use iced_native::{self, Align, Clipboard, Column, Event, Hasher, Length, Point, Rectangle, Row, Text};
-use iced_native::{
+use iced_runtime::event::Status;
+use iced_runtime::layout::{Layout, Limits, Node};
+use iced_runtime::mouse::{self, Button as MouseButton, Event as MouseEvent};
+use iced_runtime::widget::container::Container;
+use iced_runtime::widget::Widget;
+use iced_runtime::Color;
+use iced_runtime::{self, Align, Clipboard, Column, Event, Hasher, Length, Point, Rectangle, Row, Text};
+use iced_runtime::{
     overlay::{self, Overlay},
     Element,
 };
@@ -246,11 +246,11 @@ impl<'a, M: 'a + Clone, R: 'a + WidgetRenderer> Widget<M, R> for NodeElement<'a,
     fn draw(
         &self,
         renderer: &mut R,
-        defaults: &<R as iced_native::Renderer>::Defaults,
+        defaults: &<R as iced_runtime::Renderer>::Defaults,
         layout: Layout<'_>,
         cursor_position: Point,
         viewport: &Rectangle,
-    ) -> <R as iced_native::Renderer>::Output {
+    ) -> <R as iced_runtime::Renderer>::Output {
         self.element_tree.draw(renderer, defaults, layout, cursor_position, viewport)
     }
 
@@ -335,7 +335,7 @@ impl<'a, M: Clone + 'a, R: 'a + WidgetRenderer> floating_panes::FloatingPanesBeh
     fn draw_panes(
         panes: &FloatingPanes<'a, M, R, Self>,
         renderer: &mut R,
-        defaults: &<R as iced_native::Renderer>::Defaults,
+        defaults: &<R as iced_runtime::Renderer>::Defaults,
         layout: FloatingPanesLayout<'_>,
         cursor_position: Point,
         viewport: &Rectangle,
@@ -651,11 +651,11 @@ pub struct FloatingPanesBehaviourState {
 pub trait WidgetRenderer:
     margin::WidgetRenderer
     + floating_panes::WidgetRenderer
-    + iced_native::Renderer
-    + iced_native::text::Renderer
-    + iced_native::column::Renderer
-    + iced_native::widget::container::Renderer
-    + iced_native::widget::text_input::Renderer
+    + iced_runtime::Renderer
+    + iced_runtime::text::Renderer
+    + iced_runtime::column::Renderer
+    + iced_runtime::widget::container::Renderer
+    + iced_runtime::widget::text_input::Renderer
     + Sized
 {
     type StyleTooltip: StyleTooltipBounds<Self>;
@@ -912,7 +912,7 @@ where B: Backend + iced_graphics::backend::Text
 }
 
 pub trait StyleTooltipBounds<R: WidgetRenderer> {
-    fn container_style(&self) -> <R as iced_native::widget::container::Renderer>::Style;
+    fn container_style(&self) -> <R as iced_runtime::widget::container::Renderer>::Style;
 }
 
 pub trait TooltipStyleSheet {

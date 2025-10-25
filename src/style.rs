@@ -1,7 +1,8 @@
 use crate::util::rgb;
 use crate::widgets::{floating_panes, node};
 use crate::Spacing;
-use iced::{checkbox, container, pick_list, text_input, widget, Color};
+use iced::widget::{self, checkbox, container, pick_list, text_input};
+use iced::Color;
 
 pub mod consts {
     use super::*;

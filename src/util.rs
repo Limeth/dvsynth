@@ -1,18 +1,20 @@
 #![allow(dead_code)]
 
-use iced_graphics::canvas::{Fill, FillRule, Frame, Path};
-use iced_graphics::widget::canvas::path::Builder;
-use iced_graphics::{self, Primitive};
-use iced_native::layout::Layout;
-use iced_native::Color;
-use iced_native::{self, Background, Rectangle};
-use lyon_geom::{math::Point, LineSegment, QuadraticBezierSegment, Scalar, Segment};
+use iced::widget::canvas::{Fill, Frame, Path};
+use iced::{Border, Color, Rectangle};
+use iced_core::renderer::Quad;
+use iced_core::Layout;
+use iced_graphics::geometry::fill::Rule;
+use iced_graphics::geometry::path::Builder;
+use iced_graphics::geometry::Style;
+use lyon_geom::{LineSegment, Point, QuadraticBezierSegment, Scalar, Segment};
 use smallvec::{smallvec, Array, SmallVec};
 use std::borrow::Cow;
 use std::ops::Deref;
 use std::ops::DerefMut;
-use std::ops::Range;
 use vek::Vec2;
+
+use crate::widgets::PrimitiveEnum;
 
 pub enum StrokeType {
     Contiguous,
@@ -27,7 +29,7 @@ pub struct ProjectionResult {
 }
 
 pub trait ConnectionSegment {
-    type Flattened: Iterator<Item = Point>;
+    type Flattened: Iterator<Item = Point<f32>>;
 
     fn build_segment(&self, builder: &mut Builder);
     fn approx_length(&self) -> f32;
@@ -336,25 +338,26 @@ pub fn softminabs(abs_softness: f32, max_sharpness: f32, max: f32, x: f32) -> f3
     softmax(-max, max_sharpness, 0.0) - softmax(-max, max_sharpness, -softabs2(abs_softness, x))
 }
 
-pub fn draw_point(position: Vec2<f32>, color: Color, radius: f32) -> Primitive {
+pub fn draw_point<R>(renderer: &R, position: Vec2<f32>, color: Color, radius: f32) -> R::Geometry
+where R: iced_graphics::geometry::Renderer {
     let connection_point_center = radius + 1.0; // extra pixel for anti aliasing
     let frame_size = connection_point_center * 2.0;
-    let mut frame = Frame::new([frame_size, frame_size].into());
+    let mut frame = Frame::new(renderer, [frame_size, frame_size].into());
     let path = Path::new(|builder| {
         builder.circle([connection_point_center, connection_point_center].into(), radius);
     });
 
-    frame.fill(&path, Fill { color, rule: FillRule::NonZero });
+    frame.fill(&path, Fill { style: Style::Solid(color), rule: Rule::NonZero });
+    // TODO: This might need to be negated or placed before frame.fill? Or just translate the center
+    // before drawing the circle?
+    frame.translate(
+        (position - Vec2::new(connection_point_center, connection_point_center)).into_array().into(),
+    );
 
-    Primitive::Translate {
-        translation: (position - Vec2::new(connection_point_center, connection_point_center))
-            .into_array()
-            .into(),
-        content: Box::new(frame.into_geometry().into_primitive()),
-    }
+    frame.into_geometry()
 }
 
-pub fn draw_rectangle(rectangle: Rectangle<f32>, color: Color) -> Primitive {
+pub fn draw_rectangle(rectangle: Rectangle<f32>, color: Color) -> PrimitiveEnum {
     // let layout_position = Vector::new(layout.position().x, layout.position().y);
     // let layout_size = Vector::new(layout.bounds().size().width, layout.bounds().size().height);
 
@@ -370,16 +373,14 @@ pub fn draw_rectangle(rectangle: Rectangle<f32>, color: Color) -> Primitive {
     //         ),
     //     ],
     // }
-    Primitive::Quad {
+    PrimitiveEnum::Quad(Quad {
         bounds: rectangle,
-        background: Background::Color(Color::TRANSPARENT),
-        border_radius: 0,
-        border_width: 1,
-        border_color: color,
-    }
+        border: Border { radius: 0, width: 1, color },
+        shadow: None,
+    })
 }
 
-pub fn draw_bounds(layout: Layout<'_>, color: Color) -> Primitive {
+pub fn draw_bounds(layout: Layout<'_>, color: Color) -> PrimitiveEnum {
     draw_rectangle(layout.bounds(), color)
 }
 
@@ -409,7 +410,7 @@ pub trait RectangleExt: Sized {
     }
 }
 
-impl RectangleExt for Rectangle {
+impl RectangleExt for Rectangle<f32> {
     fn from_min_max(min: Vec2<f32>, max: Vec2<f32>) -> Self {
         Self::new(min.into_array().into(), (max - min).into_array().into())
     }
@@ -456,7 +457,7 @@ pub trait PathBuilderExt {
     fn line_segment_loop(&mut self, line_segments: &[Vec2<f32>]);
 }
 
-impl PathBuilderExt for iced_graphics::widget::canvas::path::Builder {
+impl PathBuilderExt for iced_graphics::geometry::path::Builder {
     fn line_segment_loop(&mut self, vertices: &[Vec2<f32>]) {
         if vertices.len() < 2 {
             return;

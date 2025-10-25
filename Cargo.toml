@@ -12,12 +12,13 @@ default = []
 debug = ["iced/debug"]
 
 [dependencies]
-iced = { version = "0.12", features = ["canvas"] }
-iced_graphics = "0.12"
-iced_native = "0.10"
-iced_wgpu = "0.12"
-iced_winit = "0.12"
-iced_futures = "0.12"
+iced = { version = "0.13", features = ["canvas"] }
+iced_graphics = "0.13"
+iced_runtime = "0.13"
+iced_wgpu = "0.13"
+iced_winit = "0.13"
+iced_futures = "0.13"
+iced_core = "0.13"
 # iced = { git = "https://github.com/Limeth/iced.git", branch = "feature-event-handler", features = ["canvas"] }
 # iced_graphics = { git = "https://github.com/Limeth/iced.git", branch = "feature-event-handler", features = ["canvas"] }
 # iced_native = { git = "https://github.com/Limeth/iced.git", branch = "feature-event-handler" }
@@ -37,7 +38,7 @@ petgraph = "0.6.4"
 roots = "*"
 smallvec = "1.4"
 static_assertions = "1.1.0"
-vek = "0.16.1"
+vek = "0.17.2"
 sharded-slab = "0.1.0"
 lazy_static = "1.4.0"
 crossbeam = "0.8.0"

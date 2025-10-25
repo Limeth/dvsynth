@@ -1,11 +1,11 @@
 use iced::Rectangle;
 use iced_graphics::Backend;
-use iced_native::event::Status;
-use iced_native::layout::{Layout, Limits, Node};
-use iced_native::widget::Widget;
-use iced_native::widget::{Column, Row, Space};
-use iced_native::{overlay, Element};
-use iced_native::{Clipboard, Event, Hasher, Length, Point};
+use iced_runtime::event::Status;
+use iced_runtime::layout::{Layout, Limits, Node};
+use iced_runtime::widget::Widget;
+use iced_runtime::widget::{Column, Row, Space};
+use iced_runtime::{overlay, Element};
+use iced_runtime::{Clipboard, Event, Hasher, Length, Point};
 
 #[derive(Default, PartialEq, Eq, Clone)]
 pub struct Spacing {
@@ -50,7 +50,7 @@ impl<'a, M: 'a, R: WidgetRenderer + 'a> Margin<'a, M, R> {
     }
 }
 
-impl<'a, M: 'a, R: WidgetRenderer + 'a> Widget<M, R> for Margin<'a, M, R> {
+impl<'a, M: 'a, T: Theme, R: WidgetRenderer + 'a> Widget<M, T, R> for Margin<'a, M, R> {
     fn width(&self) -> Length {
         self.child.width()
     }
@@ -65,10 +65,10 @@ impl<'a, M: 'a, R: WidgetRenderer + 'a> Widget<M, R> for Margin<'a, M, R> {
 
     fn draw(
         &self,
-        state: &iced_native::widget::Tree,
+        state: &iced_runtime::widget::Tree,
         renderer: &mut R,
-        theme: &<R as iced_native::Renderer>::Theme,
-        style: &iced_native::renderer::Style,
+        theme: &<R as iced_runtime::Renderer>::Theme,
+        style: &iced_runtime::renderer::Style,
         layout: Layout<'_>,
         cursor_position: Point,
         viewport: &Rectangle,
@@ -104,17 +104,18 @@ impl<'a, M: 'a, R: WidgetRenderer + 'a> From<Margin<'a, M, R>> for Element<'a, M
 }
 
 pub trait WidgetRenderer:
-    iced_native::Renderer
-    // + iced_native::space::Renderer
-    // + iced_native::column::Renderer
-    // + iced_native::row::Renderer
+    iced_runtime::Renderer
+    // + iced_runtime::space::Renderer
+    // + iced_runtime::column::Renderer
+    // + iced_runtime::row::Renderer
     + Sized
 {
 }
 
-impl<B> WidgetRenderer for iced_graphics::Renderer<B>
+impl WidgetRenderer for R
 where
-    iced_graphics::Renderer<B>: iced_native::Renderer,
+    R: iced_core::Renderer + iced_core::text::Renderer + iced_core::
+    iced_graphics::Renderer<B>: iced_runtime::Renderer,
     B: Backend, // + iced_graphics::backend::Text,
 {
 }
