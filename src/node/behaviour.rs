@@ -275,7 +275,7 @@ pub type MainThreadTask = dyn Send + FnOnce(&EventLoop<crate::Message>);
 pub trait NodeBehaviourContainer: DynClone + std::fmt::Debug + Send + Sync + 'static {
     fn name(&self) -> &str;
     fn update(&mut self, event: NodeEventContainer) -> Vec<NodeCommand>;
-    fn view(&mut self, theme: &dyn Theme) -> Option<Element<Box<dyn NodeBehaviourMessage>>>;
+    fn view(&mut self) -> Option<Element<Box<dyn NodeBehaviourMessage>>>;
     fn create_state<'state>(&self, context: &ApplicationContext) -> NodeStateContainer<'state>;
     fn update_state<'state>(&self, context: &ApplicationContext, state: &mut NodeStateContainer<'state>);
 }
@@ -288,7 +288,7 @@ pub trait NodeBehaviour: std::fmt::Debug + Clone + Send + Sync + 'static {
 
     fn name(&self) -> &str;
     fn update(&mut self, event: NodeEvent<Self::Message>) -> Vec<NodeCommand>;
-    fn view(&mut self, theme: &dyn Theme) -> Option<Element<Self::Message>>;
+    fn view(&mut self) -> Option<Element<Self::Message>>;
     fn create_state<'state>(&self, context: &ApplicationContext) -> Self::State<'state>;
 }
 
@@ -301,8 +301,8 @@ impl<T: NodeBehaviour> NodeBehaviourContainer for T {
         NodeBehaviour::update(self, NodeEvent::from_container(event).unwrap())
     }
 
-    fn view(&mut self, theme: &dyn Theme) -> Option<Element<Box<dyn NodeBehaviourMessage>>> {
-        NodeBehaviour::view(self, theme)
+    fn view(&mut self) -> Option<Element<Box<dyn NodeBehaviourMessage>>> {
+        NodeBehaviour::view(self)
             .map(|element| element.map(|message| Box::new(message) as Box<dyn NodeBehaviourMessage>))
     }
 

@@ -1,9 +1,11 @@
 use iced::event::Status;
+use iced::mouse::Cursor;
+use iced::overlay::Element;
 use iced::widget::{Column, Row, Space};
-use iced::{Element, Event, Length, Point, Rectangle};
+use iced::{Event, Length, Point, Rectangle, Vector};
 use iced_core::layout::{Limits, Node};
 use iced_core::widget::Tree;
-use iced_core::{Clipboard, Layout, Renderer, Widget};
+use iced_core::{Clipboard, Layout, Renderer, Shell, Widget};
 
 #[derive(Default, PartialEq, Eq, Clone)]
 pub struct Spacing {
@@ -53,7 +55,7 @@ impl<'a, M: 'a, T, R: WidgetRenderer + 'a> Widget<M, T, R> for Margin<'a, M, T, 
         self.child.size()
     }
 
-    fn layout(&self, renderer: &R, limits: &Limits) -> Node {
+    fn layout(&self, state: &mut Tree, renderer: &R, limits: &Limits) -> Node {
         self.child.layout(renderer, limits)
     }
 
@@ -62,12 +64,12 @@ impl<'a, M: 'a, T, R: WidgetRenderer + 'a> Widget<M, T, R> for Margin<'a, M, T, 
         state: &Tree,
         renderer: &mut R,
         theme: &T,
-        style: &R::Style,
+        style: &iced_core::renderer::Style,
         layout: Layout<'_>,
-        cursor_position: Point,
+        cursor: Cursor,
         viewport: &Rectangle,
     ) {
-        self.child.as_widget().draw(state, renderer, theme, style, layout, cursor_position, viewport)
+        self.child.as_widget().draw(state, renderer, theme, style, layout, cursor, viewport)
     }
 
     // fn hash_layout(&self, state: &mut Hasher) {
@@ -76,23 +78,31 @@ impl<'a, M: 'a, T, R: WidgetRenderer + 'a> Widget<M, T, R> for Margin<'a, M, T, 
 
     fn on_event(
         &mut self,
+        state: &mut Tree,
         event: Event,
         layout: Layout<'_>,
-        cursor_position: Point,
-        messages: &mut Vec<M>,
+        cursor: Cursor,
         renderer: &R,
-        clipboard: Option<&dyn Clipboard>,
+        clipboard: &mut dyn Clipboard,
+        shell: &mut Shell<'_, M>,
+        viewport: &Rectangle,
     ) -> Status {
-        self.child.on_event(event, layout, cursor_position, messages, renderer, clipboard)
+        self.child.on_event(event, layout, cursor, renderer, clipboard, shell)
     }
 
-    fn overlay(&mut self, layout: Layout<'_>) -> Option<Element<'_, M, R>> {
-        self.child.overlay(layout)
+    fn overlay<'b>(
+        &'b mut self,
+        state: &'b mut Tree,
+        layout: Layout<'_>,
+        renderer: &R,
+        translation: Vector,
+    ) -> Option<Element<'b, M, T, R>> {
+        self.child.overlay(layout, renderer)
     }
 }
 
-impl<'a, M: 'a, T, R: WidgetRenderer + 'a> From<Margin<'a, M, T, R>> for Element<'a, M, R> {
-    fn from(other: Margin<'a, M, R>) -> Self {
+impl<'a, M: 'a, T, R: WidgetRenderer + 'a> From<Margin<'a, M, T, R>> for Element<'a, M, T, R> {
+    fn from(other: Margin<'a, M, T, R>) -> Self {
         Element::new(other)
     }
 }

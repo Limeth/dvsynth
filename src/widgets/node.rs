@@ -1,13 +1,15 @@
 use super::*;
 use crate::graph::{GraphValidationErrorAffectedElement, GraphValidationErrors};
 use crate::node::{ChannelPassBy, ChannelRef, ConnectionPassBy, NodeConfiguration, TypeEnum, TypeExt};
+use crate::style::InteractionStatus;
 use crate::util::{RectangleExt, Segments, StrokeType};
 use crate::{style, util, ChannelDirection, ChannelIdentifier, Connection};
 use iced::alignment::Horizontal;
 use iced::mouse::Cursor;
+use iced::overlay::Element;
 use iced::widget::canvas::{Fill, Frame};
 use iced::widget::{Column, Container, Row, Space};
-use iced::Size;
+use iced::{Size, Vector};
 use iced_core::event::Status;
 use iced_core::layout::{Layout, Limits, Node};
 use iced_core::mouse::{self, Button as MouseButton, Event as MouseEvent};
@@ -27,7 +29,7 @@ use std::marker::PhantomData;
 use vek::Vec2;
 
 impl<'a> ChannelRef<'a> {
-    pub fn render<M: 'a + Clone, R: 'a + WidgetRenderer>(&self) -> Element<'a, M, R> {
+    pub fn render<M: 'a + Clone, T: 'a, R: 'a + WidgetRenderer>(&self) -> Element<'a, M, T, R> {
         Text::new(self.title.to_string()).size(style::consts::TEXT_SIZE_REGULAR).into()
     }
 }
@@ -37,10 +39,10 @@ pub struct NodeElementState {
     __marker: (), // prevent direct construction for future proofing
 }
 
-pub struct NodeElementBuilder<'a, M: 'a + Clone, R: 'a + WidgetRenderer> {
+pub struct NodeElementBuilder<'a, M: 'a + Clone, T: 'a, R: 'a + WidgetRenderer> {
     index: NodeIndex,
     state: &'a mut NodeElementState,
-    node_behaviour_element: Option<Element<'a, M, R>>,
+    node_behaviour_element: Option<Element<'a, M, T, R>>,
     // TODO: Change to Size
     width: Length,
     height: Length,
@@ -60,7 +62,7 @@ pub struct NodeElement<'a, M: 'a + Clone, T: 'a, R: 'a + WidgetRenderer> {
     element_tree: Element<'a, M, T, R>,
 }
 
-impl<'a, M: 'a + Clone, R: 'a + WidgetRenderer> NodeElementBuilder<'a, M, R> {
+impl<'a, M: 'a + Clone, T: 'a, R: 'a + WidgetRenderer> NodeElementBuilder<'a, M, T, R> {
     pub fn new(index: NodeIndex, state: &'a mut NodeElementState) -> Self {
         Self {
             index,
@@ -102,7 +104,7 @@ impl<'a, M: 'a + Clone, R: 'a + WidgetRenderer> NodeElementBuilder<'a, M, R> {
         self
     }
 
-    pub fn build(self) -> NodeElement<'a, M, R> {
+    pub fn build(self) -> NodeElement<'a, M, T, R> {
         NodeElement {
             index: self.index,
             state: self.state,
@@ -163,7 +165,7 @@ impl<'a, M: 'a + Clone, R: 'a + WidgetRenderer> NodeElementBuilder<'a, M, R> {
 }
 
 impl<'a, M: 'a + Clone, T: 'a, R: 'a + WidgetRenderer> NodeElement<'a, M, T, R> {
-    pub fn builder(index: NodeIndex, state: &'a mut NodeElementState) -> NodeElementBuilder<'a, M, R> {
+    pub fn builder(index: NodeIndex, state: &'a mut NodeElementState) -> NodeElementBuilder<'a, M, T, R> {
         NodeElementBuilder::new(index, state)
     }
 
@@ -218,7 +220,7 @@ impl<'a, M: 'a + Clone, T: 'a, R: 'a + WidgetRenderer> NodeElement<'a, M, T, R> 
     }
 
     pub fn get_layout_index_from_channel(
-        panes: &FloatingPanes<'a, M, R, FloatingPanesBehaviour<M, R>>,
+        panes: &FloatingPanes<'a, M, T, R, FloatingPanesBehaviour<M, R>>,
         channel: ChannelIdentifier,
     ) -> Option<usize> {
         panes.get_layout_index_from_pane_index(&channel.node_index)
@@ -230,7 +232,7 @@ impl<'a, M: 'a + Clone, T: 'a, R: 'a + WidgetRenderer> Widget<M, T, R> for NodeE
         Size::new(self.width, self.height)
     }
 
-    fn layout(&self, renderer: &R, limits: &Limits) -> Node {
+    fn layout(&self, state: &mut Tree, renderer: &R, limits: &Limits) -> Node {
         // let limits = limits
         //     .max_width(self.extents[0])
         //     .max_height(self.extents[1])
@@ -254,7 +256,7 @@ impl<'a, M: 'a + Clone, T: 'a, R: 'a + WidgetRenderer> Widget<M, T, R> for NodeE
 
     fn on_event(
         &mut self,
-        tree: &mut Tree,
+        state: &mut Tree,
         event: Event,
         layout: Layout<'_>,
         cursor: Cursor,
@@ -263,18 +265,26 @@ impl<'a, M: 'a + Clone, T: 'a, R: 'a + WidgetRenderer> Widget<M, T, R> for NodeE
         shell: &mut Shell<'_, M>,
         viewport: &Rectangle,
     ) -> Status {
-        self.element_tree.on_event(event, layout, cursor_position, messages, renderer, clipboard)
+        self.element_tree
+            .as_widget_mut()
+            .on_event(state, event, layout, cursor, renderer, clipboard, shell, viewport)
     }
 
-    fn overlay(&mut self, layout: Layout<'_>) -> Option<overlay::Element<'_, M, R>> {
-        self.element_tree.overlay(layout)
+    fn overlay(
+        &mut self,
+        state: &mut Tree,
+        layout: Layout<'_>,
+        renderer: &R,
+        translation: Vector,
+    ) -> Option<Element<'_, M, T, R>> {
+        self.element_tree.overlay(state, layout)
     }
 }
 
 impl<'a, M: 'a + Clone, T: 'a, R: 'a + WidgetRenderer> From<NodeElement<'a, M, T, R>>
     for Element<'a, M, T, R>
 {
-    fn from(other: NodeElement<'a, M, R>) -> Self {
+    fn from(other: NodeElement<'a, M, T, R>) -> Self {
         Element::new(other)
     }
 }
@@ -285,7 +295,8 @@ pub struct FloatingPanesBehaviour<M, R: WidgetRenderer> {
     pub connections: Vec<Connection>,
     // FIXME: Make it possible to store references instead of cloning
     pub graph_validation_errors: GraphValidationErrors,
-    pub tooltip_style: Option<<R as WidgetRenderer>::StyleTooltip>,
+    // pub tooltip_style: Option<<R as WidgetRenderer>::StyleTooltip>,
+    __marker: PhantomData<R>,
 }
 
 macro_rules! get_is_aliased {
@@ -298,8 +309,8 @@ macro_rules! get_is_aliased {
 
 impl<M: Clone, R: WidgetRenderer> FloatingPanesBehaviour<M, R> {
     /// A reflexive function to check whether two channels can be connected
-    fn can_connect<'a>(
-        panes: &FloatingPanes<'a, M, R, Self>,
+    fn can_connect<'a, T>(
+        panes: &FloatingPanes<'a, M, T, R, Self>,
         from: ChannelIdentifier,
         to: ChannelIdentifier,
     ) -> bool {
@@ -329,23 +340,27 @@ impl<'a, M: Clone + 'a, T: 'a, R: 'a + WidgetRenderer> floating_panes::FloatingP
 
     fn draw_panes(
         panes: &FloatingPanes<'a, M, T, R, Self>,
+        state: &Tree,
         renderer: &mut R,
-        defaults: &<R as iced_runtime::Renderer>::Defaults,
-        layout: FloatingPanesLayout<'_>,
-        cursor_position: Point,
+        theme: &T,
+        style: &iced_core::renderer::Style,
+        layout: Layout<'_>,
+        cursor: Cursor,
         viewport: &Rectangle,
-    ) -> ContentDrawResult<R> {
-        <R as WidgetRenderer>::draw_panes(renderer, panes, defaults, layout, cursor_position, viewport)
+    ) -> ContentDrawResult {
+        <R as WidgetRenderer>::draw_panes(renderer, panes, state, theme, style, layout, cursor, viewport)
     }
 
     fn on_event(
-        panes: &mut FloatingPanes<'a, M, R, Self>,
+        panes: &mut FloatingPanes<'a, M, T, R, Self>,
+        state: &mut Tree,
         event: Event,
-        layout: FloatingPanesLayout<'_>,
-        cursor_position: Point,
-        messages: &mut Vec<M>,
+        layout: Layout<'_>,
+        cursor: Cursor,
         renderer: &R,
-        clipboard: Option<&dyn Clipboard>,
+        clipboard: &mut dyn Clipboard,
+        shell: &mut Shell<'_, M>,
+        viewport: &Rectangle,
     ) -> Status {
         match event {
             Event::Mouse(MouseEvent::CursorMoved { position: Point { x, y } }) => {
@@ -512,6 +527,7 @@ impl<'a, M: Clone + 'a, T: 'a, R: 'a + WidgetRenderer> floating_panes::FloatingP
                     // Properly update the highlight
                     Self::on_event(
                         panes,
+                        state,
                         Event::Mouse(MouseEvent::CursorMoved {
                             position: Point {
                                 x: panes.state.cursor_position.x,
@@ -519,10 +535,11 @@ impl<'a, M: Clone + 'a, T: 'a, R: 'a + WidgetRenderer> floating_panes::FloatingP
                             },
                         }),
                         layout,
-                        cursor_position,
-                        messages,
+                        cursor,
                         renderer,
                         clipboard,
+                        shell,
+                        viewport,
                     );
                     return Status::Captured;
                 }
@@ -536,9 +553,12 @@ impl<'a, M: Clone + 'a, T: 'a, R: 'a + WidgetRenderer> floating_panes::FloatingP
     }
 
     fn overlay<'b>(
-        panes: &'b mut FloatingPanes<'a, M, R, Self>,
+        panes: &'b mut FloatingPanes<'a, M, T, R, Self>,
+        state: &'b mut Tree,
         layout: Layout<'_>,
-    ) -> Option<overlay::Element<'b, M, R>> {
+        renderer: &R,
+        translation: Vector,
+    ) -> Option<Element<'b, M, T, R>> {
         let mut errors = panes
             .behaviour_state
             .highlight
@@ -607,7 +627,7 @@ impl<'a, M: Clone + 'a, T: 'a, R: 'a + WidgetRenderer> floating_panes::FloatingP
             .children
             .iter_mut()
             .zip(layout.children())
-            .filter_map(|((_, pane), layout)| pane.element_tree.overlay(layout))
+            .filter_map(|((_, pane), layout)| pane.element_tree.overlay(state, layout))
             .next()
     }
 }
@@ -650,16 +670,18 @@ pub trait WidgetRenderer:
     + iced_core::text::Renderer
     + Sized
 {
-    type StyleTooltip: StyleTooltipBounds<Self>;
+    // type StyleTooltip: StyleTooltipBounds<Self>;
 
-    fn draw_panes<M: Clone>(
+    fn draw_panes<M: Clone, T>(
         &mut self,
-        panes: &FloatingPanes<'_, M, Self, FloatingPanesBehaviour<M, Self>>,
-        defaults: &Self::Defaults,
-        layout: FloatingPanesLayout<'_>,
-        cursor_position: Point,
+        panes: &FloatingPanes<'_, M, T, Self, FloatingPanesBehaviour<M, Self>>,
+        state: &Tree,
+        theme: &T,
+        style: &iced_core::renderer::Style,
+        layout: Layout<'_>,
+        cursor: Cursor,
         viewport: &Rectangle,
-    ) -> ContentDrawResult<Self>;
+    ) -> ContentDrawResult;
 }
 
 impl<B> WidgetRenderer for iced_graphics::Renderer<B>

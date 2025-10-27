@@ -1,20 +1,15 @@
 #![allow(dead_code)]
 
-use iced::widget::canvas::{Fill, Frame, Path};
-use iced::{Border, Color, Rectangle};
-use iced_core::renderer::Quad;
-use iced_core::Layout;
-use iced_graphics::geometry::fill::Rule;
+use iced::Color;
+use iced::Rectangle;
 use iced_graphics::geometry::path::Builder;
-use iced_graphics::geometry::Style;
-use lyon_geom::{LineSegment, Point, QuadraticBezierSegment, Scalar, Segment};
+use lyon_geom::{math::Point, LineSegment, QuadraticBezierSegment, Scalar, Segment};
 use smallvec::{smallvec, Array, SmallVec};
 use std::borrow::Cow;
 use std::ops::Deref;
 use std::ops::DerefMut;
+use std::ops::Range;
 use vek::Vec2;
-
-use crate::widgets::PrimitiveEnum;
 
 pub enum StrokeType {
     Contiguous,
@@ -29,7 +24,7 @@ pub struct ProjectionResult {
 }
 
 pub trait ConnectionSegment {
-    type Flattened: Iterator<Item = Point<f32>>;
+    type Flattened: Iterator<Item = Point>;
 
     fn build_segment(&self, builder: &mut Builder);
     fn approx_length(&self) -> f32;
@@ -338,26 +333,25 @@ pub fn softminabs(abs_softness: f32, max_sharpness: f32, max: f32, x: f32) -> f3
     softmax(-max, max_sharpness, 0.0) - softmax(-max, max_sharpness, -softabs2(abs_softness, x))
 }
 
-pub fn draw_point<R>(renderer: &R, position: Vec2<f32>, color: Color, radius: f32) -> R::Geometry
-where R: iced_graphics::geometry::Renderer {
+pub fn draw_point(position: Vec2<f32>, color: Color, radius: f32) -> Primitive {
     let connection_point_center = radius + 1.0; // extra pixel for anti aliasing
     let frame_size = connection_point_center * 2.0;
-    let mut frame = Frame::new(renderer, [frame_size, frame_size].into());
+    let mut frame = Frame::new([frame_size, frame_size].into());
     let path = Path::new(|builder| {
         builder.circle([connection_point_center, connection_point_center].into(), radius);
     });
 
-    frame.fill(&path, Fill { style: Style::Solid(color), rule: Rule::NonZero });
-    // TODO: This might need to be negated or placed before frame.fill? Or just translate the center
-    // before drawing the circle?
-    frame.translate(
-        (position - Vec2::new(connection_point_center, connection_point_center)).into_array().into(),
-    );
+    frame.fill(&path, Fill { color, rule: FillRule::NonZero });
 
-    frame.into_geometry()
+    Primitive::Translate {
+        translation: (position - Vec2::new(connection_point_center, connection_point_center))
+            .into_array()
+            .into(),
+        content: Box::new(frame.into_geometry().into_primitive()),
+    }
 }
 
-pub fn draw_rectangle(rectangle: Rectangle<f32>, color: Color) -> PrimitiveEnum {
+pub fn draw_rectangle(rectangle: Rectangle<f32>, color: Color) -> Primitive {
     // let layout_position = Vector::new(layout.position().x, layout.position().y);
     // let layout_size = Vector::new(layout.bounds().size().width, layout.bounds().size().height);
 
@@ -373,14 +367,16 @@ pub fn draw_rectangle(rectangle: Rectangle<f32>, color: Color) -> PrimitiveEnum 
     //         ),
     //     ],
     // }
-    PrimitiveEnum::Quad(Quad {
+    Primitive::Quad {
         bounds: rectangle,
-        border: Border { radius: 0, width: 1, color },
-        shadow: None,
-    })
+        background: Background::Color(Color::TRANSPARENT),
+        border_radius: 0,
+        border_width: 1,
+        border_color: color,
+    }
 }
 
-pub fn draw_bounds(layout: Layout<'_>, color: Color) -> PrimitiveEnum {
+pub fn draw_bounds(layout: Layout<'_>, color: Color) -> Primitive {
     draw_rectangle(layout.bounds(), color)
 }
 

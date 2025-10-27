@@ -1,23 +1,17 @@
-use crate::{
-    node::{
-        behaviour::{
-            ApplicationContext, ExecutionContext, ExecutorClosure, NodeBehaviour, NodeCommand, NodeEvent,
-            NodeStateClosure,
-        },
-        ArrayType, BytesRefExt, Channel, NodeConfiguration, OptionRefMutExt, PrimitiveType,
-        PrimitiveTypeEnum,
-    },
-    style::{self, Themeable},
-};
-use iced::pick_list::{self, PickList};
 use iced::{
-    button::{Button, State as ButtonState},
-    Element,
+    widget::{Button, PickList, Row, Text},
+    Alignment, Element, Length,
 };
-use iced::{Align, Length, Row, Text};
+
+use crate::node::{
+    behaviour::{
+        ApplicationContext, ExecutionContext, ExecutorClosure, NodeBehaviour, NodeCommand, NodeEvent,
+        NodeStateClosure,
+    },
+    ArrayType, BytesRefExt, Channel, NodeConfiguration, OptionRefMutExt, PrimitiveTypeEnum,
+};
 use std::io::{Cursor, Write};
 use std::num::NonZeroUsize;
-use style::Theme;
 
 #[derive(Debug, Clone)]
 pub enum ArrayConstructorNodeMessage {
@@ -30,20 +24,11 @@ pub enum ArrayConstructorNodeMessage {
 pub struct ArrayConstructorNodeBehaviour {
     ty: PrimitiveTypeEnum,
     channel_count: NonZeroUsize,
-    pick_list_state: pick_list::State<PrimitiveTypeEnum>,
-    button_add_state: ButtonState,
-    button_remove_state: ButtonState,
 }
 
 impl Default for ArrayConstructorNodeBehaviour {
     fn default() -> Self {
-        Self {
-            ty: PrimitiveTypeEnum::F32,
-            channel_count: unsafe { NonZeroUsize::new_unchecked(1) },
-            pick_list_state: Default::default(),
-            button_add_state: Default::default(),
-            button_remove_state: Default::default(),
-        }
+        Self { ty: PrimitiveTypeEnum::F32, channel_count: unsafe { NonZeroUsize::new_unchecked(1) } }
     }
 }
 
@@ -101,28 +86,24 @@ impl NodeBehaviour for ArrayConstructorNodeBehaviour {
     fn view(&mut self, theme: &dyn Theme) -> Option<Element<Self::Message>> {
         Some(
             Row::new()
-                .theme(theme)
                 .push(
-                    PickList::new(
-                        &mut self.pick_list_state,
-                        &PrimitiveTypeEnum::VALUES[..],
-                        Some(self.ty),
-                        |new_value| ArrayConstructorNodeMessage::UpdateType(new_value),
-                    )
+                    PickList::new(&PrimitiveTypeEnum::VALUES[..], Some(self.ty), |new_value| {
+                        ArrayConstructorNodeMessage::UpdateType(new_value)
+                    })
                     .theme(theme)
                     .width(Length::Units(64)),
                 )
                 .push(
-                    Button::new(&mut self.button_add_state, Text::new("+"))
+                    Button::new(Text::new("+"))
                         .width(Length::Fill)
                         .on_press(ArrayConstructorNodeMessage::AddChannel),
                 )
                 .push(
-                    Button::new(&mut self.button_remove_state, Text::new("-"))
+                    Button::new(Text::new("-"))
                         .width(Length::Fill)
                         .on_press(ArrayConstructorNodeMessage::RemoveChannel),
                 )
-                .align_items(Align::Center)
+                .align_y(Alignment::Center)
                 .width(Length::Fill)
                 .into(),
         )

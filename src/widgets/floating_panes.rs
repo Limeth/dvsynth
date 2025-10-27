@@ -10,7 +10,6 @@ use iced_core::layout::{Limits, Node};
 use iced_core::renderer::Quad;
 use iced_core::widget::Tree;
 use iced_core::{self, Clipboard, Event, Layout, Length, Point, Shell, Text, Widget};
-use iced_core::{overlay, Element};
 use iced_core::{Background, Color, Rectangle};
 use iced_winit::winit::event::MouseButton;
 use indexmap::IndexMap;
@@ -280,7 +279,7 @@ impl<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a
         self
     }
 
-    pub fn build(mut self) -> FloatingPane<'a, M, R, C> {
+    pub fn build(mut self) -> FloatingPane<'a, M, T, R, C> {
         FloatingPane {
             behaviour_data: self.behaviour_data,
             min_size: self.min_size,
@@ -673,7 +672,7 @@ impl<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a
     //     self
     // }
 
-    pub fn insert(mut self, index: C::FloatingPaneIndex, child: FloatingPane<'a, M, R, C>) -> Self {
+    pub fn insert(mut self, index: C::FloatingPaneIndex, child: FloatingPane<'a, M, T, R, C>) -> Self {
         self.children.insert(index, child.into());
         self
     }
@@ -960,7 +959,7 @@ impl<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a
         renderer: &R,
         translation: Vector,
     ) -> Option<Element<'b, M, T, R>> {
-        C::overlay(self, layout, renderer)
+        C::overlay(self, state, layout, renderer, translation)
     }
 }
 
@@ -1018,35 +1017,35 @@ where R: margin::WidgetRenderer + iced_core::Renderer + iced_core::text::Rendere
             .gesture
             .as_ref()
             .map(Gesture::get_mouse_interaction)
-            .unwrap_or(mouse::Interaction::default());
+            .unwrap_or(Interaction::default());
 
-        let background_primitive = Primitive::Quad {
+        let background_primitive = PrimitiveEnum::Quad(Quad {
             bounds: Rectangle::new(Point::ORIGIN, layout.bounds().size()),
-            background: Background::Color(
-                element
-                    .style
-                    .as_ref()
-                    .map(|style| style.style().background_color)
-                    .unwrap_or(Color::TRANSPARENT),
-            ),
+            // background: Background::Color(
+            //     element
+            //         .style
+            //         .as_ref()
+            //         .map(|style| style.style().background_color)
+            //         .unwrap_or(Color::TRANSPARENT),
+            // ),
             border: iced::Border::default(),
             shadow: iced::Shadow::default(),
-        };
+        });
 
         let ContentDrawResult {
             override_parent_cursor,
-            output: (panes_primitive, content_mouse_interaction),
+            // output: (panes_primitive, content_mouse_interaction),
         } = C::draw_panes(element, tree, self, theme, style, layout, cursor, viewport);
 
-        if override_parent_cursor {
-            mouse_interaction = content_mouse_interaction;
-        } else {
-            mouse_interaction = std::cmp::max(mouse_interaction, content_mouse_interaction);
-        };
+        // if override_parent_cursor {
+        //     mouse_interaction = content_mouse_interaction;
+        // } else {
+        //     mouse_interaction = std::cmp::max(mouse_interaction, content_mouse_interaction);
+        // };
 
-        let primitives = vec![background_primitive, panes_primitive];
+        // let primitives = vec![background_primitive, panes_primitive];
 
-        (Primitive::Group { primitives }, mouse_interaction)
+        (background_primitive /* Originally `primitives` */, mouse_interaction)
     }
 }
 

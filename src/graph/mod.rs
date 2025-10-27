@@ -8,7 +8,7 @@ use crate::node::{
     ChannelDirection, ChannelPassBy, ChannelRef, ConnectionPassBy, DynTypeTrait, NodeConfiguration,
     NodeStateRefcounter, OptionRefMutExt, RefAnyExt,
 };
-use crate::style::{self, consts, Theme, Themeable};
+use crate::style::{self, consts};
 use crate::widgets::{
     node::FloatingPanesBehaviour, FloatingPane, FloatingPaneBehaviourData, FloatingPaneBehaviourState,
     FloatingPaneState, NodeElement, NodeElementState,
@@ -20,7 +20,7 @@ use alloc::Allocator;
 use arc_swap::ArcSwapOption;
 use iced::{Element, Settings};
 use iced_futures::futures;
-use iced_wgpu::wgpu::{self, TextureFormat};
+use iced_wgpu::wgpu::{self, Backends, TextureFormat};
 use iced_winit::winit::window::Window;
 use petgraph::{stable_graph::StableGraph, visit::EdgeRef, Directed, Direction};
 use std::borrow::Cow;
@@ -888,7 +888,7 @@ pub struct Renderer {
 
 impl Renderer {
     pub async fn new(settings: &Settings<ApplicationFlags>, window: Arc<Window>) -> Self {
-        let backends = wgpu::util::backend_bits_from_env().unwrap_or(wgpu::BackendBit::PRIMARY);
+        let backends = wgpu::util::backend_bits_from_env().unwrap_or(Backends::PRIMARY);
         let instance =
             Arc::new(wgpu::Instance::new(wgpu::InstanceDescriptor { backends, ..Default::default() }));
         let surface = instance.create_surface(window.clone()).expect("Could not create surface.");
@@ -917,7 +917,7 @@ impl Renderer {
                 &wgpu::DeviceDescriptor {
                     label: None,
                     required_features: adapter_features & wgpu::Features::default(),
-                    required_limits: required_limits,
+                    required_limits,
                     // features: wgpu::Features::empty(),
                     // limits: wgpu::Limits { max_bind_groups: 2, ..wgpu::Limits::default() },
                     // shader_validation: false,
@@ -934,6 +934,7 @@ impl Renderer {
             .find(wgpu::TextureFormat::is_srgb)
             .or_else(|| capabilities.formats.first().copied())
             .expect("Get preferred format");
+        let physical_size = window.inner_size();
 
         surface.configure(
             &device,
@@ -963,7 +964,7 @@ impl Renderer {
 #[derive(Debug)]
 pub enum TextureAllocation {
     TextureView(wgpu::TextureView),
-    SwapchainFrame(wgpu::SwapChainFrame),
+    // SwapchainFrame(wgpu::SwapChainFrame),
 }
 
 impl Deref for TextureAllocation {
