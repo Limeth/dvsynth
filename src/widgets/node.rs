@@ -13,14 +13,11 @@ use iced::{Size, Vector};
 use iced_core::event::Status;
 use iced_core::layout::{Layout, Limits, Node};
 use iced_core::mouse::{self, Button as MouseButton, Event as MouseEvent};
+use iced_core::overlay::{self, Overlay};
 use iced_core::widget::{Tree, Widget};
 use iced_core::{self, Clipboard, Event, Length, Point, Rectangle, Text};
-use iced_core::{
-    overlay::{self, Overlay},
-    Element,
-};
 use iced_core::{Color, Shell};
-use iced_graphics::geometry::{Path, Stroke};
+use iced_graphics::geometry::{LineCap, LineDash, LineJoin, Path, Stroke, Style};
 use lyon_geom::QuadraticBezierSegment;
 use ordered_float::OrderedFloat;
 use petgraph::graph::NodeIndex;
@@ -684,26 +681,32 @@ pub trait WidgetRenderer:
     ) -> ContentDrawResult;
 }
 
-impl<B> WidgetRenderer for iced_graphics::Renderer<B>
-where B: Backend + iced_graphics::backend::Text
+impl<R> WidgetRenderer for R
+where R: margin::WidgetRenderer
+        + floating_panes::WidgetRenderer
+        + iced_core::Renderer
+        + iced_core::text::Renderer
+        + Sized
 {
-    type StyleTooltip = Box<dyn TooltipStyleSheet>;
+    // type StyleTooltip = Box<dyn TooltipStyleSheet>;
 
-    fn draw_panes<M: Clone>(
+    fn draw_panes<M: Clone, T>(
         &mut self,
-        panes: &FloatingPanes<'_, M, Self, FloatingPanesBehaviour<M, Self>>,
-        defaults: &Self::Defaults,
-        layout: FloatingPanesLayout<'_>,
-        cursor_position: Point,
+        panes: &FloatingPanes<'_, M, T, Self, FloatingPanesBehaviour<M, Self>>,
+        state: &Tree,
+        theme: &T,
+        style: &iced_core::renderer::Style,
+        layout: Layout<'_>,
+        cursor: Cursor,
         viewport: &Rectangle,
-    ) -> ContentDrawResult<Self> {
+    ) -> ContentDrawResult {
         let mut mouse_interaction = mouse::Interaction::default();
         let mut primitives = Vec::new();
 
         primitives.extend(panes.children.iter().zip(layout.panes()).map(
             |((_child_index, child), layout)| {
                 let (primitive, new_mouse_interaction) =
-                    child.element_tree.draw(self, defaults, layout.into(), cursor_position, viewport);
+                    child.element_tree.draw(self, theme, style, layout, cursor);
 
                 if new_mouse_interaction > mouse_interaction {
                     mouse_interaction = new_mouse_interaction;
@@ -713,7 +716,7 @@ where B: Backend + iced_graphics::backend::Text
             },
         ));
 
-        let mut frame = Frame::new(layout.bounds().size());
+        let mut frame = Frame::new(self, layout.bounds().size());
 
         // Highlight pane-related errors
         for ((node_index, _pane), pane_layout) in panes.children.iter().zip(layout.panes()) {
@@ -722,10 +725,11 @@ where B: Backend + iced_graphics::backend::Text
                 frame.stroke(
                     &Path::rectangle(layout_bounds.min().into_array().into(), layout_bounds.size()),
                     Stroke {
-                        color: Color::from_rgb(1.0, 0.0, 0.0),
+                        style: Style::Solid(Color::from_rgb(1.0, 0.0, 0.0)),
                         width: 2.0,
                         line_cap: LineCap::Square,
                         line_join: LineJoin::Miter,
+                        line_dash: Default::default(),
                     },
                 );
             }
@@ -767,17 +771,19 @@ where B: Backend + iced_graphics::backend::Text
             };
             let mut stroke = if highlighted {
                 Stroke {
-                    color: Color::from_rgba(0.5, 1.0, 0.0, 1.0),
+                    style: Style::Solid(Color::from_rgba(0.5, 1.0, 0.0, 1.0)),
                     width: 3.0,
                     line_cap: LineCap::Round,
                     line_join: LineJoin::Round,
+                    line_dash: Default::default(),
                 }
             } else {
                 Stroke {
-                    color: Color::from_rgba(1.0, 1.0, 1.0, 1.0),
+                    style: Style::Solid(Color::from_rgba(1.0, 1.0, 1.0, 1.0)),
                     width: 2.0,
                     line_cap: LineCap::Round,
                     line_join: LineJoin::Round,
+                    line_dash: Default::default(),
                 }
             };
 
@@ -865,10 +871,11 @@ where B: Backend + iced_graphics::backend::Text
             };
 
             let stroke = Stroke {
-                color: Color::from_rgba(1.0, 0.6, 0.0, 1.0),
+                style: Style::Solid(Color::from_rgba(1.0, 0.6, 0.0, 1.0)),
                 width: 3.0,
                 line_cap: LineCap::Round,
                 line_join: LineJoin::Round,
+                line_dash: Default::default(),
             };
 
             ConnectionCurve { from, to }.draw(&mut frame, stroke, connection_pass_by.get_stroke_type());
@@ -920,7 +927,7 @@ where B: Backend + iced_graphics::backend::Text
 
         ContentDrawResult {
             override_parent_cursor: panes.behaviour_state.highlight.is_some(),
-            output: (Primitive::Group { primitives }, mouse_interaction),
+            // output: (Primitive::Group { primitives }, mouse_interaction),
         }
     }
 }
@@ -943,8 +950,8 @@ where B: Backend + iced_graphics::backend::Text
 //     pub container: Box<(dyn iced::container::StyleSheet + 'static)>,
 // }
 
-fn draw_connection_point<M: Clone, R>(
-    panes: &FloatingPanes<'_, M, R, FloatingPanesBehaviour<M, R>>,
+fn draw_connection_point<M: Clone, T, R: WidgetRenderer>(
+    panes: &FloatingPanes<'_, M, T, R, FloatingPanesBehaviour<M, R>>,
     primitives: &mut Vec<PrimitiveEnum>,
     node_index: NodeIndex,
     position: Vec2<f32>,
@@ -1103,10 +1110,10 @@ impl<M: Clone, T, R: WidgetRenderer, W: Widget<M, T, R>> Overlay<M, T, R> for Wi
         &self,
         renderer: &mut R,
         theme: &T,
-        style: &R::Style,
+        style: &iced_core::renderer::Style,
         layout: Layout<'_>,
         cursor: Cursor,
-    ) -> R::Output {
+    ) {
         self.widget.draw(self.tree(), renderer, theme, style, layout, cursor, &layout.bounds())
     }
 }
