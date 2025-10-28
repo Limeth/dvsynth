@@ -7,15 +7,15 @@ use crate::{
         },
         Channel, NodeConfiguration, OptionRefMutExt, PrimitiveType, PrimitiveTypeEnum,
     },
-    style::{Theme, Themeable},
 };
 use byteorder::LittleEndian;
-use iced::{
+use iced::widget::{
     pick_list::{self, PickList},
     text_input::{self, TextInput},
-    Element,
+    Row,
 };
-use iced::{Align, Length, Row};
+use iced::{Alignment, Element, Length};
+use iced_graphics::text::Paragraph;
 use std::io::Cursor;
 
 #[derive(Debug, Clone)]
@@ -27,8 +27,7 @@ pub enum ConstantNodeMessage {
 #[derive(Clone, Debug)]
 pub struct ConstantNodeBehaviour {
     value: PrimitiveChannelValue,
-    pick_list_state: pick_list::State<PrimitiveTypeEnum>,
-    text_input_state: text_input::State,
+    text_input_state: text_input::State<Paragraph>,
     text_input_value: String,
     text_input_placeholder: String,
 }
@@ -37,7 +36,6 @@ impl Default for ConstantNodeBehaviour {
     fn default() -> Self {
         Self {
             value: PrimitiveTypeEnum::F32.default_value(),
-            pick_list_state: Default::default(),
             text_input_state: Default::default(),
             text_input_value: Default::default(),
             text_input_placeholder: PrimitiveTypeEnum::F32.default_value().value_to_string(),
@@ -101,31 +99,29 @@ impl NodeBehaviour for ConstantNodeBehaviour {
         }
     }
 
-    fn view(&mut self, theme: &dyn Theme) -> Option<Element<Self::Message>> {
+    fn view(&mut self /*, theme: &dyn Theme*/) -> Option<Element<Self::Message>> {
         Some(
             Row::new()
-                .theme(theme)
+                // .theme(theme)
                 .push(
-                    PickList::new(
-                        &mut self.pick_list_state,
-                        &PrimitiveTypeEnum::VALUES[..],
-                        Some(self.value.ty()),
-                        |new_value| ConstantNodeMessage::UpdateType(new_value),
-                    )
-                    .theme(theme)
-                    .width(Length::Units(64)),
+                    PickList::new(&PrimitiveTypeEnum::VALUES[..], Some(self.value.ty()), |new_value| {
+                        ConstantNodeMessage::UpdateType(new_value)
+                    })
+                    // .theme(theme)
+                    .width(Length::Fixed(64.0)),
                 )
                 .push(
                     TextInput::new(
-                        &mut self.text_input_state,
+                        // &mut self.text_input_state,
                         &self.text_input_placeholder,
                         &self.text_input_value,
-                        |new_raw_value| ConstantNodeMessage::UpdateValue(new_raw_value),
                     )
-                    .theme(theme)
+                    .on_input(|new_raw_value| ConstantNodeMessage::UpdateValue(new_raw_value))
+                    .on_paste(|new_raw_value| ConstantNodeMessage::UpdateValue(new_raw_value))
+                    // .theme(theme)
                     .width(Length::Fill),
                 )
-                .align_items(Align::Center)
+                .align_y(Alignment::Center)
                 .width(Length::Fill)
                 .into(),
         )

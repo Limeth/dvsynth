@@ -1,19 +1,17 @@
-use crate::{
-    node::{
-        behaviour::{
-            ApplicationContext, ExecutionContext, ExecutorClosure, NodeBehaviour, NodeCommand, NodeEvent,
-            NodeStateClosure,
-        },
-        BytesRefExt, Channel, NodeConfiguration, PrimitiveType, PrimitiveTypeEnum,
+use crate::node::{
+    behaviour::{
+        ApplicationContext, ExecutionContext, ExecutorClosure, NodeBehaviour, NodeCommand, NodeEvent,
+        NodeStateClosure,
     },
-    style::{Theme, Themeable},
+    BytesRefExt, Channel, NodeConfiguration, PrimitiveType, PrimitiveTypeEnum,
 };
 use byteorder::LittleEndian;
 use iced::{
-    pick_list::{self, PickList},
+    widget::pick_list::{self, PickList},
+    widget::Row,
     Element,
 };
-use iced::{Align, Length, Row};
+use iced::{Alignment, Length};
 
 #[derive(Debug, Clone)]
 pub enum DebugNodeMessage {
@@ -23,12 +21,11 @@ pub enum DebugNodeMessage {
 #[derive(Debug, Clone)]
 pub struct DebugNodeBehaviour {
     ty: PrimitiveTypeEnum,
-    pick_list_state: pick_list::State<PrimitiveTypeEnum>,
 }
 
 impl Default for DebugNodeBehaviour {
     fn default() -> Self {
-        Self { ty: PrimitiveTypeEnum::F32, pick_list_state: Default::default() }
+        Self { ty: PrimitiveTypeEnum::F32 }
     }
 }
 
@@ -63,21 +60,18 @@ impl NodeBehaviour for DebugNodeBehaviour {
         }
     }
 
-    fn view(&mut self, theme: &dyn Theme) -> Option<Element<Self::Message>> {
+    fn view(&mut self /*, theme: &dyn Theme*/) -> Option<Element<Self::Message>> {
         Some(
             Row::new()
-                .theme(theme)
+                // .theme(theme)
                 .push(
-                    PickList::new(
-                        &mut self.pick_list_state,
-                        &PrimitiveTypeEnum::VALUES[..],
-                        Some(self.ty),
-                        |new_value| DebugNodeMessage::UpdateType(new_value),
-                    )
-                    .theme(theme)
+                    PickList::new(&PrimitiveTypeEnum::VALUES[..], Some(self.ty), |new_value| {
+                        DebugNodeMessage::UpdateType(new_value)
+                    })
+                    // .theme(theme)
                     .width(Length::Fill),
                 )
-                .align_items(Align::Center)
+                .align_y(Alignment::Center)
                 .width(Length::Fill)
                 .into(),
         )

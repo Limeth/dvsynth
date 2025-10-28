@@ -1,16 +1,17 @@
 use crate::graph::ApplicationContext;
 use crate::node::{
-    behaviour::{ExecutionContext, ExecutorClosure, NodeBehaviour, NodeCommand, NodeEvent, NodeStateClosure},
     NodeConfiguration,
+    behaviour::{ExecutionContext, ExecutorClosure, NodeBehaviour, NodeCommand, NodeEvent, NodeStateClosure},
 };
 use flume::{self, Receiver};
+use iced::Element;
 use iced::widget::checkbox::Checkbox;
 use iced::widget::text_input::{self, TextInput};
-use iced::Element;
+use iced::widget::{Column, Row};
 use iced_graphics::text::Paragraph;
 use iced_wgpu::wgpu;
 use iced_winit::winit;
-use iced_winit::winit::window::WindowAttributes;
+use iced_winit::winit::window::{CursorGrabMode, WindowAttributes};
 use std::borrow::Cow;
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -38,7 +39,7 @@ pub struct WindowSettings {
     title: Cow<'static, str>,
     inner_size: Vec2<u32>,
     fullscreen: Option<Fullscreen>,
-    always_on_top: bool,
+    // always_on_top: bool,
     cursor_grab: bool,
     cursor_visible: bool,
     decorations: bool,
@@ -54,7 +55,7 @@ impl Default for WindowSettings {
             title: Cow::Borrowed("DVSynth Output Window"),
             inner_size: Vec2::new(800, 450),
             fullscreen: None,
-            always_on_top: false,
+            // always_on_top: false,
             cursor_grab: false,
             cursor_visible: true,
             decorations: true,
@@ -75,7 +76,7 @@ impl WindowSettings {
                 PhysicalSize::<u32>::from(inner_size.into_array())
             })
             .with_fullscreen(self.fullscreen.clone())
-            .with_always_on_top(self.always_on_top)
+            // .with_always_on_top(self.always_on_top) TODO: Add other newly supported attributes
             .with_decorations(self.decorations)
             .with_maximized(self.maximized)
             .with_resizable(self.resizable)
@@ -89,19 +90,28 @@ impl WindowSettings {
 
         if self.inner_size != new.inner_size {
             let inner_size = new.inner_size.map(|x| std::cmp::max(1, x));
-            window.set_inner_size(PhysicalSize::<u32>::from(inner_size.into_array()));
+            if let Some(actual_size) =
+                window.request_inner_size(PhysicalSize::<u32>::from(inner_size.into_array()))
+                && PhysicalSize::<u32>::from(inner_size.into_array()) != actual_size
+            {
+                // TODO: Use tracing.
+                println!("Failed to resize the window to a requested size.");
+            }
         }
 
         if self.fullscreen != new.fullscreen {
             window.set_fullscreen(new.fullscreen.clone());
         }
 
-        if self.always_on_top != new.always_on_top {
-            window.set_always_on_top(new.always_on_top);
-        }
+        // if self.always_on_top != new.always_on_top {
+        //     window.set_always_on_top(new.always_on_top);
+        // }
 
         if self.cursor_grab != new.cursor_grab {
-            let _result = window.set_cursor_grab(new.cursor_grab);
+            let _result = window.set_cursor_grab(match new.cursor_grab {
+                true => CursorGrabMode::Locked,
+                false => CursorGrabMode::None,
+            });
         }
 
         if self.cursor_visible != new.cursor_visible {
@@ -192,10 +202,10 @@ impl NodeBehaviour for WindowNodeBehaviour {
         }
     }
 
-    fn view(&mut self, theme: &dyn Theme) -> Option<Element<Self::Message>> {
+    fn view(&mut self /*, theme: &dyn Theme */) -> Option<Element<Self::Message>> {
         Some(
             Column::new()
-                .theme(theme)
+                // .theme(theme)
                 .push(
                     TextInput::new(
                         &mut self.ui_state.title_state,
@@ -208,12 +218,11 @@ impl NodeBehaviour for WindowNodeBehaviour {
                                 },
                             ))
                         },
-                    )
-                    .theme(theme),
+                    ), // .theme(theme),
                 )
                 .push(
                     Row::new()
-                        .theme(theme)
+                        // .theme(theme)
                         .push(
                             TextInput::new(
                                 &mut self.ui_state.width_state,
@@ -230,8 +239,7 @@ impl NodeBehaviour for WindowNodeBehaviour {
                                         },
                                     ))
                                 },
-                            )
-                            .theme(theme),
+                            ), // .theme(theme),
                         )
                         .push(
                             TextInput::new(
@@ -249,8 +257,7 @@ impl NodeBehaviour for WindowNodeBehaviour {
                                         },
                                     ))
                                 },
-                            )
-                            .theme(theme),
+                            ), // .theme(theme),
                         ),
                 )
                 .push(
@@ -258,64 +265,56 @@ impl NodeBehaviour for WindowNodeBehaviour {
                         WindowMessage::ModifyWindowSettings(Arc::new(
                             move |node: &mut WindowNodeBehaviour| node.settings.always_on_top = new_value,
                         ))
-                    })
-                    .theme(theme),
+                    }), // .theme(theme),
                 )
                 .push(
                     Checkbox::new(self.settings.cursor_grab, "Grab cursor", |new_value| {
                         WindowMessage::ModifyWindowSettings(Arc::new(
                             move |node: &mut WindowNodeBehaviour| node.settings.cursor_grab = new_value,
                         ))
-                    })
-                    .theme(theme),
+                    }), // .theme(theme),
                 )
                 .push(
                     Checkbox::new(self.settings.cursor_visible, "Cursor visible", |new_value| {
                         WindowMessage::ModifyWindowSettings(Arc::new(
                             move |node: &mut WindowNodeBehaviour| node.settings.cursor_visible = new_value,
                         ))
-                    })
-                    .theme(theme),
+                    }), // .theme(theme),
                 )
                 .push(
                     Checkbox::new(self.settings.decorations, "Decorations", |new_value| {
                         WindowMessage::ModifyWindowSettings(Arc::new(
                             move |node: &mut WindowNodeBehaviour| node.settings.decorations = new_value,
                         ))
-                    })
-                    .theme(theme),
+                    }), // .theme(theme),
                 )
                 .push(
                     Checkbox::new(self.settings.maximized, "Maximized", |new_value| {
                         WindowMessage::ModifyWindowSettings(Arc::new(
                             move |node: &mut WindowNodeBehaviour| node.settings.maximized = new_value,
                         ))
-                    })
-                    .theme(theme),
+                    }), // .theme(theme),
                 )
                 .push(
                     Checkbox::new(self.settings.minimized, "Minimized", |new_value| {
                         WindowMessage::ModifyWindowSettings(Arc::new(
                             move |node: &mut WindowNodeBehaviour| node.settings.minimized = new_value,
                         ))
-                    })
-                    .theme(theme),
+                    }), // .theme(theme),
                 )
                 .push(
                     Checkbox::new(self.settings.resizable, "Resizable", |new_value| {
                         WindowMessage::ModifyWindowSettings(Arc::new(
                             move |node: &mut WindowNodeBehaviour| node.settings.resizable = new_value,
                         ))
-                    })
-                    .theme(theme),
+                    }), // .theme(theme),
                 )
                 .push(
                     Checkbox::new(self.settings.visible, "Visible", |new_value| {
                         WindowMessage::ModifyWindowSettings(Arc::new(
                             move |node: &mut WindowNodeBehaviour| node.settings.visible = new_value,
                         ))
-                    })
-                    .theme(theme),
+                    }), // .theme(theme),
                 )
                 .into(),
         )

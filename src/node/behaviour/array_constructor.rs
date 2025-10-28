@@ -83,15 +83,15 @@ impl NodeBehaviour for ArrayConstructorNodeBehaviour {
         }
     }
 
-    fn view(&mut self, theme: &dyn Theme) -> Option<Element<Self::Message>> {
+    fn view(&mut self /*, theme: &dyn Theme*/) -> Option<Element<Self::Message>> {
         Some(
             Row::new()
                 .push(
                     PickList::new(&PrimitiveTypeEnum::VALUES[..], Some(self.ty), |new_value| {
                         ArrayConstructorNodeMessage::UpdateType(new_value)
                     })
-                    .theme(theme)
-                    .width(Length::Units(64)),
+                    // .theme(theme)
+                    .width(Length::Fixed(64.0)),
                 )
                 .push(
                     Button::new(Text::new("+"))

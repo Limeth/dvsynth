@@ -3,19 +3,18 @@ use crate::graph::{GraphValidationErrorAffectedElement, GraphValidationErrors};
 use crate::node::{ChannelPassBy, ChannelRef, ConnectionPassBy, NodeConfiguration, TypeEnum, TypeExt};
 use crate::style::InteractionStatus;
 use crate::util::{RectangleExt, Segments, StrokeType};
-use crate::{style, util, ChannelDirection, ChannelIdentifier, Connection};
+use crate::{ChannelDirection, ChannelIdentifier, Connection, style, util};
 use iced::alignment::Horizontal;
 use iced::mouse::Cursor;
-use iced::overlay::Element;
 use iced::widget::canvas::{Fill, Frame};
-use iced::widget::{Column, Container, Row, Space};
+use iced::widget::{Column, Container, Row, Space, Text};
 use iced::{Size, Vector};
 use iced_core::event::Status;
 use iced_core::layout::{Layout, Limits, Node};
 use iced_core::mouse::{self, Button as MouseButton, Event as MouseEvent};
 use iced_core::overlay::{self, Overlay};
 use iced_core::widget::{Tree, Widget};
-use iced_core::{self, Clipboard, Event, Length, Point, Rectangle, Text};
+use iced_core::{self, Clipboard, Element, Event, Length, Point, Rectangle, Text};
 use iced_core::{Color, Shell};
 use iced_graphics::geometry::{LineCap, LineDash, LineJoin, Path, Stroke, Style};
 use lyon_geom::QuadraticBezierSegment;
@@ -75,7 +74,7 @@ impl<'a, M: 'a + Clone, T: 'a, R: 'a + WidgetRenderer> NodeElementBuilder<'a, M,
 
     pub fn node_behaviour_element(
         mut self,
-        node_behaviour_element: impl Into<Option<Element<'a, M, R>>>,
+        node_behaviour_element: impl Into<Option<Element<'a, M, T, R>>>,
     ) -> Self {
         self.node_behaviour_element = node_behaviour_element.into();
         self
@@ -293,7 +292,7 @@ pub struct FloatingPanesBehaviour<M, R: WidgetRenderer> {
     // FIXME: Make it possible to store references instead of cloning
     pub graph_validation_errors: GraphValidationErrors,
     // pub tooltip_style: Option<<R as WidgetRenderer>::StyleTooltip>,
-    __marker: PhantomData<R>,
+    pub __marker: PhantomData<R>,
 }
 
 macro_rules! get_is_aliased {
@@ -474,8 +473,9 @@ impl<'a, M: Clone + 'a, T: 'a, R: 'a + WidgetRenderer> floating_panes::FloatingP
                     match highlight {
                         Highlight::Connection(highlighted_connection) => {
                             panes.behaviour_state.selected_channel = Some(highlighted_connection.from());
-                            messages
-                                .push((panes.behaviour.on_channel_disconnect)(highlighted_connection.to()));
+                            shell.publish((panes.behaviour.on_channel_disconnect)(
+                                highlighted_connection.to(),
+                            ));
                         }
                         Highlight::Channel(channel @ ChannelIdentifier { channel_direction, .. }) => {
                             let disconnect = match channel_direction {
@@ -487,7 +487,7 @@ impl<'a, M: Clone + 'a, T: 'a, R: 'a + WidgetRenderer> floating_panes::FloatingP
                             if let Some(selected_channel) = panes.behaviour_state.selected_channel.clone() {
                                 if FloatingPanesBehaviour::can_connect(panes, selected_channel, channel) {
                                     if disconnect {
-                                        messages.push((panes.behaviour.on_channel_disconnect)(channel));
+                                        shell.publish((panes.behaviour.on_channel_disconnect)(channel));
                                     }
 
                                     let channels = match selected_channel.channel_direction {
@@ -495,7 +495,7 @@ impl<'a, M: Clone + 'a, T: 'a, R: 'a + WidgetRenderer> floating_panes::FloatingP
                                         ChannelDirection::Out => [selected_channel, channel],
                                     };
 
-                                    messages.push((panes.behaviour.on_connection_create)(
+                                    shell.publish((panes.behaviour.on_connection_create)(
                                         Connection::try_from_identifiers(channels).unwrap(),
                                     ));
                                     panes.behaviour_state.selected_channel = None;
@@ -512,7 +512,7 @@ impl<'a, M: Clone + 'a, T: 'a, R: 'a + WidgetRenderer> floating_panes::FloatingP
                                             connection.channel(channel.channel_direction.inverse());
                                         panes.behaviour_state.selected_channel = Some(other_channel);
 
-                                        messages.push((panes.behaviour.on_channel_disconnect)(channel));
+                                        shell.publish((panes.behaviour.on_channel_disconnect)(channel));
                                     }
                                 } else {
                                     panes.behaviour_state.selected_channel = Some(channel);
@@ -662,6 +662,7 @@ pub struct FloatingPanesBehaviourState {
 /// is to be implemented on the specific `Renderer`.
 pub trait WidgetRenderer:
     margin::WidgetRenderer
+    + iced_graphics::geometry::Renderer
     + floating_panes::WidgetRenderer
     + iced_core::Renderer
     + iced_core::text::Renderer
@@ -683,6 +684,7 @@ pub trait WidgetRenderer:
 
 impl<R> WidgetRenderer for R
 where R: margin::WidgetRenderer
+        + iced_graphics::geometry::Renderer
         + floating_panes::WidgetRenderer
         + iced_core::Renderer
         + iced_core::text::Renderer
@@ -951,8 +953,8 @@ where R: margin::WidgetRenderer
 // }
 
 fn draw_connection_point<M: Clone, T, R: WidgetRenderer>(
+    renderer: &mut R,
     panes: &FloatingPanes<'_, M, T, R, FloatingPanesBehaviour<M, R>>,
-    primitives: &mut Vec<PrimitiveEnum>,
     node_index: NodeIndex,
     position: Vec2<f32>,
     channel_pass_by: ChannelPassBy,
@@ -967,13 +969,13 @@ fn draw_connection_point<M: Clone, T, R: WidgetRenderer>(
         color = Color::from_rgb(1.0, 0.0, 0.0);
     }
 
-    primitives.push(util::draw_point(position, color, radius));
+    util::draw_point(renderer, position, color, radius);
 
     if !solid {
         let pane = panes.children.get(&node_index).unwrap();
         let color = pane.style.as_ref().unwrap().style(style::InteractionStatus::Idle).body_background_color;
 
-        primitives.push(util::draw_point(position, color, radius * (2.0 / 3.0)));
+        util::draw_point(renderer, position, color, radius * (2.0 / 3.0));
     }
 }
 

@@ -1,21 +1,20 @@
 use crate::node::prelude::*;
-use crate::node::{BorrowedRef, BorrowedRefMut, ListDescriptor, ListType, OwnedRefMut, Unique};
-use crate::{
-    node::{
-        behaviour::{
-            ApplicationContext, ExecutionContext, ExecutorClosure, NodeBehaviour, NodeCommand, NodeEvent,
-            NodeStateClosure,
-        },
-        Channel, NodeConfiguration, PrimitiveType, PrimitiveTypeEnum,
+use crate::node::{
+    behaviour::{
+        ApplicationContext, ExecutionContext, ExecutorClosure, NodeBehaviour, NodeCommand, NodeEvent,
+        NodeStateClosure,
     },
-    style::{Theme, Themeable},
+    Channel, NodeConfiguration, PrimitiveType, PrimitiveTypeEnum,
 };
+use crate::node::{BorrowedRef, BorrowedRefMut, ListDescriptor, ListType, OwnedRefMut, Unique};
 use iced::{
-    button::{self, Button},
-    pick_list::{self, PickList},
-    Element, Text,
+    widget::button::{self, Button},
+    widget::pick_list::{self, PickList},
+    widget::Row,
+    widget::Text,
+    Element,
 };
-use iced::{Align, Length, Row};
+use iced::{Alignment, Length};
 use std::io::{Cursor, Write};
 use std::num::NonZeroUsize;
 
@@ -30,20 +29,11 @@ pub enum ListConstructorNodeMessage {
 pub struct ListConstructorNodeBehaviour {
     ty: PrimitiveTypeEnum,
     channel_count: NonZeroUsize,
-    pick_list_state: pick_list::State<PrimitiveTypeEnum>,
-    button_add_state: button::State,
-    button_remove_state: button::State,
 }
 
 impl Default for ListConstructorNodeBehaviour {
     fn default() -> Self {
-        Self {
-            ty: PrimitiveTypeEnum::F32,
-            channel_count: unsafe { NonZeroUsize::new_unchecked(1) },
-            pick_list_state: Default::default(),
-            button_add_state: Default::default(),
-            button_remove_state: Default::default(),
-        }
+        Self { ty: PrimitiveTypeEnum::F32, channel_count: unsafe { NonZeroUsize::new_unchecked(1) } }
     }
 }
 
@@ -99,31 +89,28 @@ impl NodeBehaviour for ListConstructorNodeBehaviour {
         }
     }
 
-    fn view(&mut self, theme: &dyn Theme) -> Option<Element<Self::Message>> {
+    fn view(&mut self /*, theme: &dyn Theme */) -> Option<Element<Self::Message>> {
         Some(
             Row::new()
-                .theme(theme)
+                // .theme(theme)
                 .push(
-                    PickList::new(
-                        &mut self.pick_list_state,
-                        &PrimitiveTypeEnum::VALUES[..],
-                        Some(self.ty),
-                        |new_value| ListConstructorNodeMessage::UpdateType(new_value),
-                    )
-                    .theme(theme)
-                    .width(Length::Units(64)),
+                    PickList::new(&PrimitiveTypeEnum::VALUES[..], Some(self.ty), |new_value| {
+                        ListConstructorNodeMessage::UpdateType(new_value)
+                    })
+                    // .theme(theme)
+                    .width(Length::Fixed(64.0)),
                 )
                 .push(
-                    Button::new(&mut self.button_add_state, Text::new("+"))
+                    Button::new(Text::new("+"))
                         .width(Length::Fill)
                         .on_press(ListConstructorNodeMessage::AddChannel),
                 )
                 .push(
-                    Button::new(&mut self.button_remove_state, Text::new("-"))
+                    Button::new(Text::new("-"))
                         .width(Length::Fill)
                         .on_press(ListConstructorNodeMessage::RemoveChannel),
                 )
-                .align_items(Align::Center)
+                .align_y(Alignment::Center)
                 .width(Length::Fill)
                 .into(),
         )

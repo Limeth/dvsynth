@@ -24,12 +24,15 @@
 //! * Display type tooltips when hovering over channels
 //!
 
+use std::collections::BTreeMap;
+use std::marker::PhantomData;
+
 use graph::{
     ApplicationContext, ChannelIdentifier, Connection, EdgeData, ExecutionGraph, Graph, GraphExecutor,
     GraphValidationErrors, NodeData,
 };
 use iced::application::Title;
-use iced::{window, Application, Font, Pixels, Settings, Task};
+use iced::{Application, Executor, Font, Pixels, Settings, Task, window};
 use iced_futures::Runtime;
 use iced_graphics::Antialiasing;
 use iced_wgpu::Engine;
@@ -57,6 +60,7 @@ pub enum NodeMessage {
 
 #[derive(Debug, Clone)]
 pub enum Message {
+    WindowOpened(window::Id),
     NodeMessage {
         node: NodeIndex<u32>,
         message: NodeMessage,
@@ -75,11 +79,14 @@ pub struct ApplicationFlags {
     graph: ExecutionGraph,
 }
 
+pub struct WindowHandle {}
+
 pub struct ApplicationState {
     graph: ExecutionGraph,
     floating_panes_state: FloatingPanesState,
     floating_panes_content_state: FloatingPanesBehaviourState,
     graph_validation_errors: GraphValidationErrors,
+    windows: BTreeMap<window::Id, WindowHandle>,
 }
 
 impl ApplicationState {
@@ -87,7 +94,9 @@ impl ApplicationState {
     // type Message = Message;
     // type Flags = ApplicationFlags; // The data needed to initialize your Application.
 
-    fn new(flags: ApplicationFlags) -> (Self, Task<Self::Message>) {
+    fn new(flags: ApplicationFlags) -> (Self, Task<Message>) {
+        let (_window_id, task_window_open) = window::open(window::Settings::default());
+
         (
             Self {
                 graph: flags.graph,
@@ -95,18 +104,27 @@ impl ApplicationState {
                 floating_panes_content_state: FloatingPanesBehaviourState::default(),
                 graph_validation_errors: Default::default(),
             },
-            Task::none(),
+            task_window_open.map(Message::WindowOpened),
         )
     }
 
-    fn title(&self) -> String {
-        String::from("DVSynth")
+    fn title(&self, window_id: window::Id) -> String {
+        format!("DVSynth Window #{window_id}")
     }
 
-    fn update(&mut self, message: Self::Message) -> Task<Self::Message> {
+    fn update(&mut self, message: Message) -> Task<Message> {
         let mut update_schedule = false;
+        let task = match message {
+            Message::WindowOpened(id) => {
+                let window = WindowHandle {};
+                // Focus an element:
+                // let focus_input = text_input::focus(format!("input-{id}"));
 
-        match message {
+                self.windows.insert(id, window);
+
+                // focus_input
+                Task::none()
+            }
             Message::NodeMessage { node, message } => {
                 match message {
                     NodeMessage::NodeBehaviourMessage(message) => {
@@ -117,6 +135,7 @@ impl ApplicationState {
                 }
 
                 update_schedule = true;
+                Task::none()
             }
             Message::DisconnectChannel { channel } => {
                 self.graph.retain_edges(|frozen, edge| {
@@ -138,6 +157,7 @@ impl ApplicationState {
                 });
 
                 update_schedule = true;
+                Task::none()
             }
             Message::InsertConnection { connection } => {
                 let from = connection.from();
@@ -150,9 +170,10 @@ impl ApplicationState {
                 );
 
                 update_schedule = true;
+                Task::none()
             }
-            Message::RecomputeLayout => (),
-        }
+            Message::RecomputeLayout => Task::none(),
+        };
 
         if update_schedule {
             if let Err(vec) = self.graph.update_schedule() {
@@ -163,10 +184,10 @@ impl ApplicationState {
             }
         }
 
-        Task::none()
+        task
     }
 
-    fn view(&mut self) -> iced::Element<Message> {
+    fn view(&self, window_id: window::Id) -> iced::Element<Message> {
         // let theme: Box<dyn Theme> = Box::new(style::Dark);
         let node_indices = self.graph.node_indices().collect::<Vec<_>>();
         let connections = self.graph.get_connections();
@@ -179,11 +200,12 @@ impl ApplicationState {
                 on_connection_create: |connection| Message::InsertConnection { connection },
                 connections,
                 graph_validation_errors: self.graph_validation_errors.clone(),
-                tooltip_style: Some(theme.tooltip()),
+                // tooltip_style: Some(theme.tooltip()),
+                __marker: PhantomData,
             },
             Box::new(|| Message::RecomputeLayout),
-        )
-        .theme(&*theme);
+        );
+        // .theme(&*theme);
 
         for (node_index, node_data) in node_indices.iter().zip(self.graph.node_weights_mut()) {
             panes = panes.insert(*node_index, node_data.view(*node_index, theme.as_ref()));
@@ -193,7 +215,8 @@ impl ApplicationState {
     }
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let graph: ExecutionGraph = {
         let mut graph = Graph::new();
 
@@ -251,9 +274,8 @@ fn main() {
         ..Settings::with_flags(ApplicationFlags { graph })
     };
     let event_loop = EventLoop::new().expect("Failed to create event loop.");
-    let window = Window::new(&event_loop);
     let (execution_context, main_thread_task_receiver) =
-        ApplicationContext::from_settings(&settings, window.clone());
+        ApplicationContext::from_settings(&settings, window.clone()).await;
     let renderer_settings = iced_wgpu::Settings {
         default_font: settings.default_font,
         default_text_size: settings.default_text_size,
@@ -282,10 +304,10 @@ fn main() {
         Pixels(16.0),
     );
 
-    iced::application(ApplicationState::title, ApplicationState::update, ApplicationState::view)
-        .subscription(ApplicationState::subscription)
-        .theme(ApplicationState::theme)
-        .run_with(|(x, y)| ApplicationState::new(ApplicationFlags { graph }));
+    iced::daemon(ApplicationState::title, ApplicationState::update, ApplicationState::view)
+        // .subscription(ApplicationState::subscription)
+        // .theme(ApplicationState::theme)
+        .run_with(|| ApplicationState::new(ApplicationFlags { graph }));
 
     // Main loop
     /*

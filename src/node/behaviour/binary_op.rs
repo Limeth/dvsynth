@@ -1,20 +1,14 @@
 use crate::node::PrimitiveChannelValue;
-use crate::{
-    node::{
-        behaviour::{
-            ApplicationContext, ExecutionContext, ExecutorClosure, NodeBehaviour, NodeCommand, NodeEvent,
-            NodeStateClosure,
-        },
-        BytesRefExt, Channel, NodeConfiguration, OptionRefMutExt, PrimitiveType, PrimitiveTypeEnum,
+use crate::node::{
+    behaviour::{
+        ApplicationContext, ExecutionContext, ExecutorClosure, NodeBehaviour, NodeCommand, NodeEvent,
+        NodeStateClosure,
     },
-    style::{Theme, Themeable},
+    BytesRefExt, Channel, NodeConfiguration, OptionRefMutExt, PrimitiveType, PrimitiveTypeEnum,
 };
 use byteorder::LittleEndian;
-use iced::{
-    pick_list::{self, PickList},
-    Element,
-};
-use iced::{Align, Container, Length, Row};
+use iced::widget::{pick_list, Container, PickList, Row};
+use iced::{Alignment, Element, Length};
 use std::io::Cursor;
 use std::ops::{Add, Div, Mul, Sub};
 
@@ -26,20 +20,13 @@ pub enum BinaryOpMessage {
 
 #[derive(Clone, Debug)]
 pub struct BinaryOpNodeBehaviour {
-    pub pick_list_ty_state: pick_list::State<PrimitiveTypeEnum>,
     pub pick_list_ty_value: PrimitiveTypeEnum,
-    pub pick_list_op_state: pick_list::State<BinaryOp>,
     pub op: BinaryOp,
 }
 
 impl Default for BinaryOpNodeBehaviour {
     fn default() -> Self {
-        Self {
-            op: BinaryOp::Add,
-            pick_list_ty_state: Default::default(),
-            pick_list_ty_value: PrimitiveTypeEnum::F32,
-            pick_list_op_state: Default::default(),
-        }
+        Self { op: BinaryOp::Add, pick_list_ty_value: PrimitiveTypeEnum::F32 }
     }
 }
 
@@ -80,20 +67,19 @@ impl NodeBehaviour for BinaryOpNodeBehaviour {
         }
     }
 
-    fn view(&mut self, theme: &dyn Theme) -> Option<Element<Self::Message>> {
+    fn view(&mut self /*, theme: &dyn Theme*/) -> Option<Element<Self::Message>> {
         Some(
             Row::new()
-                .theme(theme)
+                // .theme(theme)
                 .push(
                     // Wrap PickList in a container because PickList's width resolution is buggy
                     Container::new(
                         PickList::new(
-                            &mut self.pick_list_ty_state,
                             &PrimitiveTypeEnum::VALUES[..],
                             Some(self.pick_list_ty_value),
                             |new_value| BinaryOpMessage::UpdateType(new_value),
                         )
-                        .theme(theme)
+                        // .theme(theme)
                         .width(Length::Fill),
                     )
                     .width(Length::Fill),
@@ -101,18 +87,15 @@ impl NodeBehaviour for BinaryOpNodeBehaviour {
                 .push(
                     // Wrap PickList in a container because PickList's width resolution is buggy
                     Container::new(
-                        PickList::new(
-                            &mut self.pick_list_op_state,
-                            &BinaryOp::VALUES[..],
-                            Some(self.op),
-                            |value| BinaryOpMessage::UpdateOp(value),
-                        )
-                        .theme(theme)
+                        PickList::new(&BinaryOp::VALUES[..], Some(self.op), |value| {
+                            BinaryOpMessage::UpdateOp(value)
+                        })
+                        // .theme(theme)
                         .width(Length::Fill),
                     )
-                    .width(Length::Units(48)),
+                    .width(Length::Fixed(48.0)),
                 )
-                .align_items(Align::Center)
+                .align_y(Alignment::Center)
                 .width(Length::Fill)
                 .into(),
         )

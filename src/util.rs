@@ -1,15 +1,34 @@
 #![allow(dead_code)]
 
+use iced::Background;
+use iced::Border;
 use iced::Color;
+use iced::Point;
 use iced::Rectangle;
+use iced::Shadow;
+use iced::border::Radius;
+use iced::widget::canvas::Frame;
+use iced_core::Layout;
+use iced_core::Renderer;
+use iced_core::renderer::Quad;
+use iced_graphics::geometry::Fill;
+use iced_graphics::geometry::Path;
+use iced_graphics::geometry::Style;
+use iced_graphics::geometry::fill::Rule;
+use iced_graphics::geometry::frame::Backend;
 use iced_graphics::geometry::path::Builder;
-use lyon_geom::{math::Point, LineSegment, QuadraticBezierSegment, Scalar, Segment};
-use smallvec::{smallvec, Array, SmallVec};
+use iced_graphics::geometry::path::lyon_path::FillRule;
+use lyon_geom::euclid::Point2D;
+use lyon_geom::euclid::UnknownUnit;
+use lyon_geom::{LineSegment, QuadraticBezierSegment, Scalar, Segment};
+use smallvec::{Array, SmallVec, smallvec};
 use std::borrow::Cow;
 use std::ops::Deref;
 use std::ops::DerefMut;
 use std::ops::Range;
 use vek::Vec2;
+
+use crate::widgets::PrimitiveEnum;
 
 pub enum StrokeType {
     Contiguous,
@@ -24,7 +43,7 @@ pub struct ProjectionResult {
 }
 
 pub trait ConnectionSegment {
-    type Flattened: Iterator<Item = Point>;
+    type Flattened: Iterator<Item = Point2D<f32, UnknownUnit>>;
 
     fn build_segment(&self, builder: &mut Builder);
     fn approx_length(&self) -> f32;
@@ -159,8 +178,8 @@ impl<T: Segment> DerefMut for Segments<T> {
 }
 
 impl<T: Segment<Scalar = f32> + ConnectionSegment> Segments<T> {
-    pub fn flattened(&self, tolerance: f32) -> Vec<Point> {
-        let mut points = Vec::<Point>::new();
+    pub fn flattened(&self, tolerance: f32) -> Vec<Point2D<f32, UnknownUnit>> {
+        let mut points = Vec::<Point2D<f32, UnknownUnit>>::new();
 
         for (index, segment) in self.segments.iter().enumerate() {
             if index == 0 {
@@ -304,11 +323,7 @@ pub fn softmax(min: f32, sharpness: f32, x: f32) -> f32 {
 fn softabs(softness: f32, x: f32) -> f32 {
     let abs_x = x.abs();
 
-    if abs_x < softness {
-        ((x / softness).powi(2) + 1.0) * 0.5 * softness
-    } else {
-        abs_x
-    }
+    if abs_x < softness { ((x / softness).powi(2) + 1.0) * 0.5 * softness } else { abs_x }
 }
 
 /// Do not google images for this function (or do at your own risk)
@@ -320,11 +335,7 @@ fn softabs(softness: f32, x: f32) -> f32 {
 pub fn softabs2(softness: f32, x: f32) -> f32 {
     let abs_x = x.abs();
 
-    if abs_x < softness {
-        (x / softness).powi(2) * 0.5 * softness
-    } else {
-        abs_x - 0.5 * softness
-    }
+    if abs_x < softness { (x / softness).powi(2) * 0.5 * softness } else { abs_x - 0.5 * softness }
 }
 
 /// A combination of softabs2 and softmax to limit the maximum value
@@ -333,25 +344,29 @@ pub fn softminabs(abs_softness: f32, max_sharpness: f32, max: f32, x: f32) -> f3
     softmax(-max, max_sharpness, 0.0) - softmax(-max, max_sharpness, -softabs2(abs_softness, x))
 }
 
-pub fn draw_point(position: Vec2<f32>, color: Color, radius: f32) -> Primitive {
+pub fn draw_point<R: Renderer + iced_graphics::geometry::Renderer>(
+    renderer: &mut R,
+    position: Vec2<f32>,
+    color: Color,
+    radius: f32,
+) {
     let connection_point_center = radius + 1.0; // extra pixel for anti aliasing
     let frame_size = connection_point_center * 2.0;
-    let mut frame = Frame::new([frame_size, frame_size].into());
+    let mut frame = Frame::<R>::new(renderer, [frame_size, frame_size].into());
     let path = Path::new(|builder| {
         builder.circle([connection_point_center, connection_point_center].into(), radius);
     });
 
-    frame.fill(&path, Fill { color, rule: FillRule::NonZero });
+    frame.fill(&path, Fill { style: Style::Solid(color), rule: Rule::NonZero });
+    renderer.draw_geometry(frame.into_geometry());
 
-    Primitive::Translate {
-        translation: (position - Vec2::new(connection_point_center, connection_point_center))
-            .into_array()
-            .into(),
-        content: Box::new(frame.into_geometry().into_primitive()),
-    }
+    // TODO:
+    // translation: (position - Vec2::new(connection_point_center, connection_point_center))
+    //     .into_array()
+    //     .into(),
 }
 
-pub fn draw_rectangle(rectangle: Rectangle<f32>, color: Color) -> Primitive {
+pub fn draw_rectangle(rectangle: Rectangle<f32>, color: Color) -> PrimitiveEnum {
     // let layout_position = Vector::new(layout.position().x, layout.position().y);
     // let layout_size = Vector::new(layout.bounds().size().width, layout.bounds().size().height);
 
@@ -367,16 +382,15 @@ pub fn draw_rectangle(rectangle: Rectangle<f32>, color: Color) -> Primitive {
     //         ),
     //     ],
     // }
-    Primitive::Quad {
+    PrimitiveEnum::Quad(Quad {
         bounds: rectangle,
-        background: Background::Color(Color::TRANSPARENT),
-        border_radius: 0,
-        border_width: 1,
-        border_color: color,
-    }
+        // background: Background::Color(Color::TRANSPARENT),
+        border: Border { radius: Radius::new(0), width: 1.0, color },
+        shadow: Shadow::default(),
+    })
 }
 
-pub fn draw_bounds(layout: Layout<'_>, color: Color) -> Primitive {
+pub fn draw_bounds(layout: Layout<'_>, color: Color) -> PrimitiveEnum {
     draw_rectangle(layout.bounds(), color)
 }
 
@@ -568,19 +582,11 @@ where A::Item: Clone
 }
 
 pub fn partial_max<T: PartialOrd>(a: T, b: T) -> T {
-    if a > b {
-        a
-    } else {
-        b
-    }
+    if a > b { a } else { b }
 }
 
 pub fn partial_min<T: PartialOrd>(a: T, b: T) -> T {
-    if a < b {
-        a
-    } else {
-        b
-    }
+    if a < b { a } else { b }
 }
 
 pub fn partial_clamp<T: PartialOrd>(x: T, [min, max]: [T; 2]) -> T {

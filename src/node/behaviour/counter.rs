@@ -1,12 +1,9 @@
-use crate::{
-    node::{
-        behaviour::{
-            ApplicationContext, ExecutionContext, ExecutorClosure, NodeBehaviour, NodeCommand, NodeEvent,
-            NodeStateClosure,
-        },
-        Channel, NodeConfiguration, OptionRefMutExt, PrimitiveTypeEnum,
+use crate::node::{
+    behaviour::{
+        ApplicationContext, ExecutionContext, ExecutorClosure, NodeBehaviour, NodeCommand, NodeEvent,
+        NodeStateClosure,
     },
-    style::Theme,
+    Channel, NodeConfiguration, OptionRefMutExt, PrimitiveTypeEnum,
 };
 use byteorder::{LittleEndian, WriteBytesExt};
 use iced::Element;
@@ -31,7 +28,7 @@ impl NodeBehaviour for CounterNodeBehaviour {
         }
     }
 
-    fn view(&mut self, _theme: &dyn Theme) -> Option<Element<Self::Message>> {
+    fn view(&mut self /*, _theme: &dyn Theme*/) -> Option<Element<Self::Message>> {
         None
     }
 

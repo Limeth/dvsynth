@@ -9,6 +9,7 @@ use iced_core::{Clipboard, Layout, Renderer, Shell, Widget};
 
 #[derive(Default, PartialEq, Eq, Clone)]
 pub struct Spacing {
+    // TODO: Consider using Length instead
     pub right: u16,
     pub up: u16,
     pub left: u16,
@@ -29,28 +30,28 @@ pub struct Margin<'a, M, T, R: WidgetRenderer + 'a> {
     child: Element<'a, M, T, R>,
 }
 
-impl<'a, M: 'a, T, R: WidgetRenderer + 'a> Margin<'a, M, T, R> {
-    pub fn new(element: impl Into<Element<'a, M, R>>, spacing: Spacing) -> Self {
+impl<'a, M: 'a, T: 'a, R: WidgetRenderer + 'a> Margin<'a, M, T, R> {
+    pub fn new(element: impl Into<Element<'a, M, T, R>>, spacing: Spacing) -> Self {
         if spacing == Spacing::default() {
             return Self { child: element.into() };
         }
 
         Self {
-            child: Column::new()
-                .push(Space::with_height(Length::Units(spacing.up)))
+            child: Column::<M, T, R>::new()
+                .push(Space::with_height(Length::Fixed(spacing.up as f32)))
                 .push(
                     Row::new()
-                        .push(Space::with_width(Length::Units(spacing.left)))
+                        .push(Space::with_width(Length::Fixed(spacing.left as f32)))
                         .push(element)
-                        .push(Space::with_width(Length::Units(spacing.right))),
+                        .push(Space::with_width(Length::Fixed(spacing.right as f32))),
                 )
-                .push(Space::with_height(Length::Units(spacing.down)))
+                .push(Space::with_height(Length::Fixed(spacing.down as f32)))
                 .into(),
         }
     }
 }
 
-impl<'a, M: 'a, T, R: WidgetRenderer + 'a> Widget<M, T, R> for Margin<'a, M, T, R> {
+impl<'a, M: 'a, T: 'a, R: WidgetRenderer + 'a> Widget<M, T, R> for Margin<'a, M, T, R> {
     fn size(&self) -> iced::Size<iced::Length> {
         self.child.size()
     }

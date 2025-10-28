@@ -1,3 +1,6 @@
+use crate::ApplicationFlags;
+use crate::Message;
+use crate::NodeMessage;
 use crate::graph::alloc::AllocationInner;
 use crate::node::behaviour::{
     AllocatorHandle, ExecutionContext, MainThreadTask, NodeBehaviourContainer, NodeCommand,
@@ -10,21 +13,18 @@ use crate::node::{
 };
 use crate::style::{self, consts};
 use crate::widgets::{
-    node::FloatingPanesBehaviour, FloatingPane, FloatingPaneBehaviourData, FloatingPaneBehaviourState,
-    FloatingPaneState, NodeElement, NodeElementState,
+    FloatingPane, FloatingPaneBehaviourData, FloatingPaneBehaviourState, FloatingPaneState, NodeElement,
+    NodeElementState, node::FloatingPanesBehaviour,
 };
-use crate::ApplicationFlags;
-use crate::Message;
-use crate::NodeMessage;
 use alloc::Allocator;
 use arc_swap::ArcSwapOption;
 use iced::{Element, Settings};
 use iced_futures::futures;
 use iced_wgpu::wgpu::{self, Backends, TextureFormat};
 use iced_winit::winit::window::Window;
-use petgraph::{stable_graph::StableGraph, visit::EdgeRef, Directed, Direction};
+use petgraph::{Directed, Direction, stable_graph::StableGraph, visit::EdgeRef};
 use std::borrow::Cow;
-use std::collections::{hash_map::Entry, HashMap, HashSet};
+use std::collections::{HashMap, HashSet, hash_map::Entry};
 use std::fmt::Debug;
 use std::fmt::Display;
 use std::ops::{Deref, DerefMut};
@@ -727,11 +727,7 @@ impl ExecutionGraph {
             errors.extend(sorted_nodes.as_ref().unwrap_err().clone());
         }
 
-        if errors.is_empty() {
-            Ok(sorted_nodes.unwrap())
-        } else {
-            Err(errors)
-        }
+        if errors.is_empty() { Ok(sorted_nodes.unwrap()) } else { Err(errors) }
     }
 
     fn create_schedule(&mut self) -> Result<Schedule, Vec<GraphValidationError>> {
@@ -887,7 +883,7 @@ pub struct Renderer {
 }
 
 impl Renderer {
-    pub async fn new(settings: &Settings<ApplicationFlags>, window: Arc<Window>) -> Self {
+    pub async fn new(settings: &Settings, window: Arc<Window>) -> Self {
         let backends = wgpu::util::backend_bits_from_env().unwrap_or(Backends::PRIMARY);
         let instance =
             Arc::new(wgpu::Instance::new(wgpu::InstanceDescriptor { backends, ..Default::default() }));
@@ -973,7 +969,7 @@ impl Deref for TextureAllocation {
     fn deref(&self) -> &Self::Target {
         match self {
             TextureAllocation::TextureView(texture_view) => texture_view,
-            TextureAllocation::SwapchainFrame(swapchain_frame) => &swapchain_frame.output.view,
+            // TextureAllocation::SwapchainFrame(swapchain_frame) => &swapchain_frame.output.view,
         }
     }
 }
@@ -991,7 +987,7 @@ impl ApplicationContext {
     }
 
     pub async fn from_settings(
-        settings: &Settings<ApplicationFlags>,
+        settings: &Settings,
         window: Arc<Window>,
     ) -> (Self, Receiver<Box<MainThreadTask>>) {
         Self::new(Renderer::new(settings, window).await)
@@ -1081,14 +1077,19 @@ impl NodeData {
         }
     }
 
-    pub fn view(
+    pub fn view<T>(
         &mut self,
         index: NodeIndex,
-        theme: &dyn Theme,
-    ) -> FloatingPane<'_, Message, iced_wgpu::Renderer, FloatingPanesBehaviour<Message, iced_wgpu::Renderer>>
-    {
+        // theme: &dyn Theme,
+    ) -> FloatingPane<
+        '_,
+        Message,
+        T,
+        iced_wgpu::Renderer,
+        FloatingPanesBehaviour<Message, T, iced_wgpu::Renderer>,
+    > {
         let mut builder = NodeElement::builder(index, &mut self.element_state).node_behaviour_element(
-            self.behaviour.view(theme).map(Element::from).map(move |element| {
+            self.behaviour.view(/*theme*/).map(Element::from).map(move |element| {
                 element.map(move |message| Message::NodeMessage {
                     node: index,
                     message: NodeMessage::NodeBehaviourMessage(message),

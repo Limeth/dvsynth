@@ -686,7 +686,7 @@ impl<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a
         self.children.get_index_of(pane_index)
     }
 
-    pub fn update_pending_gestures(&mut self, layout: FloatingPanesLayout, messages: &mut Vec<M>) {
+    pub fn update_pending_gestures(&mut self, layout: FloatingPanesLayout, shell: &mut Shell<'_, M>) {
         // Update the interaction status of title bars
         for ((_, (_, pane)), pane_layout) in self.children.iter_mut().enumerate().zip(layout.panes()) {
             let content_layout = pane_layout.content();
@@ -701,7 +701,7 @@ impl<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a
             if new_title_bar_status != pane.state.title_bar_status {
                 pane.state.title_bar_status = new_title_bar_status;
 
-                messages.push((self.on_layout_change)());
+                shell.publish((self.on_layout_change)());
             }
         }
 
@@ -826,14 +826,14 @@ impl<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a
                             pane.state.position = self.state.cursor_position.as_::<f32>()
                                 + grab_state.grab_element_position
                                 - grab_state.grab_mouse_position;
-                            messages.push((self.on_layout_change)());
+                            shell.publish((self.on_layout_change)());
                         }
                     }
                     Some(Gesture::GrabBackground(grab_state)) => {
                         self.state.panes_offset = self.state.cursor_position.as_::<f32>()
                             + grab_state.grab_element_position
                             - grab_state.grab_mouse_position;
-                        messages.push((self.on_layout_change)());
+                        shell.publish((self.on_layout_change)());
                     }
                     Some(Gesture::ResizePane { pending: false, pane_index, grab_state, directions }) => {
                         if let Some((_, pane)) = self.children.get_index_mut(pane_index) {
@@ -876,11 +876,11 @@ impl<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a
                                 }
                             }
 
-                            messages.push((self.on_layout_change)());
+                            shell.publish((self.on_layout_change)());
                         }
                     }
                     _ => {
-                        self.update_pending_gestures(layout, messages);
+                        self.update_pending_gestures(layout, shell);
                     }
                 }
             }
@@ -924,11 +924,11 @@ impl<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a
                         }));
                     }
                 } else {
-                    messages.push((self.on_layout_change)());
+                    shell.publish((self.on_layout_change)());
                 }
             }
             Event::Mouse(iced_core::mouse::Event::ButtonReleased(MouseButton::Left)) => {
-                self.update_pending_gestures(layout, messages);
+                self.update_pending_gestures(layout, shell);
             }
             _ => (),
         }
