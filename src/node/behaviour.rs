@@ -1,6 +1,6 @@
 use crate::graph::{ApplicationContext, NodeIndex};
 use crate::node::{BorrowedRef, BorrowedRefMut, DynTypeTrait, NodeConfiguration, OptionType};
-use downcast_rs::{impl_downcast, Downcast};
+use downcast_rs::{Downcast, impl_downcast};
 use dyn_clone::DynClone;
 use iced::Element;
 use iced_winit::winit::event_loop::EventLoop;
@@ -13,7 +13,7 @@ pub use binary_op::*;
 pub use constant::*;
 pub use debug::*;
 pub use list_constructor::*;
-pub use window::*;
+// pub use window::*;
 
 use super::{OwnedRefMut, Unique};
 
@@ -323,4 +323,5 @@ pub mod constant;
 pub mod counter;
 pub mod debug;
 pub mod list_constructor;
-pub mod window;
+// TODO: Temporarily disabled
+// pub mod window;

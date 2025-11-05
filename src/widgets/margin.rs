@@ -1,8 +1,7 @@
 use iced::event::Status;
 use iced::mouse::Cursor;
-use iced::overlay::Element;
 use iced::widget::{Column, Row, Space};
-use iced::{Event, Length, Point, Rectangle, Vector};
+use iced::{Element, Event, Length, Point, Rectangle, Vector, overlay};
 use iced_core::layout::{Limits, Node};
 use iced_core::widget::Tree;
 use iced_core::{Clipboard, Layout, Renderer, Shell, Widget};
@@ -97,7 +96,7 @@ impl<'a, M: 'a, T: 'a, R: WidgetRenderer + 'a> Widget<M, T, R> for Margin<'a, M,
         layout: Layout<'_>,
         renderer: &R,
         translation: Vector,
-    ) -> Option<Element<'b, M, T, R>> {
+    ) -> Option<overlay::Element<'b, M, T, R>> {
         self.child.overlay(layout, renderer)
     }
 }

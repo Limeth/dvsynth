@@ -103,6 +103,7 @@ impl ApplicationState {
                 floating_panes_state: Default::default(),
                 floating_panes_content_state: FloatingPanesBehaviourState::default(),
                 graph_validation_errors: Default::default(),
+                windows: Default::default(),
             },
             task_window_open.map(Message::WindowOpened),
         )
@@ -238,11 +239,11 @@ async fn main() {
             Box::new(BinaryOpNodeBehaviour::default()),
         ));
 
-        graph.add_node(NodeData::new(
-            "My Window #1",
-            [610.0, 10.0],
-            Box::new(WindowNodeBehaviour::default()),
-        ));
+        // graph.add_node(NodeData::new(
+        //     "My Window #1",
+        //     [610.0, 10.0],
+        //     Box::new(WindowNodeBehaviour::default()),
+        // ));
 
         graph.add_node(NodeData::new(
             "My Array Constructor",
@@ -271,38 +272,38 @@ async fn main() {
         //     ..window::Settings::default()
         // },
         antialiasing: true,
-        ..Settings::with_flags(ApplicationFlags { graph })
+        ..Default::default() // ..Settings::with_flags(ApplicationFlags { graph })
     };
-    let event_loop = EventLoop::new().expect("Failed to create event loop.");
-    let (execution_context, main_thread_task_receiver) =
-        ApplicationContext::from_settings(&settings, window.clone()).await;
-    let renderer_settings = iced_wgpu::Settings {
-        default_font: settings.default_font,
-        default_text_size: settings.default_text_size,
-        // because anti-aliasing is enabled in the settings
-        antialiasing: Some(iced_graphics::Antialiasing::MSAAx4),
-        ..iced_wgpu::Settings::default()
-    };
-    let _join_handle = GraphExecutor::spawn(execution_context, active_schedule);
+    // let event_loop = EventLoop::new().expect("Failed to create event loop.");
+    // let (execution_context, main_thread_task_receiver) =
+    //     ApplicationContext::from_settings(&settings, window.clone()).await;
+    // let renderer_settings = iced_wgpu::Settings {
+    //     default_font: settings.default_font,
+    //     default_text_size: settings.default_text_size,
+    //     // because anti-aliasing is enabled in the settings
+    //     antialiasing: Some(iced_graphics::Antialiasing::MSAAx4),
+    //     ..iced_wgpu::Settings::default()
+    // };
+    // let _join_handle = GraphExecutor::spawn(execution_context, active_schedule);
 
-    let mut engine = Engine::new(
-        &execution_context.renderer.adapter,
-        &execution_context.renderer.device,
-        &execution_context.renderer.queue,
-        execution_context.renderer.surface_format,
-        Some(Antialiasing::MSAAx16),
-    );
-    let mut iced_renderer = iced_wgpu::Renderer::new(
-        Runtime::new(
-            &execution_context.renderer.device,
-            &execution_context.renderer.queue,
-            // iced_wgpu::Settings::default(),
-            // execution_context.renderer.surface_format,
-        ),
-        &engine,
-        Font::DEFAULT,
-        Pixels(16.0),
-    );
+    // let mut engine = Engine::new(
+    //     &execution_context.renderer.adapter,
+    //     &execution_context.renderer.device,
+    //     &execution_context.renderer.queue,
+    //     execution_context.renderer.surface_format,
+    //     Some(Antialiasing::MSAAx16),
+    // );
+    // let mut iced_renderer = iced_wgpu::Renderer::new(
+    //     Runtime::new(
+    //         &execution_context.renderer.device,
+    //         &execution_context.renderer.queue,
+    //         // iced_wgpu::Settings::default(),
+    //         // execution_context.renderer.surface_format,
+    //     ),
+    //     &engine,
+    //     Font::DEFAULT,
+    //     Pixels(16.0),
+    // );
 
     iced::daemon(ApplicationState::title, ApplicationState::update, ApplicationState::view)
         // .subscription(ApplicationState::subscription)
