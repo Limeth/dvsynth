@@ -14,7 +14,7 @@ use iced_core::layout::{Layout, Limits, Node};
 use iced_core::mouse::{self, Button as MouseButton, Event as MouseEvent};
 use iced_core::overlay::{self, Overlay};
 use iced_core::widget::{Tree, Widget};
-use iced_core::{self, Clipboard, Element, Event, Length, Point, Rectangle, Text};
+use iced_core::{self, Clipboard, Element, Event, Length, Point, Rectangle};
 use iced_core::{Color, Shell};
 use iced_graphics::geometry::{LineCap, LineDash, LineJoin, Path, Stroke, Style};
 use lyon_geom::QuadraticBezierSegment;
@@ -25,7 +25,12 @@ use std::marker::PhantomData;
 use vek::Vec2;
 
 impl<'a> ChannelRef<'a> {
-    pub fn render<M: 'a + Clone, T: 'a, R: 'a + WidgetRenderer>(&self) -> Element<'a, M, T, R> {
+    pub fn render<M, T, R>(&self) -> Element<'a, M, T, R>
+    where
+        M: 'a + Clone,
+        T: 'a + iced::widget::text::Catalog,
+        R: 'a + WidgetRenderer,
+    {
         Text::new(self.title.to_string()).size(style::consts::TEXT_SIZE_REGULAR).into()
     }
 }
@@ -58,7 +63,12 @@ pub struct NodeElement<'a, M: 'a + Clone, T: 'a, R: 'a + WidgetRenderer> {
     element_tree: Element<'a, M, T, R>,
 }
 
-impl<'a, M: 'a + Clone, T: 'a, R: 'a + WidgetRenderer> NodeElementBuilder<'a, M, T, R> {
+impl<'a, M, T, R> NodeElementBuilder<'a, M, T, R>
+where
+    M: 'a + Clone,
+    T: 'a + iced::widget::text::Catalog,
+    R: 'a + WidgetRenderer,
+{
     pub fn new(index: NodeIndex, state: &'a mut NodeElementState) -> Self {
         Self {
             index,
@@ -160,7 +170,12 @@ impl<'a, M: 'a + Clone, T: 'a, R: 'a + WidgetRenderer> NodeElementBuilder<'a, M,
     }
 }
 
-impl<'a, M: 'a + Clone, T: 'a, R: 'a + WidgetRenderer> NodeElement<'a, M, T, R> {
+impl<'a, M, T, R> NodeElement<'a, M, T, R>
+where
+    M: 'a + Clone,
+    T: 'a + iced::widget::text::Catalog,
+    R: 'a + WidgetRenderer,
+{
     pub fn builder(index: NodeIndex, state: &'a mut NodeElementState) -> NodeElementBuilder<'a, M, T, R> {
         NodeElementBuilder::new(index, state)
     }
@@ -223,7 +238,12 @@ impl<'a, M: 'a + Clone, T: 'a, R: 'a + WidgetRenderer> NodeElement<'a, M, T, R> 
     }
 }
 
-impl<'a, M: 'a + Clone, T: 'a, R: 'a + WidgetRenderer> Widget<M, T, R> for NodeElement<'a, M, T, R> {
+impl<'a, M, T, R> Widget<M, T, R> for NodeElement<'a, M, T, R>
+where
+    M: 'a + Clone,
+    T: 'a + iced::widget::text::Catalog,
+    R: 'a + WidgetRenderer,
+{
     fn size(&self) -> Size<iced::Length> {
         Size::new(self.width, self.height)
     }
@@ -234,7 +254,7 @@ impl<'a, M: 'a + Clone, T: 'a, R: 'a + WidgetRenderer> Widget<M, T, R> for NodeE
         //     .max_height(self.extents[1])
         //     .width(self.width)
         //     .height(self.height);
-        self.element_tree.layout(renderer, limits)
+        self.element_tree.as_widget().layout(state, renderer, limits)
     }
 
     fn draw(
@@ -266,19 +286,22 @@ impl<'a, M: 'a + Clone, T: 'a, R: 'a + WidgetRenderer> Widget<M, T, R> for NodeE
             .on_event(state, event, layout, cursor, renderer, clipboard, shell, viewport)
     }
 
-    fn overlay(
-        &mut self,
-        state: &mut Tree,
+    fn overlay<'b>(
+        &'b mut self,
+        state: &'b mut Tree,
         layout: Layout<'_>,
         renderer: &R,
         translation: Vector,
-    ) -> Option<Element<'_, M, T, R>> {
-        self.element_tree.overlay(state, layout)
+    ) -> Option<overlay::Element<'b, M, T, R>> {
+        self.element_tree.as_widget_mut().overlay(state, layout, renderer, translation)
     }
 }
 
-impl<'a, M: 'a + Clone, T: 'a, R: 'a + WidgetRenderer> From<NodeElement<'a, M, T, R>>
-    for Element<'a, M, T, R>
+impl<'a, M, T, R> From<NodeElement<'a, M, T, R>> for Element<'a, M, T, R>
+where
+    M: 'a + Clone,
+    T: 'a + iced::widget::text::Catalog,
+    R: 'a + WidgetRenderer,
 {
     fn from(other: NodeElement<'a, M, T, R>) -> Self {
         Element::new(other)
@@ -326,8 +349,11 @@ impl<M: Clone, R: WidgetRenderer> FloatingPanesBehaviour<M, R> {
     }
 }
 
-impl<'a, M: Clone + 'a, T: 'a, R: 'a + WidgetRenderer> floating_panes::FloatingPanesBehaviour<'a, M, T, R>
-    for FloatingPanesBehaviour<M, R>
+impl<'a, M, T, R> floating_panes::FloatingPanesBehaviour<'a, M, T, R> for FloatingPanesBehaviour<M, R>
+where
+    M: Clone + 'a,
+    T: 'a + iced::widget::text::Catalog + iced::widget::container::Catalog,
+    R: 'a + WidgetRenderer,
 {
     type FloatingPaneIndex = NodeIndex;
     type FloatingPaneBehaviourData = FloatingPaneBehaviourData;
@@ -351,7 +377,7 @@ impl<'a, M: Clone + 'a, T: 'a, R: 'a + WidgetRenderer> floating_panes::FloatingP
         panes: &mut FloatingPanes<'a, M, T, R, Self>,
         state: &mut Tree,
         event: Event,
-        layout: Layout<'_>,
+        layout: FloatingPanesLayout<'_>,
         cursor: Cursor,
         renderer: &R,
         clipboard: &mut dyn Clipboard,
@@ -398,7 +424,7 @@ impl<'a, M: Clone + 'a, T: 'a, R: 'a + WidgetRenderer> floating_panes::FloatingP
                                 }
                             }
 
-                            NodeElement::<M, R>::is_channel_selected(
+                            NodeElement::<M, T, R>::is_channel_selected(
                                 channel_layout.clone(),
                                 channel_ref.direction,
                                 cursor_position,
@@ -426,7 +452,7 @@ impl<'a, M: Clone + 'a, T: 'a, R: 'a + WidgetRenderer> floating_panes::FloatingP
                             let layout_from = layout
                                 .panes()
                                 .nth(
-                                    NodeElement::<M, R>::get_layout_index_from_channel(
+                                    NodeElement::<M, T, R>::get_layout_index_from_channel(
                                         panes,
                                         connection.from(),
                                     )
@@ -436,7 +462,7 @@ impl<'a, M: Clone + 'a, T: 'a, R: 'a + WidgetRenderer> floating_panes::FloatingP
                             let layout_to = layout
                                 .panes()
                                 .nth(
-                                    NodeElement::<M, R>::get_layout_index_from_channel(
+                                    NodeElement::<M, T, R>::get_layout_index_from_channel(
                                         panes,
                                         connection.to(),
                                     )
@@ -555,7 +581,7 @@ impl<'a, M: Clone + 'a, T: 'a, R: 'a + WidgetRenderer> floating_panes::FloatingP
         layout: Layout<'_>,
         renderer: &R,
         translation: Vector,
-    ) -> Option<Element<'b, M, T, R>> {
+    ) -> Option<overlay::Element<'b, M, T, R>> {
         let mut errors = panes
             .behaviour_state
             .highlight
@@ -589,7 +615,7 @@ impl<'a, M: Clone + 'a, T: 'a, R: 'a + WidgetRenderer> floating_panes::FloatingP
 
             for error in errors {
                 let display = error.display();
-                let mut error_element = Column::<M, R>::new()
+                let mut error_element = Column::<M, T, R>::new()
                     .max_width(512)
                     .push(Text::new(display.title.to_string()).size(style::consts::TEXT_SIZE_TITLE))
                     .push(Text::new(display.description.to_string()).size(style::consts::TEXT_SIZE_REGULAR));
@@ -601,17 +627,18 @@ impl<'a, M: Clone + 'a, T: 'a, R: 'a + WidgetRenderer> floating_panes::FloatingP
                     );
                 }
 
-                let mut container = Container::new(Margin::new(error_element, style::consts::SPACING));
+                let mut container =
+                    Container::<M, T, R>::new(Margin::new(error_element, style::consts::SPACING));
 
-                if let Some(style) = panes.behaviour.tooltip_style.as_ref() {
-                    container = container.style(style.container_style());
-                }
+                // if let Some(style) = panes.behaviour.tooltip_style.as_ref() {
+                //     container = container.style(style.container_style());
+                // }
 
                 column = column.push(container);
             }
 
             let position: Point = panes.state.cursor_position.into_array().into();
-            let overlay = WidgetOverlay::<M, R, _>::new(
+            let overlay = WidgetOverlay::<M, T, R, _>::new(
                 column,
                 WidgetOverlayAlignment { top: true, left: false },
                 position,

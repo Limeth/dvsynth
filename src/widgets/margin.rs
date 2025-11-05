@@ -1,7 +1,7 @@
 use iced::event::Status;
 use iced::mouse::Cursor;
 use iced::widget::{Column, Row, Space};
-use iced::{Element, Event, Length, Point, Rectangle, Vector, overlay};
+use iced::{Element, Event, Length, Rectangle, Vector, overlay};
 use iced_core::layout::{Limits, Node};
 use iced_core::widget::Tree;
 use iced_core::{Clipboard, Layout, Renderer, Shell, Widget};
@@ -52,11 +52,11 @@ impl<'a, M: 'a, T: 'a, R: WidgetRenderer + 'a> Margin<'a, M, T, R> {
 
 impl<'a, M: 'a, T: 'a, R: WidgetRenderer + 'a> Widget<M, T, R> for Margin<'a, M, T, R> {
     fn size(&self) -> iced::Size<iced::Length> {
-        self.child.size()
+        self.child.as_widget().size()
     }
 
     fn layout(&self, state: &mut Tree, renderer: &R, limits: &Limits) -> Node {
-        self.child.layout(renderer, limits)
+        self.child.as_widget().layout(state, renderer, limits)
     }
 
     fn draw(
@@ -87,7 +87,9 @@ impl<'a, M: 'a, T: 'a, R: WidgetRenderer + 'a> Widget<M, T, R> for Margin<'a, M,
         shell: &mut Shell<'_, M>,
         viewport: &Rectangle,
     ) -> Status {
-        self.child.on_event(event, layout, cursor, renderer, clipboard, shell)
+        self.child
+            .as_widget_mut()
+            .on_event(state, event, layout, cursor, renderer, clipboard, shell, viewport)
     }
 
     fn overlay<'b>(
@@ -97,11 +99,11 @@ impl<'a, M: 'a, T: 'a, R: WidgetRenderer + 'a> Widget<M, T, R> for Margin<'a, M,
         renderer: &R,
         translation: Vector,
     ) -> Option<overlay::Element<'b, M, T, R>> {
-        self.child.overlay(layout, renderer)
+        self.child.as_widget_mut().overlay(state, layout, renderer, translation)
     }
 }
 
-impl<'a, M: 'a, T, R: WidgetRenderer + 'a> From<Margin<'a, M, T, R>> for Element<'a, M, T, R> {
+impl<'a, M: 'a, T: 'a, R: WidgetRenderer + 'a> From<Margin<'a, M, T, R>> for Element<'a, M, T, R> {
     fn from(other: Margin<'a, M, T, R>) -> Self {
         Element::new(other)
     }
