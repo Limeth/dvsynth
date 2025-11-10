@@ -173,7 +173,7 @@ where
 impl<'a, M, T, R> NodeElement<'a, M, T, R>
 where
     M: 'a + Clone,
-    T: 'a + iced::widget::text::Catalog,
+    T: 'a + iced::widget::text::Catalog + iced::widget::container::Catalog,
     R: 'a + WidgetRenderer,
 {
     pub fn builder(index: NodeIndex, state: &'a mut NodeElementState) -> NodeElementBuilder<'a, M, T, R> {
@@ -332,7 +332,10 @@ impl<M: Clone, R: WidgetRenderer> FloatingPanesBehaviour<M, R> {
         panes: &FloatingPanes<'a, M, T, R, Self>,
         from: ChannelIdentifier,
         to: ChannelIdentifier,
-    ) -> bool {
+    ) -> bool
+    where
+        T: iced::widget::text::Catalog + iced::widget::container::Catalog,
+    {
         if let Some(connection) = Connection::try_from_identifiers([from, to]) {
             connection.is_valid(&get_is_aliased!(panes), &move |channel| {
                 let pane = panes.children.get(&channel.node_index).unwrap();
@@ -366,7 +369,7 @@ where
         renderer: &mut R,
         theme: &T,
         style: &iced_core::renderer::Style,
-        layout: Layout<'_>,
+        layout: FloatingPanesLayout<'_>,
         cursor: Cursor,
         viewport: &Rectangle,
     ) -> ContentDrawResult {
@@ -476,7 +479,7 @@ where
                             let layout_output = layout_outputs.channel(connection.from().channel_index);
                             let layout_input = layout_inputs.channel(connection.to().channel_index);
                             let connection_curve =
-                                ConnectionCurve::from_channel_layouts::<M, R>(layout_output, layout_input);
+                                ConnectionCurve::from_channel_layouts::<M, T, R>(layout_output, layout_input);
                             let connection_distance_squared = connection_curve
                                 .get_distance_squared(cursor_position, MAX_CONNECTION_HIGHLIGHT_DISTANCE);
 
@@ -697,16 +700,19 @@ pub trait WidgetRenderer:
 {
     // type StyleTooltip: StyleTooltipBounds<Self>;
 
-    fn draw_panes<M: Clone, T>(
+    fn draw_panes<M, T>(
         &mut self,
         panes: &FloatingPanes<'_, M, T, Self, FloatingPanesBehaviour<M, Self>>,
         state: &Tree,
         theme: &T,
         style: &iced_core::renderer::Style,
-        layout: Layout<'_>,
+        layout: FloatingPanesLayout<'_>,
         cursor: Cursor,
         viewport: &Rectangle,
-    ) -> ContentDrawResult;
+    ) -> ContentDrawResult
+    where
+        M: Clone,
+        T: iced::widget::text::Catalog + iced::widget::container::Catalog;
 }
 
 impl<R> WidgetRenderer for R
@@ -719,29 +725,41 @@ where R: margin::WidgetRenderer
 {
     // type StyleTooltip = Box<dyn TooltipStyleSheet>;
 
-    fn draw_panes<M: Clone, T>(
+    fn draw_panes<M, T>(
         &mut self,
         panes: &FloatingPanes<'_, M, T, Self, FloatingPanesBehaviour<M, Self>>,
         state: &Tree,
         theme: &T,
         style: &iced_core::renderer::Style,
-        layout: Layout<'_>,
+        layout: FloatingPanesLayout<'_>,
         cursor: Cursor,
         viewport: &Rectangle,
-    ) -> ContentDrawResult {
+    ) -> ContentDrawResult
+    where
+        M: Clone,
+        T: iced::widget::text::Catalog + iced::widget::container::Catalog,
+    {
         let mut mouse_interaction = mouse::Interaction::default();
         let mut primitives = Vec::new();
 
         primitives.extend(panes.children.iter().zip(layout.panes()).map(
             |((_child_index, child), layout)| {
-                let (primitive, new_mouse_interaction) =
-                    child.element_tree.draw(self, theme, style, layout, cursor);
+                /*let (primitive, new_mouse_interaction) =*/
+                child.element_tree.as_widget().draw(
+                    state,
+                    self,
+                    theme,
+                    style,
+                    layout.into(),
+                    cursor,
+                    viewport,
+                );
 
-                if new_mouse_interaction > mouse_interaction {
-                    mouse_interaction = new_mouse_interaction;
-                }
+                // if new_mouse_interaction > mouse_interaction {
+                //     mouse_interaction = new_mouse_interaction;
+                // }
 
-                primitive
+                // primitive
             },
         ));
 
@@ -767,10 +785,10 @@ where R: margin::WidgetRenderer
         // Draw existing connections
         for connection in &panes.behaviour.connections {
             let layout_from = layout.pane_with_index(
-                NodeElement::<M, Self>::get_layout_index_from_channel(panes, connection.from()).unwrap(),
+                NodeElement::<M, T, Self>::get_layout_index_from_channel(panes, connection.from()).unwrap(),
             );
             let layout_to = layout.pane_with_index(
-                NodeElement::<M, Self>::get_layout_index_from_channel(panes, connection.to()).unwrap(),
+                NodeElement::<M, T, Self>::get_layout_index_from_channel(panes, connection.to()).unwrap(),
             );
 
             let layout_outputs = layout_from.content().channels_with_direction(ChannelDirection::Out);
@@ -785,8 +803,8 @@ where R: margin::WidgetRenderer
             //     draw_bounds(layout_input, Color::from_rgb(0.0, 0.0, 1.0))
             // );
 
-            let from = NodeElement::<M, Self>::get_connection_point(layout_output, ChannelDirection::Out);
-            let to = NodeElement::<M, Self>::get_connection_point(layout_input, ChannelDirection::In);
+            let from = NodeElement::<M, T, Self>::get_connection_point(layout_output, ChannelDirection::Out);
+            let to = NodeElement::<M, T, Self>::get_connection_point(layout_input, ChannelDirection::In);
 
             let highlighted = if let Some(highlight) = panes.behaviour_state.highlight.as_ref() {
                 match highlight {
@@ -851,13 +869,16 @@ where R: margin::WidgetRenderer
         if let Some(selected_channel) = panes.behaviour_state.selected_channel.as_ref() {
             let pane_layout = layout
                 .panes()
-                .nth(NodeElement::<M, Self>::get_layout_index_from_channel(panes, *selected_channel).unwrap())
+                .nth(
+                    NodeElement::<M, T, Self>::get_layout_index_from_channel(panes, *selected_channel)
+                        .unwrap(),
+                )
                 .unwrap();
             let layout_channels =
                 pane_layout.content().channels_with_direction(selected_channel.channel_direction);
             let layout_channel = layout_channels.channel(selected_channel.channel_index);
 
-            let connected_position = NodeElement::<M, Self>::get_connection_point(
+            let connected_position = NodeElement::<M, T, Self>::get_connection_point(
                 layout_channel,
                 selected_channel.channel_direction,
             );
@@ -867,14 +888,14 @@ where R: margin::WidgetRenderer
                 let child_layout = layout
                     .panes()
                     .nth(
-                        NodeElement::<M, Self>::get_layout_index_from_channel(panes, *highlighted_channel)
+                        NodeElement::<M, T, Self>::get_layout_index_from_channel(panes, *highlighted_channel)
                             .unwrap(),
                     )
                     .unwrap();
                 let layout_channels =
                     child_layout.content().channels_with_direction(highlighted_channel.channel_direction);
                 let layout_channel = layout_channels.channel(highlighted_channel.channel_index);
-                let target_position = NodeElement::<M, Self>::get_connection_point(
+                let target_position = NodeElement::<M, T, Self>::get_connection_point(
                     layout_channel,
                     highlighted_channel.channel_direction,
                 );
@@ -929,8 +950,10 @@ where R: margin::WidgetRenderer
                 let channel_layouts = inputs_layout.chain(outputs_layout);
 
                 for (channel_layout, channel_ref) in channel_layouts {
-                    let position =
-                        NodeElement::<M, Self>::get_connection_point(channel_layout, channel_ref.direction);
+                    let position = NodeElement::<M, T, Self>::get_connection_point(
+                        channel_layout,
+                        channel_ref.direction,
+                    );
                     let channel = channel_ref.into_identifier(node_index);
                     let highlighted = if let Some(Highlight::Channel(highlighted_channel)) =
                         panes.behaviour_state.highlight.as_ref()
@@ -979,7 +1002,7 @@ where R: margin::WidgetRenderer
 //     pub container: Box<(dyn iced::container::StyleSheet + 'static)>,
 // }
 
-fn draw_connection_point<M: Clone, T, R: WidgetRenderer>(
+fn draw_connection_point<M, T, R>(
     renderer: &mut R,
     panes: &FloatingPanes<'_, M, T, R, FloatingPanesBehaviour<M, R>>,
     node_index: NodeIndex,
@@ -987,7 +1010,11 @@ fn draw_connection_point<M: Clone, T, R: WidgetRenderer>(
     channel_pass_by: ChannelPassBy,
     highlighted: bool,
     error: bool,
-) {
+) where
+    M: Clone,
+    T: iced::widget::text::Catalog + iced::widget::container::Catalog,
+    R: WidgetRenderer,
+{
     let solid = channel_pass_by > ChannelPassBy::SharedReference;
     let (radius, mut color) =
         if highlighted { (5.0, Color::from_rgb(0.5, 1.0, 0.0)) } else { (3.5, Color::WHITE) };
@@ -1000,7 +1027,10 @@ fn draw_connection_point<M: Clone, T, R: WidgetRenderer>(
 
     if !solid {
         let pane = panes.children.get(&node_index).unwrap();
-        let color = pane.style.as_ref().unwrap().style(style::InteractionStatus::Idle).body_background_color;
+        // TODO
+        // let color =
+        // pane.style.as_ref().unwrap().style(style::InteractionStatus::Idle).body_background_color;
+        let color = Color::from_rgb(1.0, 0.8, 0.2);
 
         util::draw_point(renderer, position, color, radius * (2.0 / 3.0));
     }
@@ -1012,12 +1042,14 @@ pub struct ConnectionCurve {
 }
 
 impl ConnectionCurve {
-    fn from_channel_layouts<M: Clone, R: WidgetRenderer>(
-        output: ChannelLayout,
-        input: ChannelLayout,
-    ) -> Self {
-        let from = NodeElement::<M, R>::get_connection_point(output, ChannelDirection::Out);
-        let to = NodeElement::<M, R>::get_connection_point(input, ChannelDirection::In);
+    fn from_channel_layouts<M, T, R>(output: ChannelLayout, input: ChannelLayout) -> Self
+    where
+        M: Clone,
+        T: iced::widget::text::Catalog + iced::widget::container::Catalog,
+        R: WidgetRenderer,
+    {
+        let from = NodeElement::<M, T, R>::get_connection_point(output, ChannelDirection::Out);
+        let to = NodeElement::<M, T, R>::get_connection_point(input, ChannelDirection::In);
         Self { from, to }
     }
 
@@ -1112,13 +1144,13 @@ impl<M: Clone, T, R: WidgetRenderer, W: Widget<M, T, R>> WidgetOverlay<M, T, R, 
     }
 
     pub fn tree(&self) -> Tree {
-        Tree::new(&self.widget)
+        Tree::new(&self.widget as &dyn Widget<M, T, R>)
     }
 }
 
 impl<M: Clone, T, R: WidgetRenderer, W: Widget<M, T, R>> Overlay<M, T, R> for WidgetOverlay<M, T, R, W> {
     fn layout(&mut self, renderer: &R, bounds: Size) -> Node {
-        let mut node = self.widget.layout(self.tree(), renderer, &Limits::new(Size::ZERO, bounds));
+        let mut node = self.widget.layout(&mut self.tree(), renderer, &Limits::new(Size::ZERO, bounds));
         let node_bounds = node.bounds();
         let mut position = self.position;
 
@@ -1130,9 +1162,7 @@ impl<M: Clone, T, R: WidgetRenderer, W: Widget<M, T, R>> Overlay<M, T, R> for Wi
             position.y -= node_bounds.height;
         }
 
-        node.move_to(position);
-
-        node
+        node.move_to(position)
     }
 
     fn draw(
@@ -1143,7 +1173,7 @@ impl<M: Clone, T, R: WidgetRenderer, W: Widget<M, T, R>> Overlay<M, T, R> for Wi
         layout: Layout<'_>,
         cursor: Cursor,
     ) {
-        self.widget.draw(self.tree(), renderer, theme, style, layout, cursor, &layout.bounds())
+        self.widget.draw(&mut self.tree(), renderer, theme, style, layout, cursor, &layout.bounds())
     }
 }
 

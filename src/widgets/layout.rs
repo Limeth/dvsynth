@@ -9,6 +9,7 @@ pub trait TypedLayout: Clone + Copy + Debug {
 /// A macro that facilitates type safety for layout traversal.
 /// Generates a newtype (wrapper) for the [`::iced_runtime::Layout`] type and functions to access
 /// this type from other typed layout types specified in `traverse` and `children_of`.
+/// Use `Into` and `From` to convert into/from `iced_core::Layout`.
 macro_rules! typed_layout {
     {
         type_name: $type_name:ident,

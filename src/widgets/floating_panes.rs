@@ -6,6 +6,7 @@ use iced::mouse::{self, Cursor, Interaction};
 use iced::widget::{Column, Container};
 use iced::{Element, Size, Vector, overlay};
 use iced_core::layout::{Limits, Node};
+use iced_core::overlay::Group;
 use iced_core::renderer::Quad;
 use iced_core::widget::{Text, Tree};
 use iced_core::{self, Clipboard, Event, Layout, Length, Point, Shell, Widget};
@@ -48,7 +49,7 @@ pub trait FloatingPanesBehaviour<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer>: Size
         renderer: &mut R,
         theme: &T,
         style: &iced_core::renderer::Style,
-        layout: Layout<'_>,
+        layout: FloatingPanesLayout<'_>,
         cursor: Cursor,
         viewport: &Rectangle,
     ) -> ContentDrawResult;
@@ -70,7 +71,7 @@ pub trait FloatingPanesBehaviour<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer>: Size
     fn overlay<'b>(
         panes: &'b mut FloatingPanes<'a, M, T, R, Self>,
         state: &'b mut Tree,
-        layout: Layout<'_>,
+        layout: FloatingPanesLayout<'_>,
         renderer: &R,
         translation: Vector,
     ) -> Option<overlay::Element<'b, M, T, R>>;
@@ -92,14 +93,22 @@ impl<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer + iced_wgpu::primitive::Renderer>
         renderer: &mut R,
         theme: &T,
         style: &iced_core::renderer::Style,
-        layout: Layout<'_>,
+        layout: FloatingPanesLayout<'_>,
         cursor: Cursor,
         viewport: &Rectangle,
     ) -> ContentDrawResult {
         let mut mouse_interaction = Interaction::default();
-        let primitives = panes.children.iter().zip(layout.children()).map(|((_, child), layout)| {
+        let primitives = panes.children.iter().zip(layout.panes()).map(|((_, child), layout)| {
             // let (primitive, new_mouse_interaction) =
-            child.element_tree.as_widget().draw(tree, renderer, theme, style, layout, cursor, viewport);
+            child.element_tree.as_widget().draw(
+                tree,
+                renderer,
+                theme,
+                style,
+                layout.into(),
+                cursor,
+                viewport,
+            );
 
             // if new_mouse_interaction > mouse_interaction {
             //     mouse_interaction = new_mouse_interaction;
@@ -162,18 +171,35 @@ impl<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer + iced_wgpu::primitive::Renderer>
     fn overlay<'b>(
         panes: &'b mut FloatingPanes<'a, M, T, R, Self>,
         state: &'b mut Tree,
-        layout: Layout<'_>,
+        layout: FloatingPanesLayout<'_>,
         renderer: &R,
         translation: Vector,
     ) -> Option<overlay::Element<'b, M, T, R>> {
-        panes
-            .children
-            .iter_mut()
-            .zip(layout.children())
-            .filter_map(|((_, pane), layout)| {
-                pane.element_tree.as_widget_mut().overlay(state, layout, renderer, translation)
-            })
-            .next()
+        let mut group = Group::new();
+
+        for (((_, child), child_state), child_layout) in
+            panes.children.iter_mut().zip(state.children.iter_mut()).zip(layout.panes())
+        {
+            group = group.push(
+                child
+                    .element_tree
+                    .as_widget_mut()
+                    .overlay(child_state, child_layout.into(), renderer, translation)
+                    .unwrap(),
+            );
+        }
+
+        Some(overlay::Element::new(Box::new(group)))
+
+        // for ((_, pane), layout) in panes.children.iter_mut().zip(layout.panes()) {
+        //     if let Some(overlay) =
+        //         pane.element_tree.as_widget_mut().overlay(state, layout.into(), renderer, translation)
+        //     {
+        //         return Some(overlay);
+        //     }
+        // }
+
+        // None
     }
 }
 
@@ -964,7 +990,7 @@ impl<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a
         renderer: &R,
         translation: Vector,
     ) -> Option<overlay::Element<'b, M, T, R>> {
-        C::overlay(self, state, layout, renderer, translation)
+        C::overlay(self, state, layout.into(), renderer, translation)
     }
 }
 
@@ -1040,7 +1066,7 @@ where R: margin::WidgetRenderer + iced_core::Renderer + iced_core::text::Rendere
         let ContentDrawResult {
             override_parent_cursor,
             // output: (panes_primitive, content_mouse_interaction),
-        } = C::draw_panes(element, tree, self, theme, style, layout, cursor, viewport);
+        } = C::draw_panes(element, tree, self, theme, style, layout.into(), cursor, viewport);
 
         // if override_parent_cursor {
         //     mouse_interaction = content_mouse_interaction;
