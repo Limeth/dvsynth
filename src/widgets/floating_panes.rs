@@ -180,16 +180,18 @@ impl<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer + iced_wgpu::primitive::Renderer>
         for (((_, child), child_state), child_layout) in
             panes.children.iter_mut().zip(state.children.iter_mut()).zip(layout.panes())
         {
-            group = group.push(
-                child
-                    .element_tree
-                    .as_widget_mut()
-                    .overlay(child_state, child_layout.into(), renderer, translation)
-                    .unwrap(),
-            );
+            if let Some(overlay) = child.element_tree.as_widget_mut().overlay(
+                child_state,
+                child_layout.into(),
+                renderer,
+                translation,
+            ) {
+                group = group.push(overlay);
+            }
         }
 
-        Some(overlay::Element::new(Box::new(group)))
+        Some(group.into())
+        // Some(overlay::Element::new(Box::new(group)))
 
         // for ((_, pane), layout) in panes.children.iter_mut().zip(layout.panes()) {
         //     if let Some(overlay) =

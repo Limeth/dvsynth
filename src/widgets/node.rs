@@ -12,7 +12,7 @@ use iced::{Size, Vector};
 use iced_core::event::Status;
 use iced_core::layout::{Layout, Limits, Node};
 use iced_core::mouse::{self, Button as MouseButton, Event as MouseEvent};
-use iced_core::overlay::{self, Overlay};
+use iced_core::overlay::{self, Group, Overlay};
 use iced_core::widget::{Tree, Widget};
 use iced_core::{self, Clipboard, Element, Event, Length, Point, Rectangle};
 use iced_core::{Color, Shell};
@@ -581,7 +581,7 @@ where
     fn overlay<'b>(
         panes: &'b mut FloatingPanes<'a, M, T, R, Self>,
         state: &'b mut Tree,
-        layout: Layout<'_>,
+        layout: FloatingPanesLayout<'_>,
         renderer: &R,
         translation: Vector,
     ) -> Option<overlay::Element<'b, M, T, R>> {
@@ -614,7 +614,7 @@ where
         }
 
         if !errors.is_empty() {
-            let mut column = Column::<M, R>::new();
+            let mut column = Column::<M, T, R>::new();
 
             for error in errors {
                 let display = error.display();
@@ -650,12 +650,22 @@ where
             return Some(overlay::Element::new(Box::new(overlay)));
         }
 
-        panes
-            .children
-            .iter_mut()
-            .zip(layout.children())
-            .filter_map(|((_, pane), layout)| pane.element_tree.overlay(state, layout))
-            .next()
+        let mut group = Group::new();
+
+        for (((_, pane), child_state), child_layout) in
+            panes.children.iter_mut().zip(state.children.iter_mut()).zip(layout.panes())
+        {
+            if let Some(overlay) = pane.element_tree.as_widget_mut().overlay(
+                child_state,
+                child_layout.into(),
+                renderer,
+                translation,
+            ) {
+                group = group.push(overlay);
+            }
+        }
+
+        Some(group.into())
     }
 }
 
@@ -836,7 +846,7 @@ where R: margin::WidgetRenderer
 
             // Highlight connection-related errors
             if panes.behaviour.graph_validation_errors.is_invalid(connection.clone()) {
-                stroke.color = Color::from_rgba(1.0, 0.0, 0.0, 1.0);
+                stroke.style = Style::Solid(Color::from_rgba(1.0, 0.0, 0.0, 1.0));
             }
 
             // primitives.push(draw_point(from.into_array().into(), Color::from_rgb(1.0, 0.0, 0.0)));
@@ -931,7 +941,7 @@ where R: margin::WidgetRenderer
             ConnectionCurve { from, to }.draw(&mut frame, stroke, connection_pass_by.get_stroke_type());
         }
 
-        primitives.push(frame.into_geometry().into_primitive());
+        // primitives.push(frame.into_geometry().into_primitive());
 
         // Draw connection points
         {
@@ -965,8 +975,8 @@ where R: margin::WidgetRenderer
                     let error = panes.behaviour.graph_validation_errors.is_invalid(channel);
 
                     draw_connection_point(
+                        self,
                         panes,
-                        &mut primitives,
                         node_index,
                         position,
                         channel_ref.edge_endpoint.pass_by,
@@ -1053,7 +1063,12 @@ impl ConnectionCurve {
         Self { from, to }
     }
 
-    fn draw(&self, frame: &mut Frame, stroke: Stroke, stroke_type: StrokeType) {
+    fn draw<R: iced_graphics::geometry::Renderer>(
+        &self,
+        frame: &mut Frame<R>,
+        stroke: Stroke,
+        stroke_type: StrokeType,
+    ) {
         let segments = util::get_connection_curve(self.from, self.to);
         let path = Path::new(|builder| {
             builder.move_to(self.from.into_array().into());
@@ -1084,7 +1099,7 @@ impl ConnectionCurve {
             [segments[0].from.x, segments[0].ctrl.x, segments[1].ctrl.x, segments[1].to.x]
                 .iter()
                 .copied()
-                .fold_first(util::partial_min)
+                .reduce(util::partial_min)
                 .unwrap(),
             util::partial_min(segments[0].from.y, segments[1].to.y),
         );
@@ -1092,7 +1107,7 @@ impl ConnectionCurve {
             [segments[0].from.x, segments[0].ctrl.x, segments[1].ctrl.x, segments[1].to.x]
                 .iter()
                 .copied()
-                .fold_first(util::partial_max)
+                .reduce(util::partial_max)
                 .unwrap(),
             util::partial_max(segments[0].from.y, segments[1].to.y),
         );
