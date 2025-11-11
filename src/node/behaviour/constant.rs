@@ -1,20 +1,21 @@
+use crate::Element;
 use crate::node::PrimitiveChannelValue;
 use crate::{
     graph::ApplicationContext,
     node::{
+        Channel, NodeConfiguration, OptionRefMutExt, PrimitiveType, PrimitiveTypeEnum,
         behaviour::{
             ExecutionContext, ExecutorClosure, NodeBehaviour, NodeCommand, NodeEvent, NodeStateClosure,
         },
-        Channel, NodeConfiguration, OptionRefMutExt, PrimitiveType, PrimitiveTypeEnum,
     },
 };
 use byteorder::LittleEndian;
 use iced::widget::{
+    Row,
     pick_list::{self, PickList},
     text_input::{self, TextInput},
-    Row,
 };
-use iced::{Alignment, Element, Length};
+use iced::{Alignment, Length};
 use iced_graphics::text::Paragraph;
 use std::io::Cursor;
 

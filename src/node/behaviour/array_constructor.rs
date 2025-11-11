@@ -1,14 +1,17 @@
 use iced::{
+    Alignment, Length,
     widget::{Button, PickList, Row, Text},
-    Alignment, Element, Length,
 };
 
-use crate::node::{
-    behaviour::{
-        ApplicationContext, ExecutionContext, ExecutorClosure, NodeBehaviour, NodeCommand, NodeEvent,
-        NodeStateClosure,
+use crate::{
+    Element,
+    node::{
+        ArrayType, BytesRefExt, Channel, NodeConfiguration, OptionRefMutExt, PrimitiveTypeEnum,
+        behaviour::{
+            ApplicationContext, ExecutionContext, ExecutorClosure, NodeBehaviour, NodeCommand, NodeEvent,
+            NodeStateClosure,
+        },
     },
-    ArrayType, BytesRefExt, Channel, NodeConfiguration, OptionRefMutExt, PrimitiveTypeEnum,
 };
 use std::io::{Cursor, Write};
 use std::num::NonZeroUsize;

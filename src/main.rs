@@ -32,7 +32,7 @@ use graph::{
     GraphValidationErrors, NodeData,
 };
 use iced::application::Title;
-use iced::{Application, Executor, Font, Pixels, Settings, Task, window};
+use iced::{Application, Executor, Font, Pixels, Renderer, Settings, Task, Theme, window};
 use iced_futures::Runtime;
 use iced_graphics::Antialiasing;
 use iced_wgpu::Engine;
@@ -52,6 +52,8 @@ pub mod graph;
 pub mod node;
 pub mod style;
 pub mod widgets;
+
+pub type Element<'a, M = Message, T = Theme> = iced::Element<'a, M, T, iced_wgpu::Renderer>;
 
 #[derive(Debug, Clone)]
 pub enum NodeMessage {
@@ -188,8 +190,8 @@ impl ApplicationState {
         task
     }
 
-    fn view(&self, window_id: window::Id) -> iced::Element<Message> {
-        // let theme: Box<dyn Theme> = Box::new(style::Dark);
+    fn view(&self, window_id: window::Id) -> Element {
+        let theme = Theme::Dark; // TODO: Theming
         let node_indices = self.graph.node_indices().collect::<Vec<_>>();
         let connections = self.graph.get_connections();
 
@@ -209,7 +211,7 @@ impl ApplicationState {
         // .theme(&*theme);
 
         for (node_index, node_data) in node_indices.iter().zip(self.graph.node_weights_mut()) {
-            panes = panes.insert(*node_index, node_data.view(*node_index, theme.as_ref()));
+            panes = panes.insert(*node_index, node_data.view(*node_index, &theme));
         }
 
         panes.into()

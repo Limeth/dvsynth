@@ -95,34 +95,22 @@ impl<'a> Bytes<'a> {
     pub fn borrow(&self) -> Bytes<'_> {
         use self::Bytes::*;
         match self {
-            Bytes(ref inner) => Bytes(&**inner),
-            Object { ty_name, ref data } => Object { ty_name, data: &**data },
+            &Bytes(ref inner) => Bytes(&**inner),
+            &Object { ty_name, ref data } => Object { ty_name, data: &**data },
         }
     }
 
     pub fn bytes_slice<R>(self, range: R) -> Option<Bytes<'a>>
     where [u8]: std::ops::Index<R, Output = [u8]> {
-        if let Bytes::Bytes(bytes) = self {
-            Some(Bytes::Bytes(&bytes[range]))
-        } else {
-            None
-        }
+        if let Bytes::Bytes(bytes) = self { Some(Bytes::Bytes(&bytes[range])) } else { None }
     }
 
     pub fn bytes(self) -> Option<&'a [u8]> {
-        if let Bytes::Bytes(inner) = self {
-            Some(inner)
-        } else {
-            None
-        }
+        if let Bytes::Bytes(inner) = self { Some(inner) } else { None }
     }
 
     pub fn object(self) -> Option<&'a dyn AllocatedType> {
-        if let Bytes::Object { data, .. } = self {
-            Some(data)
-        } else {
-            None
-        }
+        if let Bytes::Object { data, .. } = self { Some(data) } else { None }
     }
 
     pub fn downcast_ref_unwrap<T: AllocatedType>(self) -> &'a T {
@@ -269,66 +257,42 @@ impl<'a> BytesMut<'a> {
     pub fn borrow_mut(&mut self) -> BytesMut<'_> {
         use self::BytesMut::*;
         match self {
-            Bytes(ref mut inner) => Bytes(&mut **inner),
-            Object { ty_name, ref mut data } => Object { ty_name, data: &mut **data },
+            &mut Bytes(ref mut inner) => Bytes(&mut **inner),
+            &mut Object { ty_name, ref mut data } => Object { ty_name, data: &mut **data },
         }
     }
 
     pub fn borrow(&self) -> Bytes<'_> {
         match self {
-            BytesMut::Bytes(ref inner) => Bytes::Bytes(&**inner),
-            BytesMut::Object { ty_name, ref data } => Bytes::Object { ty_name, data: &**data },
+            &BytesMut::Bytes(ref inner) => Bytes::Bytes(&**inner),
+            &BytesMut::Object { ty_name, ref data } => Bytes::Object { ty_name, data: &**data },
         }
     }
 
     pub fn bytes_slice_mut<R>(self, range: R) -> Option<BytesMut<'a>>
     where [u8]: std::ops::IndexMut<R, Output = [u8]> {
-        if let BytesMut::Bytes(bytes) = self {
-            Some(BytesMut::Bytes(&mut bytes[range]))
-        } else {
-            None
-        }
+        if let BytesMut::Bytes(bytes) = self { Some(BytesMut::Bytes(&mut bytes[range])) } else { None }
     }
 
     pub fn bytes_slice<R>(self, range: R) -> Option<Bytes<'a>>
     where [u8]: std::ops::Index<R, Output = [u8]> {
-        if let BytesMut::Bytes(bytes) = self {
-            Some(Bytes::Bytes(&bytes[range]))
-        } else {
-            None
-        }
+        if let BytesMut::Bytes(bytes) = self { Some(Bytes::Bytes(&bytes[range])) } else { None }
     }
 
     pub fn bytes(self) -> Option<&'a [u8]> {
-        if let BytesMut::Bytes(inner) = self {
-            Some(&*inner)
-        } else {
-            None
-        }
+        if let BytesMut::Bytes(inner) = self { Some(&*inner) } else { None }
     }
 
     pub fn object(self) -> Option<&'a dyn AllocatedType> {
-        if let BytesMut::Object { data, .. } = self {
-            Some(&*data)
-        } else {
-            None
-        }
+        if let BytesMut::Object { data, .. } = self { Some(&*data) } else { None }
     }
 
     pub fn bytes_mut(self) -> Option<&'a mut [u8]> {
-        if let BytesMut::Bytes(inner) = self {
-            Some(inner)
-        } else {
-            None
-        }
+        if let BytesMut::Bytes(inner) = self { Some(inner) } else { None }
     }
 
     pub fn object_mut(self) -> Option<&'a mut dyn AllocatedType> {
-        if let BytesMut::Object { data, .. } = self {
-            Some(data)
-        } else {
-            None
-        }
+        if let BytesMut::Object { data, .. } = self { Some(data) } else { None }
     }
 
     pub fn downcast_ref_unwrap<T: AllocatedType>(self) -> &'a T {
@@ -680,7 +644,9 @@ impl<Resolved, Unresolved> TypeResolution<Resolved, Unresolved> {
         if let TypeResolution::Resolved(resolved) = self {
             resolved
         } else {
-            panic!("Tried to unwrap `TypeResolution` as `TypeResolution::Resolved`, but the variant does not match.");
+            panic!(
+                "Tried to unwrap `TypeResolution` as `TypeResolution::Resolved`, but the variant does not match."
+            );
         }
     }
 }
@@ -739,31 +705,19 @@ where T: DowncastFromTypeEnum
     fn downcast_from(from: TypeEnum) -> Option<Self>
     where Self: Sized {
         Self::resolve_from(from).and_then(|resolution| {
-            if let TypeResolution::Resolved(resolved) = resolution {
-                Some(resolved)
-            } else {
-                None
-            }
+            if let TypeResolution::Resolved(resolved) = resolution { Some(resolved) } else { None }
         })
     }
 
     fn downcast_from_ref(from: &TypeEnum) -> Option<&Self> {
         Self::resolve_from_ref(from).and_then(|resolution| {
-            if let TypeResolution::Resolved(resolved) = resolution {
-                Some(resolved)
-            } else {
-                None
-            }
+            if let TypeResolution::Resolved(resolved) = resolution { Some(resolved) } else { None }
         })
     }
 
     fn downcast_from_mut(from: &mut TypeEnum) -> Option<&mut Self> {
         Self::resolve_from_mut(from).and_then(|resolution| {
-            if let TypeResolution::Resolved(resolved) = resolution {
-                Some(resolved)
-            } else {
-                None
-            }
+            if let TypeResolution::Resolved(resolved) = resolution { Some(resolved) } else { None }
         })
     }
 }

@@ -1,7 +1,9 @@
 use crate::ApplicationFlags;
+use crate::Element;
 use crate::Message;
 use crate::NodeMessage;
 use crate::graph::alloc::AllocationInner;
+use crate::node::behaviour::NodeBehaviourMessage;
 use crate::node::behaviour::{
     AllocatorHandle, ExecutionContext, MainThreadTask, NodeBehaviourContainer, NodeCommand,
     NodeEventContainer, NodeStateContainer,
@@ -18,7 +20,8 @@ use crate::widgets::{
 };
 use alloc::Allocator;
 use arc_swap::ArcSwapOption;
-use iced::{Element, Settings};
+use iced::Settings;
+use iced::Theme;
 use iced_futures::futures;
 use iced_wgpu::wgpu::{self, Backends, TextureFormat};
 use iced_winit::winit::window::Window;
@@ -1058,7 +1061,7 @@ impl NodeData {
         let mut result = Self {
             title: title.to_string(),
             element_state: Default::default(),
-            floating_pane_state: FloatingPaneState::new().with_position(position).with_width(200),
+            floating_pane_state: FloatingPaneState::new().with_position(position).with_width(200.0),
             floating_pane_behaviour_state: Default::default(),
             configuration: Default::default(),
             behaviour,
@@ -1077,19 +1080,19 @@ impl NodeData {
         }
     }
 
-    pub fn view<T>(
+    pub fn view(
         &mut self,
         index: NodeIndex,
-        // theme: &dyn Theme,
+        theme: &Theme,
     ) -> FloatingPane<
         '_,
         Message,
-        T,
+        Theme,
         iced_wgpu::Renderer,
-        FloatingPanesBehaviour<Message, T, iced_wgpu::Renderer>,
+        FloatingPanesBehaviour<Message, iced_wgpu::Renderer>,
     > {
         let mut builder = NodeElement::builder(index, &mut self.element_state).node_behaviour_element(
-            self.behaviour.view(/*theme*/).map(Element::from).map(move |element| {
+            self.behaviour.view(/*theme*/).map(move |element| {
                 element.map(move |message| Message::NodeMessage {
                     node: index,
                     message: NodeMessage::NodeBehaviourMessage(message),
@@ -1112,15 +1115,16 @@ impl NodeData {
             }
         }*/);
 
-        Themeable::theme(
-            FloatingPane::builder(
-                node_element,
-                &mut self.floating_pane_state,
-                &mut self.floating_pane_behaviour_state,
-                FloatingPaneBehaviourData { node_configuration: self.configuration.clone() },
-            ),
-            theme,
+        // Themeable::theme(
+        FloatingPane::builder(
+            node_element,
+            &mut self.floating_pane_state,
+            &mut self.floating_pane_behaviour_state,
+            FloatingPaneBehaviourData { node_configuration: self.configuration.clone() },
         )
+        //,
+        //     theme,
+        // )
         .title(Some(&self.title))
         .title_size(Some(style::consts::TEXT_SIZE_TITLE))
         .title_margin(consts::SPACING)

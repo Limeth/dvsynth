@@ -1,14 +1,15 @@
+use crate::Element;
 use crate::node::PrimitiveChannelValue;
 use crate::node::{
+    BytesRefExt, Channel, NodeConfiguration, OptionRefMutExt, PrimitiveType, PrimitiveTypeEnum,
     behaviour::{
         ApplicationContext, ExecutionContext, ExecutorClosure, NodeBehaviour, NodeCommand, NodeEvent,
         NodeStateClosure,
     },
-    BytesRefExt, Channel, NodeConfiguration, OptionRefMutExt, PrimitiveType, PrimitiveTypeEnum,
 };
 use byteorder::LittleEndian;
-use iced::widget::{pick_list, Container, PickList, Row};
-use iced::{Alignment, Element, Length};
+use iced::widget::{Container, PickList, Row, pick_list};
+use iced::{Alignment, Length};
 use std::io::Cursor;
 use std::ops::{Add, Div, Mul, Sub};
 

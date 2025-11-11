@@ -1,12 +1,14 @@
-use crate::node::{
-    behaviour::{
-        ApplicationContext, ExecutionContext, ExecutorClosure, NodeBehaviour, NodeCommand, NodeEvent,
-        NodeStateClosure,
+use crate::{
+    Element,
+    node::{
+        Channel, NodeConfiguration, OptionRefMutExt, PrimitiveTypeEnum,
+        behaviour::{
+            ApplicationContext, ExecutionContext, ExecutorClosure, NodeBehaviour, NodeCommand, NodeEvent,
+            NodeStateClosure,
+        },
     },
-    Channel, NodeConfiguration, OptionRefMutExt, PrimitiveTypeEnum,
 };
 use byteorder::{LittleEndian, WriteBytesExt};
-use iced::Element;
 use std::io::Cursor;
 
 #[derive(Clone, Debug, Default)]

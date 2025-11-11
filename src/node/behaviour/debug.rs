@@ -1,17 +1,19 @@
-use crate::node::{
-    behaviour::{
-        ApplicationContext, ExecutionContext, ExecutorClosure, NodeBehaviour, NodeCommand, NodeEvent,
-        NodeStateClosure,
+use crate::{
+    Element,
+    node::{
+        BytesRefExt, Channel, NodeConfiguration, PrimitiveType, PrimitiveTypeEnum,
+        behaviour::{
+            ApplicationContext, ExecutionContext, ExecutorClosure, NodeBehaviour, NodeCommand, NodeEvent,
+            NodeStateClosure,
+        },
     },
-    BytesRefExt, Channel, NodeConfiguration, PrimitiveType, PrimitiveTypeEnum,
 };
 use byteorder::LittleEndian;
-use iced::{
-    widget::pick_list::{self, PickList},
-    widget::Row,
-    Element,
-};
 use iced::{Alignment, Length};
+use iced::{
+    widget::Row,
+    widget::pick_list::{self, PickList},
+};
 
 #[derive(Debug, Clone)]
 pub enum DebugNodeMessage {

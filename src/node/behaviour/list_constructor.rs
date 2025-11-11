@@ -1,20 +1,20 @@
+use crate::Element;
 use crate::node::prelude::*;
+use crate::node::{BorrowedRef, BorrowedRefMut, ListDescriptor, ListType, OwnedRefMut, Unique};
 use crate::node::{
+    Channel, NodeConfiguration, PrimitiveType, PrimitiveTypeEnum,
     behaviour::{
         ApplicationContext, ExecutionContext, ExecutorClosure, NodeBehaviour, NodeCommand, NodeEvent,
         NodeStateClosure,
     },
-    Channel, NodeConfiguration, PrimitiveType, PrimitiveTypeEnum,
-};
-use crate::node::{BorrowedRef, BorrowedRefMut, ListDescriptor, ListType, OwnedRefMut, Unique};
-use iced::{
-    widget::button::{self, Button},
-    widget::pick_list::{self, PickList},
-    widget::Row,
-    widget::Text,
-    Element,
 };
 use iced::{Alignment, Length};
+use iced::{
+    widget::Row,
+    widget::Text,
+    widget::button::{self, Button},
+    widget::pick_list::{self, PickList},
+};
 use std::io::{Cursor, Write};
 use std::num::NonZeroUsize;
 

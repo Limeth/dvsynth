@@ -119,10 +119,4 @@ pub trait WidgetRenderer:
 {
 }
 
-// impl WidgetRenderer for R
-// where
-//     R: iced_core::Renderer + iced_core::text::Renderer + iced_core::
-//     iced_graphics::Renderer<B>: iced_runtime::Renderer,
-//     B: Backend, // + iced_graphics::backend::Text,
-// {
-// }
+impl<R> WidgetRenderer for R where R: Renderer + Sized {}
