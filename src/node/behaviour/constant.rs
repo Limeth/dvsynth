@@ -18,6 +18,7 @@ use iced::widget::{
 use iced::{Alignment, Length};
 use iced_graphics::text::Paragraph;
 use std::io::Cursor;
+use transient::{Static, Transient};
 
 #[derive(Debug, Clone)]
 pub enum ConstantNodeMessage {
@@ -32,6 +33,8 @@ pub struct ConstantNodeBehaviour {
     text_input_value: String,
     text_input_placeholder: String,
 }
+
+impl Static for ConstantNodeBehaviour {}
 
 impl Default for ConstantNodeBehaviour {
     fn default() -> Self {

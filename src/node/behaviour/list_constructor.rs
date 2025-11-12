@@ -17,6 +17,7 @@ use iced::{
 };
 use std::io::{Cursor, Write};
 use std::num::NonZeroUsize;
+use transient::Static;
 
 #[derive(Debug, Clone)]
 pub enum ListConstructorNodeMessage {
@@ -30,6 +31,8 @@ pub struct ListConstructorNodeBehaviour {
     ty: PrimitiveTypeEnum,
     channel_count: NonZeroUsize,
 }
+
+impl Static for ListConstructorNodeBehaviour {}
 
 impl Default for ListConstructorNodeBehaviour {
     fn default() -> Self {

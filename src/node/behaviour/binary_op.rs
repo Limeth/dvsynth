@@ -12,6 +12,7 @@ use iced::widget::{Container, PickList, Row, pick_list};
 use iced::{Alignment, Length};
 use std::io::Cursor;
 use std::ops::{Add, Div, Mul, Sub};
+use transient::Static;
 
 #[derive(Debug, Clone)]
 pub enum BinaryOpMessage {
@@ -24,6 +25,8 @@ pub struct BinaryOpNodeBehaviour {
     pub pick_list_ty_value: PrimitiveTypeEnum,
     pub op: BinaryOp,
 }
+
+impl Static for BinaryOpNodeBehaviour {}
 
 impl Default for BinaryOpNodeBehaviour {
     fn default() -> Self {

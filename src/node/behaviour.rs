@@ -5,9 +5,9 @@ use downcast_rs::{Downcast, impl_downcast};
 use dyn_clone::DynClone;
 use iced::Theme;
 use iced_winit::winit::event_loop::EventLoop;
-use std::any::Any;
 use std::fmt::Debug;
 use std::marker::PhantomData;
+use transient::{Any, CanRecoverFrom, Co, Downcast as _, Static, Timeless, Transient};
 
 pub use array_constructor::*;
 pub use binary_op::*;
@@ -65,7 +65,7 @@ impl<M: NodeBehaviourMessage> NodeEvent<M> {
 
 // FIXME: Maybe just store `Box<dyn NodeExecutor<'static>>` instead?
 pub struct NodeStateContainer<'state> {
-    ptr: Box<dyn NodeExecutor<'state> + 'static>,
+    ptr: Box<dyn NodeExecutor<'state> + 'state>,
 }
 
 impl<'state> NodeStateContainer<'state> {
@@ -85,20 +85,23 @@ impl<'state> NodeStateContainer<'state> {
     //     &mut *(trait_object.data as *mut T::State<'state>)
     // }
 
-    unsafe fn downcast_mut<T: NodeBehaviour>(&mut self) -> &mut T::State<'state> {
+    unsafe fn downcast_mut<'a, T: NodeBehaviour>(&'a mut self) -> &'a mut T::State<'state> {
         //let reference: &mut dyn NodeExecutor<'state> = &mut *self.ptr;
-        let mut reference = self.ptr.as_mut();
-        reference.as_any_mut().downcast_mut().unwrap()
+        // self.ptr.as_mut().as_any_mut().downcast_mut().unwrap()
+        (self.ptr.as_mut() as &mut dyn Any<Co>).downcast_mut().unwrap()
+
+        // self.ptr.as_mut().downcast_mut() .unwrap()
         //let raw: *mut dyn NodeExecutor<'state> = &mut *self.ptr as *mut _;
         //&mut *(trait_object.data as *mut T::State<'state>)
     }
 
-    pub fn update<'invocation, T: NodeBehaviour>(
+    pub fn update<'invocation, T>(
         &'invocation mut self,
         context: &'invocation ApplicationContext,
         behaviour: &T,
     ) where
         'state: 'invocation,
+        T: NodeBehaviour,
     {
         let state = unsafe { self.downcast_mut::<T>() };
 
@@ -115,12 +118,14 @@ impl<'state> NodeStateContainer<'state> {
     // }
 }
 
-pub trait NodeExecutor<'state>: Debug + Send + Sync + Any {
+pub trait NodeExecutor<'state>: Debug + Send + Sync + Any<Co<'state>> {
     fn execute<'invocation>(&'invocation mut self, context: ExecutionContext<'invocation, 'state>)
     where 'state: 'invocation;
 }
 
-pub trait NodeState<'state>: NodeExecutor<'state> {
+pub trait NodeState<'state>
+where Self: NodeExecutor<'state> + Transient<Transience = Co<'state>>
+{
     type Behaviour: NodeBehaviour;
 
     fn update<'invocation>(
@@ -156,10 +161,22 @@ where
     transient: Transient,
 }
 
+unsafe impl<'state, T, Transient> transient::Transient for NodeStateClosure<'state, T, Transient>
+where
+    T: NodeBehaviour,
+    Transient: TransientTrait + transient::Transient + 'state,
+    Transient::Static: TransientTrait,
+{
+    type Static = NodeStateClosure<'static, T, Transient::Static>;
+    // TODO: Is this correct?
+    type Transience = Co<'state>;
+}
+
 impl<'state, T, Transient> NodeStateClosure<'state, T, Transient>
 where
     T: NodeBehaviour,
-    Transient: TransientTrait + 'state,
+    Transient: TransientTrait + transient::Transient + 'state,
+    Transient::Static: TransientTrait,
 {
     pub fn new<'invocation>(
         behaviour: &'invocation T,
@@ -189,7 +206,8 @@ where
 impl<'state, T, Transient> Debug for NodeStateClosure<'state, T, Transient>
 where
     T: NodeBehaviour,
-    Transient: TransientTrait + 'state,
+    Transient: TransientTrait + transient::Transient + 'state,
+    Transient::Static: TransientTrait,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("NodeStateClosure").field("transient", &self.transient).finish()
@@ -199,7 +217,8 @@ where
 impl<'state, T, Transient> NodeState<'state> for NodeStateClosure<'state, T, Transient>
 where
     T: NodeBehaviour,
-    Transient: TransientTrait + 'state,
+    Transient: TransientTrait + transient::Transient + 'state,
+    Transient::Static: TransientTrait,
 {
     type Behaviour = T;
 
@@ -217,7 +236,8 @@ where
 impl<'state, T, Transient> NodeExecutor<'state> for NodeStateClosure<'state, T, Transient>
 where
     T: NodeBehaviour,
-    Transient: TransientTrait + 'state,
+    Transient: TransientTrait + transient::Transient + 'state,
+    Transient::Static: TransientTrait,
 {
     fn execute<'invocation>(&'invocation mut self, context: ExecutionContext<'invocation, 'state>)
     where 'state: 'invocation {
@@ -283,7 +303,9 @@ pub trait NodeBehaviourContainer: DynClone + std::fmt::Debug + Send + Sync + 'st
 
 dyn_clone::clone_trait_object!(NodeBehaviourContainer);
 
-pub trait NodeBehaviour: std::fmt::Debug + Clone + Send + Sync + 'static {
+pub trait NodeBehaviour
+where Self: std::fmt::Debug + Clone + Send + Sync + 'static + Static
+{
     type Message: NodeBehaviourMessage = ();
     type State<'state>: NodeState<'state, Behaviour = Self> = NodeStateClosure<'state, Self>;
 

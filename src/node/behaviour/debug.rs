@@ -14,6 +14,7 @@ use iced::{
     widget::Row,
     widget::pick_list::{self, PickList},
 };
+use transient::Static;
 
 #[derive(Debug, Clone)]
 pub enum DebugNodeMessage {
@@ -24,6 +25,8 @@ pub enum DebugNodeMessage {
 pub struct DebugNodeBehaviour {
     ty: PrimitiveTypeEnum,
 }
+
+impl Static for DebugNodeBehaviour {}
 
 impl Default for DebugNodeBehaviour {
     fn default() -> Self {

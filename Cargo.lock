@@ -916,6 +916,7 @@ dependencies = [
  "smallvec",
  "static_assertions",
  "tokio",
+ "transient",
  "vek",
 ]
 
@@ -3209,6 +3210,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c06d3da6113f116aaee68e4d601191614c9053067f9ab7f6edbcb161237daa54"
 dependencies = [
  "once_cell",
+]
+
+[[package]]
+name = "transient"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cdb61be2bc3753cfec3ea4a16753bb98322be47dac7b910ee3170a5307ba9341"
+dependencies = [
+ "rustversion",
+ "transient-derive",
+]
+
+[[package]]
+name = "transient-derive"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "045931745df1346c58e3d822f81f07cabbb515e737613d5c93d3a77c13b66cd8"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.108",
+ "thiserror",
 ]
 
 [[package]]

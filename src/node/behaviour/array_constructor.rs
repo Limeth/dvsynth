@@ -2,6 +2,7 @@ use iced::{
     Alignment, Length,
     widget::{Button, PickList, Row, Text},
 };
+use transient::Static;
 
 use crate::{
     Element,
@@ -28,6 +29,8 @@ pub struct ArrayConstructorNodeBehaviour {
     ty: PrimitiveTypeEnum,
     channel_count: NonZeroUsize,
 }
+
+impl Static for ArrayConstructorNodeBehaviour {}
 
 impl Default for ArrayConstructorNodeBehaviour {
     fn default() -> Self {

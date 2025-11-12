@@ -10,9 +10,12 @@ use crate::{
 };
 use byteorder::{LittleEndian, WriteBytesExt};
 use std::io::Cursor;
+use transient::Static;
 
 #[derive(Clone, Debug, Default)]
 pub struct CounterNodeBehaviour;
+
+impl Static for CounterNodeBehaviour {}
 
 impl NodeBehaviour for CounterNodeBehaviour {
     type State<'state> = NodeStateClosure<'state, Self, Persistent>;
@@ -65,3 +68,5 @@ impl NodeBehaviour for CounterNodeBehaviour {
 pub struct Persistent {
     count: u32,
 }
+
+impl Static for Persistent {}
