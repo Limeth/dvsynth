@@ -231,8 +231,8 @@ pub struct FloatingPaneBuilder<
     C: 'a + FloatingPanesBehaviour<'a, M, T, R>,
 > {
     pub content: Element<'a, M, T, R>,
-    pub state: &'a mut FloatingPaneState,
-    pub behaviour_state: &'a mut C::FloatingPaneBehaviourState,
+    pub state: &'a FloatingPaneState,
+    pub behaviour_state: &'a C::FloatingPaneBehaviourState,
     pub behaviour_data: C::FloatingPaneBehaviourData,
     pub title: Option<&'a str>,
     pub title_size: Option<u16>,
@@ -249,8 +249,8 @@ impl<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a
 {
     pub fn new(
         content: impl Into<Element<'a, M, T, R>>,
-        state: &'a mut FloatingPaneState,
-        behaviour_state: &'a mut C::FloatingPaneBehaviourState,
+        state: &'a FloatingPaneState,
+        behaviour_state: &'a C::FloatingPaneBehaviourState,
         behaviour_data: C::FloatingPaneBehaviourData,
     ) -> Self {
         Self {
@@ -402,7 +402,7 @@ impl FloatingPaneState {
 /// A single floating pane within the [`FloatingPanes`] widget.
 pub struct FloatingPane<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a, M, T, R>>
 {
-    pub state: &'a mut FloatingPaneState,
+    pub state: &'a FloatingPaneState,
     pub behaviour_data: C::FloatingPaneBehaviourData,
     // pub style: Option<<R as WidgetRenderer>::StyleFloatingPane>,
     pub element_tree: Element<'a, M, T, R>,
@@ -416,8 +416,8 @@ impl<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a
 {
     pub fn builder(
         content: impl Into<Element<'a, M, T, R>>,
-        state: &'a mut FloatingPaneState,
-        behaviour_state: &'a mut C::FloatingPaneBehaviourState,
+        state: &'a FloatingPaneState,
+        behaviour_state: &'a C::FloatingPaneBehaviourState,
         behaviour_data: C::FloatingPaneBehaviourData,
     ) -> FloatingPaneBuilder<'a, M, T, R, C> {
         FloatingPaneBuilder::new(content, state, behaviour_state, behaviour_data)
@@ -641,8 +641,8 @@ pub struct FloatingPanes<
     R: 'a + WidgetRenderer,
     C: 'a + FloatingPanesBehaviour<'a, M, T, R>,
 > {
-    pub state: &'a mut FloatingPanesState,
-    pub behaviour_state: &'a mut C::FloatingPanesBehaviourState,
+    pub state: &'a FloatingPanesState,
+    pub behaviour_state: &'a C::FloatingPanesBehaviourState,
     pub behaviour: C,
     pub width: Length,
     pub height: Length,
@@ -656,8 +656,8 @@ impl<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a
     FloatingPanes<'a, M, T, R, C>
 {
     pub fn new(
-        state: &'a mut FloatingPanesState,
-        behaviour_state: &'a mut C::FloatingPanesBehaviourState,
+        state: &'a FloatingPanesState,
+        behaviour_state: &'a C::FloatingPanesBehaviourState,
         behaviour: C,
         on_layout_change: Box<dyn Fn() -> M>,
     ) -> Self {

@@ -32,7 +32,7 @@ use graph::{
     GraphValidationErrors, NodeData,
 };
 use iced::application::Title;
-use iced::{Application, Executor, Font, Pixels, Renderer, Settings, Task, Theme, window};
+use iced::{Application, Executor, Font, Pixels, Point, Renderer, Settings, Task, Theme, window};
 use iced_futures::Runtime;
 use iced_graphics::Antialiasing;
 use iced_wgpu::Engine;
@@ -43,6 +43,7 @@ use node::behaviour::counter::CounterNodeBehaviour;
 use node::behaviour::*;
 use node::*;
 use petgraph::graph::NodeIndex;
+use vek::Vec2;
 use widgets::*;
 
 #[macro_use]
@@ -73,6 +74,12 @@ pub enum Message {
     InsertConnection {
         connection: Connection,
     },
+    FloatingPanesHighlightChanged {
+        highlight: Option<Highlight>,
+    },
+    FloatingPanesSelectedChannelChanged {
+        selected_channel: Option<ChannelIdentifier>,
+    },
     /// Workaround for layouts not being updated when we only change its mutable state
     RecomputeLayout,
 }
@@ -86,6 +93,7 @@ pub struct WindowHandle {}
 pub struct ApplicationState {
     graph: ExecutionGraph,
     floating_panes_state: FloatingPanesState,
+    // TODO: rename from content to behaviour
     floating_panes_content_state: FloatingPanesBehaviourState,
     graph_validation_errors: GraphValidationErrors,
     windows: BTreeMap<window::Id, WindowHandle>,
@@ -175,6 +183,14 @@ impl ApplicationState {
                 update_schedule = true;
                 Task::none()
             }
+            Message::FloatingPanesHighlightChanged { highlight } => {
+                self.floating_panes_content_state.highlight = highlight;
+                Task::none()
+            }
+            Message::FloatingPanesSelectedChannelChanged { selected_channel } => {
+                self.floating_panes_content_state.selected_channel = selected_channel;
+                Task::none()
+            }
             Message::RecomputeLayout => Task::none(),
         };
 
@@ -195,12 +211,19 @@ impl ApplicationState {
         let node_indices = self.graph.node_indices().collect::<Vec<_>>();
         let connections = self.graph.get_connections();
 
+        // TODO: Pass const references, and send messages back instead of trying to mutate state through
+        // the references.
+
         let mut panes = FloatingPanes::new(
-            &mut self.floating_panes_state,
-            &mut self.floating_panes_content_state,
+            &self.floating_panes_state,
+            &self.floating_panes_content_state,
             crate::widgets::node::FloatingPanesBehaviour {
                 on_channel_disconnect: |channel| Message::DisconnectChannel { channel },
                 on_connection_create: |connection| Message::InsertConnection { connection },
+                on_highlight_change: |highlight| Message::FloatingPanesHighlightChanged { highlight },
+                on_selected_channel_changed: |selected_channel| {
+                    Message::FloatingPanesSelectedChannelChanged { selected_channel }
+                },
                 connections,
                 graph_validation_errors: self.graph_validation_errors.clone(),
                 // tooltip_style: Some(theme.tooltip()),
@@ -210,7 +233,7 @@ impl ApplicationState {
         );
         // .theme(&*theme);
 
-        for (node_index, node_data) in node_indices.iter().zip(self.graph.node_weights_mut()) {
+        for (node_index, node_data) in node_indices.iter().zip(self.graph.node_weights()) {
             panes = panes.insert(*node_index, node_data.view(*node_index, &theme));
         }
 

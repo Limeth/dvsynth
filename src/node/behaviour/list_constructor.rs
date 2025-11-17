@@ -92,7 +92,7 @@ impl NodeBehaviour for ListConstructorNodeBehaviour {
         }
     }
 
-    fn view(&mut self /*, theme: &dyn Theme */) -> Option<Element<Self::Message>> {
+    fn view(&self /*, theme: &dyn Theme */) -> Option<Element<Self::Message>> {
         Some(
             Row::new()
                 // .theme(theme)

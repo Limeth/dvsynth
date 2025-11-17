@@ -89,7 +89,7 @@ impl NodeBehaviour for ArrayConstructorNodeBehaviour {
         }
     }
 
-    fn view(&mut self /*, theme: &dyn Theme*/) -> Option<Element<Self::Message>> {
+    fn view(&self /*, theme: &dyn Theme*/) -> Option<Element<Self::Message>> {
         Some(
             Row::new()
                 .push(

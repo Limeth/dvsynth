@@ -1081,7 +1081,7 @@ impl NodeData {
     }
 
     pub fn view(
-        &mut self,
+        &self,
         index: NodeIndex,
         theme: &Theme,
     ) -> FloatingPane<
@@ -1091,7 +1091,7 @@ impl NodeData {
         iced_wgpu::Renderer,
         FloatingPanesBehaviour<Message, iced_wgpu::Renderer>,
     > {
-        let mut builder = NodeElement::builder(index, &mut self.element_state).node_behaviour_element(
+        let mut builder = NodeElement::builder(index, &self.element_state).node_behaviour_element(
             self.behaviour.view(/*theme*/).map(move |element| {
                 element.map(move |message| Message::NodeMessage {
                     node: index,
@@ -1118,8 +1118,8 @@ impl NodeData {
         // Themeable::theme(
         FloatingPane::builder(
             node_element,
-            &mut self.floating_pane_state,
-            &mut self.floating_pane_behaviour_state,
+            &self.floating_pane_state,
+            &self.floating_pane_behaviour_state,
             FloatingPaneBehaviourData { node_configuration: self.configuration.clone() },
         )
         //,
