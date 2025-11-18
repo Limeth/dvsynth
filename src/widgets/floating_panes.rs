@@ -30,7 +30,7 @@ pub struct ContentDrawResult /*<R: WidgetRenderer>*/ {
 
 /// A widget-like trait for customizing the behaviour of the [`FloatingPanes`] widget
 pub trait FloatingPanesBehaviour<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer>: Sized {
-    type FloatingPaneIndex: Hash + Eq;
+    type FloatingPaneIndex: Clone + Copy + Hash + Eq;
 
     /// Additional data passed by value during construction of each pane.
     /// Custom data to pass to the FloatingPanes widget (shared by all floating panes) can be
@@ -504,7 +504,7 @@ impl<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a
     }
 }
 
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug, Clone, PartialEq)]
 pub struct GrabStateResize {
     pub grab_element_position: Vec2<f32>,
     pub grab_element_size: Vec2<f32>,
@@ -520,7 +520,7 @@ impl Hash for GrabStateResize {
     }
 }
 
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug, Clone, PartialEq)]
 pub struct GrabStateMove {
     pub grab_element_position: Vec2<f32>,
     pub grab_mouse_position: Vec2<f32>,
@@ -551,7 +551,7 @@ impl PaneResizeDirection {
     }
 }
 
-#[derive(Debug, Hash, Clone, Copy)]
+#[derive(Debug, Hash, Clone, Copy, PartialEq)]
 pub struct PaneResizeDirections(Vec2<PaneResizeDirection>);
 
 impl PaneResizeDirections {
@@ -583,7 +583,7 @@ impl DerefMut for PaneResizeDirections {
     }
 }
 
-#[derive(Debug, Hash, Clone)]
+#[derive(Debug, Hash, Clone, PartialEq)]
 pub enum Gesture {
     /// To pan across the pane view (via panes_offset)
     GrabBackground(GrabStateMove),
@@ -620,7 +620,6 @@ impl Gesture {
 
 #[derive(Default, Debug)]
 pub struct FloatingPanesState {
-    pub cursor_position: Vec2<f32>,
     /// The vector to offset all floating panes' positions by
     pub panes_offset: Vec2<f32>,
     pub gesture: Option<Gesture>,
@@ -650,6 +649,8 @@ pub struct FloatingPanes<
     // pub style: Option<<R as WidgetRenderer>::StyleFloatingPanes>,
     pub children: IndexMap<C::FloatingPaneIndex, FloatingPane<'a, M, T, R, C>>,
     pub on_layout_change: Box<dyn Fn() -> M>,
+    pub on_gesture_change: Box<dyn Fn(Option<Gesture>) -> M>,
+    pub on_pane_title_bar_status_change: Box<dyn Fn(C::FloatingPaneIndex, InteractionStatus) -> M>,
 }
 
 impl<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a, M, T, R>>
@@ -719,14 +720,19 @@ impl<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a
         self.children.get_index_of(pane_index)
     }
 
-    pub fn update_pending_gestures(&mut self, layout: FloatingPanesLayout, shell: &mut Shell<'_, M>) {
+    pub fn update_pending_gestures(
+        &mut self,
+        cursor_position: Vec2<f32>,
+        layout: FloatingPanesLayout,
+        shell: &mut Shell<'_, M>,
+    ) {
         // Update the interaction status of title bars
         for ((_, (_, pane)), pane_layout) in self.children.iter_mut().enumerate().zip(layout.panes()) {
             let content_layout = pane_layout.content();
             let pane_bounds = pane_layout.bounds();
-            let cursor_on_pane = pane_bounds.contains(self.state.cursor_position.into_array().into());
-            let cursor_on_title = cursor_on_pane
-                && !content_layout.bounds().contains(self.state.cursor_position.into_array().into());
+            let cursor_on_pane = pane_bounds.contains(cursor_position.into_array().into());
+            let cursor_on_title =
+                cursor_on_pane && !content_layout.bounds().contains(cursor_position.into_array().into());
 
             let new_title_bar_status =
                 if cursor_on_title { InteractionStatus::Hovered } else { InteractionStatus::Idle };
@@ -739,10 +745,8 @@ impl<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a
         }
 
         self.state.gesture = self.children.iter_mut().enumerate().zip(layout.panes()).find_map({
-            let panes_state = &self.state;
             move |((pane_index, (_, pane)), pane_layout)| {
-                let resize_directions =
-                    pane.get_pane_resize_directions(pane_layout, panes_state.cursor_position);
+                let resize_directions = pane.get_pane_resize_directions(pane_layout, cursor_position);
 
                 if !resize_directions.is_none() {
                     Some(Gesture::ResizePane {
@@ -751,7 +755,7 @@ impl<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a
                         grab_state: GrabStateResize {
                             grab_element_position: pane.state.position,
                             grab_element_size: Into::<[f32; 2]>::into(pane_layout.bounds().size()).into(),
-                            grab_mouse_position: panes_state.cursor_position,
+                            grab_mouse_position: cursor_position,
                         },
                         directions: resize_directions,
                     })
@@ -849,19 +853,19 @@ impl<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a
         // cursor is on top of a pane.
         match &event {
             Event::Mouse(mouse::Event::CursorMoved { position: Point { x, y } }) => {
-                self.state.cursor_position = [*x, *y].into();
+                let cursor_position: Vec2<f32> = [*x, *y].into();
 
                 match self.state.gesture.clone() {
                     Some(Gesture::GrabPane { pane_index, grab_state }) => {
                         if let Some((_, pane)) = self.children.get_index_mut(pane_index) {
-                            pane.state.position = self.state.cursor_position.as_::<f32>()
+                            pane.state.position = cursor_position.as_::<f32>()
                                 + grab_state.grab_element_position
                                 - grab_state.grab_mouse_position;
                             shell.publish((self.on_layout_change)());
                         }
                     }
                     Some(Gesture::GrabBackground(grab_state)) => {
-                        self.state.panes_offset = self.state.cursor_position.as_::<f32>()
+                        self.state.panes_offset = cursor_position.as_::<f32>()
                             + grab_state.grab_element_position
                             - grab_state.grab_mouse_position;
                         shell.publish((self.on_layout_change)());
@@ -877,8 +881,7 @@ impl<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a
                                         grab_state.grab_element_position[component_index];
                                     let original_mouse_position =
                                         grab_state.grab_mouse_position[component_index];
-                                    let current_mouse_position =
-                                        self.state.cursor_position[component_index] as f32;
+                                    let current_mouse_position = cursor_position[component_index] as f32;
                                     let mouse_offset = current_mouse_position - original_mouse_position;
                                     let new_element_size: f32 = std::cmp::max(
                                         OrderedFloat(
@@ -911,29 +914,36 @@ impl<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a
                         }
                     }
                     _ => {
-                        self.update_pending_gestures(layout, shell);
+                        self.update_pending_gestures(cursor_position, layout, shell);
                     }
                 }
             }
-            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
-                self.state.gesture = self.children.iter_mut().enumerate().find_map({
+            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
+                if let Some(cursor_position) = cursor.position() =>
+            {
+                let pane_to_focus_and_gesture = self.children.iter_mut().enumerate().find_map({
                     let panes_state = &self.state;
-                    move |(pane_index, (_, pane))| {
+                    move |(pane_index, (pane_index_2, pane))| {
                         if let Some(Gesture::ResizePane { pane_index, grab_state, directions, .. }) =
                             panes_state.gesture.clone()
                         {
-                            Some(Gesture::ResizePane { pending: false, pane_index, grab_state, directions })
+                            Some((
+                                None,
+                                Gesture::ResizePane { pending: false, pane_index, grab_state, directions },
+                            ))
                         } else {
                             if pane.state.title_bar_status == InteractionStatus::Hovered {
-                                pane.state.title_bar_status = InteractionStatus::Focused;
-
-                                Some(Gesture::GrabPane {
-                                    pane_index,
-                                    grab_state: GrabStateMove {
-                                        grab_mouse_position: panes_state.cursor_position,
-                                        grab_element_position: pane.state.position,
+                                Some((
+                                    Some(*pane_index_2),
+                                    Gesture::GrabPane {
+                                        pane_index,
+                                        grab_state: GrabStateMove {
+                                            grab_mouse_position: [cursor_position.x, cursor_position.y]
+                                                .into(),
+                                            grab_element_position: pane.state.position,
+                                        },
                                     },
-                                })
+                                ))
                             } else {
                                 None
                             }
@@ -941,25 +951,42 @@ impl<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a
                     }
                 });
 
-                if self.state.gesture.is_none() {
-                    let mouse_on_top_of_pane = layout.panes().any({
-                        let panes_state = &self.state;
-                        let cursor_point: Point = panes_state.cursor_position.into_array().into();
-                        move |pane_layout| pane_layout.bounds().contains(cursor_point)
-                    });
+                let (pane_to_focus, mut gesture) = pane_to_focus_and_gesture
+                    .map(|(pane_to_focus, gesture)| (pane_to_focus, Some(gesture)))
+                    .unwrap_or((None, None));
+
+                if gesture.is_none() {
+                    let mouse_on_top_of_pane =
+                        layout.panes().any(move |pane_layout| cursor.is_over(pane_layout.bounds()));
 
                     if !mouse_on_top_of_pane {
-                        self.state.gesture = Some(Gesture::GrabBackground(GrabStateMove {
-                            grab_mouse_position: self.state.cursor_position,
+                        gesture = Some(Gesture::GrabBackground(GrabStateMove {
+                            grab_mouse_position: [cursor_position.x, cursor_position.y].into(),
                             grab_element_position: self.state.panes_offset,
                         }));
                     }
-                } else {
-                    shell.publish((self.on_layout_change)());
                 }
+
+                if let Some(pane_to_focus) = pane_to_focus {
+                    shell.publish((self.on_pane_title_bar_status_change)(
+                        pane_to_focus,
+                        InteractionStatus::Focused,
+                    ));
+                }
+
+                if self.state.gesture != gesture {
+                    shell.publish((self.on_gesture_change)(gesture));
+                }
+
+                // else {
+                //     shell.publish((self.on_layout_change)());
+                // }
             }
-            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
-                self.update_pending_gestures(layout, shell);
+            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
+                if let Some(cursor_position) = cursor.position() =>
+            {
+                let cursor_position: Vec2<f32> = [cursor_position.x, cursor_position.y].into();
+                self.update_pending_gestures(cursor_position, layout, shell);
             }
             _ => (),
         }

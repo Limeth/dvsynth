@@ -7,6 +7,7 @@
 #![feature(trivial_bounds)]
 #![feature(associated_type_defaults)]
 #![feature(trait_alias)]
+#![feature(if_let_guard)]
 //!
 //! Task list:
 //! * Finish adding generic params to channel types
