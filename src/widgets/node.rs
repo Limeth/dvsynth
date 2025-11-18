@@ -574,10 +574,7 @@ where
                         panes,
                         state,
                         Event::Mouse(MouseEvent::CursorMoved {
-                            position: Point {
-                                x: panes.state.cursor_position.x,
-                                y: panes.state.cursor_position.y,
-                            },
+                            position: cursor.position().unwrap_or_default(),
                         }),
                         layout,
                         cursor,
@@ -658,7 +655,8 @@ where
                 column = column.push(container);
             }
 
-            let position: Point = panes.state.cursor_position.into_array().into();
+            // let position: Point = panes.state.cursor_position.into_array().into();
+            let position = Point { x: translation.x, y: translation.y };
             let overlay = WidgetOverlay::<M, T, R, _>::new(
                 column,
                 WidgetOverlayAlignment { top: true, left: false },
@@ -939,8 +937,9 @@ where R: margin::WidgetRenderer
                     &get_is_aliased!(panes),
                     *selected_channel,
                 );
+                let target_position = cursor.position().unwrap_or_default();
 
-                (panes.state.cursor_position, connection_pass_by)
+                ([target_position.x, target_position.y].into(), connection_pass_by)
             };
 
             let (from, to) = match selected_channel.channel_direction {
@@ -1206,7 +1205,7 @@ impl<M: Clone, T, R: WidgetRenderer, W: Widget<M, T, R>> Overlay<M, T, R> for Wi
         layout: Layout<'_>,
         cursor: Cursor,
     ) {
-        self.widget.draw(&mut self.tree(), renderer, theme, style, layout, cursor, &layout.bounds())
+        self.widget.draw(&self.tree(), renderer, theme, style, layout, cursor, &layout.bounds())
     }
 }
 

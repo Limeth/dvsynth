@@ -648,7 +648,11 @@ pub struct FloatingPanes<
     pub extents: Vec2<f32>,
     // pub style: Option<<R as WidgetRenderer>::StyleFloatingPanes>,
     pub children: IndexMap<C::FloatingPaneIndex, FloatingPane<'a, M, T, R, C>>,
+    // TODO: This shouldn't be necessary -- consider removing.
     pub on_layout_change: Box<dyn Fn() -> M>,
+    pub on_pane_move_to: Box<dyn Fn(C::FloatingPaneIndex, Vec2<f32>) -> M>,
+    pub on_pane_resize: Box<dyn Fn(C::FloatingPaneIndex, Vec2<FloatingPaneLength>) -> M>,
+    pub on_background_move_to: Box<dyn Fn(Vec2<f32>) -> M>,
     pub on_gesture_change: Box<dyn Fn(Option<Gesture>) -> M>,
     pub on_pane_title_bar_status_change: Box<dyn Fn(C::FloatingPaneIndex, InteractionStatus) -> M>,
 }
@@ -661,6 +665,11 @@ impl<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a
         behaviour_state: &'a C::FloatingPanesBehaviourState,
         behaviour: C,
         on_layout_change: Box<dyn Fn() -> M>,
+        on_pane_move_to: Box<dyn Fn(C::FloatingPaneIndex, Vec2<f32>) -> M>,
+        on_pane_resize: Box<dyn Fn(C::FloatingPaneIndex, Vec2<FloatingPaneLength>) -> M>,
+        on_background_move_to: Box<dyn Fn(Vec2<f32>) -> M>,
+        on_gesture_change: Box<dyn Fn(Option<Gesture>) -> M>,
+        on_pane_title_bar_status_change: Box<dyn Fn(C::FloatingPaneIndex, InteractionStatus) -> M>,
     ) -> Self {
         Self {
             state,
@@ -672,6 +681,11 @@ impl<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a
             // style: None,
             children: Default::default(),
             on_layout_change,
+            on_pane_move_to,
+            on_pane_resize,
+            on_background_move_to,
+            on_gesture_change,
+            on_pane_title_bar_status_change,
         }
     }
 
@@ -727,7 +741,8 @@ impl<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a
         shell: &mut Shell<'_, M>,
     ) {
         // Update the interaction status of title bars
-        for ((_, (_, pane)), pane_layout) in self.children.iter_mut().enumerate().zip(layout.panes()) {
+        for ((_, (pane_index, pane)), pane_layout) in self.children.iter_mut().enumerate().zip(layout.panes())
+        {
             let content_layout = pane_layout.content();
             let pane_bounds = pane_layout.bounds();
             let cursor_on_pane = pane_bounds.contains(cursor_position.into_array().into());
@@ -738,13 +753,12 @@ impl<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a
                 if cursor_on_title { InteractionStatus::Hovered } else { InteractionStatus::Idle };
 
             if new_title_bar_status != pane.state.title_bar_status {
-                pane.state.title_bar_status = new_title_bar_status;
-
+                shell.publish((self.on_pane_title_bar_status_change)(*pane_index, new_title_bar_status));
                 shell.publish((self.on_layout_change)());
             }
         }
 
-        self.state.gesture = self.children.iter_mut().enumerate().zip(layout.panes()).find_map({
+        let gesture = self.children.iter_mut().enumerate().zip(layout.panes()).find_map({
             move |((pane_index, (_, pane)), pane_layout)| {
                 let resize_directions = pane.get_pane_resize_directions(pane_layout, cursor_position);
 
@@ -764,6 +778,8 @@ impl<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a
                 }
             }
         });
+
+        shell.publish((self.on_gesture_change)(gesture));
     }
 }
 
@@ -857,24 +873,28 @@ impl<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a
 
                 match self.state.gesture.clone() {
                     Some(Gesture::GrabPane { pane_index, grab_state }) => {
-                        if let Some((_, pane)) = self.children.get_index_mut(pane_index) {
-                            pane.state.position = cursor_position.as_::<f32>()
+                        if let Some((pane_index_2, pane)) = self.children.get_index_mut(pane_index) {
+                            let pane_position = cursor_position.as_::<f32>()
                                 + grab_state.grab_element_position
                                 - grab_state.grab_mouse_position;
+                            shell.publish((self.on_pane_move_to)(*pane_index_2, pane_position));
                             shell.publish((self.on_layout_change)());
                         }
                     }
                     Some(Gesture::GrabBackground(grab_state)) => {
-                        self.state.panes_offset = cursor_position.as_::<f32>()
+                        let background_position = cursor_position.as_::<f32>()
                             + grab_state.grab_element_position
                             - grab_state.grab_mouse_position;
+                        shell.publish((self.on_background_move_to)(background_position));
                         shell.publish((self.on_layout_change)());
                     }
                     Some(Gesture::ResizePane { pending: false, pane_index, grab_state, directions }) => {
-                        if let Some((_, pane)) = self.children.get_index_mut(pane_index) {
+                        if let Some((pane_index_2, pane)) = self.children.get_index_mut(pane_index) {
+                            let mut pane_size = pane.state.size;
+                            let mut pane_position = pane.state.position;
+
                             for component_index in 0..2 {
-                                if let FloatingPaneLength::Fixed(pane_size) =
-                                    &mut pane.state.size[component_index]
+                                if let FloatingPaneLength::Fixed(pane_size) = &mut pane_size[component_index]
                                 {
                                     let original_element_size = grab_state.grab_element_size[component_index];
                                     let original_element_position =
@@ -898,7 +918,7 @@ impl<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a
                                     .into();
                                     let size_delta = new_element_size - original_element_size;
 
-                                    pane.state.position[component_index] = original_element_position
+                                    pane_position[component_index] = original_element_position
                                         + size_delta
                                             * match directions[component_index] {
                                                 PaneResizeDirection::None | PaneResizeDirection::Positive => {
@@ -910,6 +930,8 @@ impl<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a
                                 }
                             }
 
+                            shell.publish((self.on_pane_move_to)(*pane_index_2, pane_position));
+                            shell.publish((self.on_pane_resize)(*pane_index_2, pane_size));
                             shell.publish((self.on_layout_change)());
                         }
                     }

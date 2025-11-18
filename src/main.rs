@@ -44,6 +44,7 @@ use node::behaviour::counter::CounterNodeBehaviour;
 use node::behaviour::*;
 use node::*;
 use petgraph::graph::NodeIndex;
+use style::InteractionStatus;
 use vek::Vec2;
 use widgets::*;
 
@@ -74,6 +75,24 @@ pub enum Message {
     },
     InsertConnection {
         connection: Connection,
+    },
+    FloatingPanesPaneMoveTo {
+        pane_index: NodeIndex,
+        position: Vec2<f32>,
+    },
+    FloatingPanesPaneResize {
+        pane_index: NodeIndex,
+        size: Vec2<FloatingPaneLength>,
+    },
+    FloatingPanesBackgroundMoveTo {
+        position: Vec2<f32>,
+    },
+    FloatingPanesGestureChange {
+        gesture: Option<Gesture>,
+    },
+    FloatingPanesPaneTitleBarStatusChange {
+        pane_index: NodeIndex,
+        title_bar_status: InteractionStatus,
     },
     FloatingPanesHighlightChanged {
         highlight: Option<Highlight>,
@@ -184,6 +203,32 @@ impl ApplicationState {
                 update_schedule = true;
                 Task::none()
             }
+            Message::FloatingPanesPaneMoveTo { pane_index, position } => {
+                if let Some(pane) = self.graph.node_weight_mut(pane_index) {
+                    pane.floating_pane_state.position = position;
+                }
+                Task::none()
+            }
+            Message::FloatingPanesPaneResize { pane_index, size } => {
+                if let Some(pane) = self.graph.node_weight_mut(pane_index) {
+                    pane.floating_pane_state.size = size;
+                }
+                Task::none()
+            }
+            Message::FloatingPanesBackgroundMoveTo { position } => {
+                self.floating_panes_state.panes_offset = position;
+                Task::none()
+            }
+            Message::FloatingPanesGestureChange { gesture } => {
+                self.floating_panes_state.gesture = gesture;
+                Task::none()
+            }
+            Message::FloatingPanesPaneTitleBarStatusChange { pane_index, title_bar_status } => {
+                if let Some(pane) = self.graph.node_weight_mut(pane_index) {
+                    pane.floating_pane_state.title_bar_status = title_bar_status;
+                }
+                Task::none()
+            }
             Message::FloatingPanesHighlightChanged { highlight } => {
                 self.floating_panes_content_state.highlight = highlight;
                 Task::none()
@@ -231,6 +276,14 @@ impl ApplicationState {
                 __marker: PhantomData,
             },
             Box::new(|| Message::RecomputeLayout),
+            Box::new(|pane_index, position| Message::FloatingPanesPaneMoveTo { pane_index, position }),
+            Box::new(|pane_index, size| Message::FloatingPanesPaneResize { pane_index, size }),
+            Box::new(|position| Message::FloatingPanesBackgroundMoveTo { position }),
+            Box::new(|gesture| Message::FloatingPanesGestureChange { gesture }),
+            Box::new(|pane_index, title_bar_status| Message::FloatingPanesPaneTitleBarStatusChange {
+                pane_index,
+                title_bar_status,
+            }),
         );
         // .theme(&*theme);
 

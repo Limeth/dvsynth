@@ -48,3 +48,7 @@ transient = "0.4.1"
 
 [package.metadata.docs.rs]
 rustdoc-args = [ "--html-in-header", "doc/katex.html" ]
+
+[profile.release-with-debug]
+inherits = "release"
+debug = true

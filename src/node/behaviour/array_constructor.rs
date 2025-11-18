@@ -131,7 +131,7 @@ impl NodeBehaviour for ArrayConstructorNodeBehaviour {
                             let mut cursor = Cursor::new(bytes);
 
                             for input in inputs.iter() {
-                                cursor.write(input.as_bytes().unwrap()).unwrap();
+                                cursor.write_all(input.as_bytes().unwrap()).unwrap();
                             }
                         })
                         .unwrap();
