@@ -1223,8 +1223,11 @@ typed_layout! {
             layout_fn: |parent: Layout<'a>, pane_index: usize| {
                 parent.children().nth(pane_index).unwrap()
             },
-            tree_fn: |parent: &Tree, pane_index: usize| {
-                parent.children().nth(pane_index).unwrap()
+            tree_ref_fn: |parent: &'a Tree, pane_index: usize| {
+                &parent.children[pane_index]
+            },
+            tree_mut_fn: |parent: &'a mut Tree, pane_index: usize| {
+                &mut parent.children[pane_index]
             },
         },
     ],
@@ -1247,11 +1250,17 @@ typed_layout! {
                     .children().nth(1).unwrap()
                     .children().nth(0).unwrap()
             },
-            tree_fn: |parent: &Tree| {
-                parent
-                    .children().nth(0).unwrap()
-                    .children().nth(1).unwrap()
-                    .children().nth(0).unwrap()
+            tree_ref_fn: |parent: &'a Tree| {
+                &parent
+                    .children[0]
+                    .children[1]
+                    .children[0]
+            },
+            tree_mut_fn: |parent: &'a mut Tree| {
+                &mut parent
+                    .children[0]
+                    .children[1]
+                    .children[0]
             },
         },
     ],

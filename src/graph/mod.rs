@@ -1,9 +1,6 @@
-use crate::ApplicationFlags;
-use crate::Element;
 use crate::Message;
 use crate::NodeMessage;
 use crate::graph::alloc::AllocationInner;
-use crate::node::behaviour::NodeBehaviourMessage;
 use crate::node::behaviour::{
     AllocatorHandle, ExecutionContext, MainThreadTask, NodeBehaviourContainer, NodeCommand,
     NodeEventContainer, NodeStateContainer,
@@ -22,7 +19,6 @@ use alloc::Allocator;
 use arc_swap::ArcSwapOption;
 use iced::Settings;
 use iced::Theme;
-use iced_futures::futures;
 use iced_wgpu::wgpu::{self, Backends, TextureFormat};
 use iced_winit::winit::window::Window;
 use petgraph::{Directed, Direction, stable_graph::StableGraph, visit::EdgeRef};
@@ -184,9 +180,7 @@ impl PreparedExecution {
                     .iter()
                     .map(|borrow_value_guard| {
                         let input_typed_bytes = borrow_value_guard.as_ref(&());
-                        let input_ref_option =
-                            unsafe { BorrowedRef::<OptionType>::from_unchecked_type(input_typed_bytes) };
-                        input_ref_option
+                        unsafe { BorrowedRef::<OptionType>::from_unchecked_type(input_typed_bytes) }
                     })
                     .collect::<Vec<_>>()
                     .into_boxed_slice();
@@ -197,7 +191,7 @@ impl PreparedExecution {
                     .into_boxed_slice();
 
                 // Mutable borrows
-                let mut mutable_borrow_value_guards = task
+                let mutable_borrow_value_guards = task
                     .mutable_borrows
                     .iter()
                     .map(|input| tasks_preceding[input.task_index].as_ref().unwrap().read().unwrap())
@@ -217,9 +211,7 @@ impl PreparedExecution {
                     .zip(rcs.iter_mut())
                     .map(|(mutable_borrow_value_guard, rc)| {
                         let input_typed_bytes = mutable_borrow_value_guard.as_mut(rc);
-                        let input_ref_option =
-                            unsafe { BorrowedRefMut::<OptionType>::from_unchecked_type(input_typed_bytes) };
-                        input_ref_option
+                        unsafe { BorrowedRefMut::<OptionType>::from_unchecked_type(input_typed_bytes) }
                     })
                     .collect::<Vec<_>>()
                     .into_boxed_slice();
@@ -230,7 +222,7 @@ impl PreparedExecution {
                     .into_boxed_slice();
 
                 // Input values
-                let mut input_value_guards = task
+                let input_value_guards = task
                     .inputs
                     .iter()
                     .map(|input| tasks_preceding[input.task_index].as_ref().unwrap().read().unwrap())
@@ -250,9 +242,7 @@ impl PreparedExecution {
                     .zip(rcs.iter_mut())
                     .map(|(input_value_guard, rc)| {
                         let input_typed_bytes = input_value_guard.as_mut(rc);
-                        let input_ref_option =
-                            unsafe { BorrowedRefMut::<OptionType>::from_unchecked_type(input_typed_bytes) };
-                        input_ref_option
+                        unsafe { BorrowedRefMut::<OptionType>::from_unchecked_type(input_typed_bytes) }
                     })
                     .collect::<Vec<_>>()
                     .into_boxed_slice();
@@ -279,12 +269,12 @@ impl PreparedExecution {
 
                 {
                     let execution_context = ExecutionContext {
-                        application_context: &context,
+                        application_context: context,
                         allocator_handle,
-                        borrows: &*input_borrow_refs,
-                        mutable_borrows: &mut *input_mutable_borrow_refs,
-                        inputs: &mut *input_values,
-                        outputs: &mut *output_values,
+                        borrows: &input_borrow_refs,
+                        mutable_borrows: &mut input_mutable_borrow_refs,
+                        inputs: &mut input_values,
+                        outputs: &mut output_values,
                     };
 
                     // Execute task
@@ -314,9 +304,7 @@ impl PreparedExecution {
                 .iter()
                 .map(|borrow_value_guard| {
                     let input_typed_bytes = borrow_value_guard.as_ref(&());
-                    let input_ref_option =
-                        unsafe { BorrowedRef::<OptionType>::from_unchecked_type(input_typed_bytes) };
-                    input_ref_option
+                    unsafe { BorrowedRef::<OptionType>::from_unchecked_type(input_typed_bytes) }
                 })
                 .collect::<Vec<_>>()
                 .into_boxed_slice();
@@ -327,7 +315,7 @@ impl PreparedExecution {
                 .into_boxed_slice();
 
             // Mutable borrows
-            let mut mutable_borrow_value_guards = task
+            let mutable_borrow_value_guards = task
                 .mutable_borrows
                 .iter()
                 .map(|input| tasks_preceding[input.task_index].as_ref().unwrap().read().unwrap())
@@ -347,20 +335,18 @@ impl PreparedExecution {
                 .zip(rcs.iter_mut())
                 .map(|(mutable_borrow_value_guard, rc)| {
                     let input_typed_bytes = mutable_borrow_value_guard.as_mut(rc);
-                    let input_ref_option =
-                        unsafe { BorrowedRefMut::<OptionType>::from_unchecked_type(input_typed_bytes) };
-                    input_ref_option
+                    unsafe { BorrowedRefMut::<OptionType>::from_unchecked_type(input_typed_bytes) }
                 })
                 .collect::<Vec<_>>()
                 .into_boxed_slice();
-            let mut input_mutable_borrow_refs = input_mutable_borrows
+            let input_mutable_borrow_refs = input_mutable_borrows
                 .iter_mut()
                 .map(|input_ref_option| input_ref_option.get_mut().unwrap())
                 .collect::<Vec<_>>()
                 .into_boxed_slice();
 
             // Input values
-            let mut input_value_guards = task
+            let input_value_guards = task
                 .inputs
                 .iter()
                 .map(|input| tasks_preceding[input.task_index].as_ref().unwrap().read().unwrap())
@@ -375,14 +361,12 @@ impl PreparedExecution {
                 .collect::<Vec<_>>()
                 .into_boxed_slice();
             let mut rcs = vec![(); input_value_guards.len()];
-            let mut input_values = input_value_guards
+            let input_values = input_value_guards
                 .iter_mut()
                 .zip(rcs.iter_mut())
                 .map(|(input_value_guard, rc)| {
                     let input_typed_bytes = input_value_guard.as_mut(rc);
-                    let input_ref_option =
-                        unsafe { BorrowedRefMut::<OptionType>::from_unchecked_type(input_typed_bytes) };
-                    input_ref_option
+                    unsafe { BorrowedRefMut::<OptionType>::from_unchecked_type(input_typed_bytes) }
                 })
                 .collect::<Vec<_>>()
                 .into_boxed_slice();
@@ -395,7 +379,7 @@ impl PreparedExecution {
                 .collect::<Vec<_>>()
                 .into_boxed_slice();
             let mut rcs = vec![(); output_value_guards.len()];
-            let mut output_values = output_value_guards
+            let output_values = output_value_guards
                 .iter_mut()
                 .zip(rcs.iter_mut())
                 .map(|(output_value, rc)| {
@@ -517,7 +501,7 @@ impl GraphValidationError {
     pub fn display(&self) -> GraphValidationErrorDisplay<'_> {
         use GraphValidationError::*;
         match self {
-            IncompleteInput(undirected_channel_id) => GraphValidationErrorDisplay {
+            IncompleteInput(_undirected_channel_id) => GraphValidationErrorDisplay {
                 title: Cow::Borrowed("Incomplete input"),
                 // TODO: Specify which exact channel is missing the connection.
                 description: Cow::Borrowed("Missing a connection for input channel."),
@@ -525,7 +509,7 @@ impl GraphValidationError {
                     "Add a connection or disconnect all inputs to disable the node.",
                 )),
             },
-            StronglyConnectedComponent { nodes, connections } => GraphValidationErrorDisplay {
+            StronglyConnectedComponent { nodes: _, connections: _ } => GraphValidationErrorDisplay {
                 title: Cow::Borrowed("Graph not acyclic"),
                 description: Cow::Borrowed("The graph contains one or more loops."),
                 suggestion: Some(Cow::Borrowed("Remove highlighted loops.")),
@@ -726,8 +710,8 @@ impl ExecutionGraph {
             })
         });
 
-        if sorted_nodes.is_err() {
-            errors.extend(sorted_nodes.as_ref().unwrap_err().clone());
+        if let Err(sorted_nodes) = &sorted_nodes {
+            errors.extend(sorted_nodes.clone());
         }
 
         if errors.is_empty() { Ok(sorted_nodes.unwrap()) } else { Err(errors) }
@@ -746,7 +730,7 @@ impl ExecutionGraph {
         for node_index in ordered_node_indices {
             let node = self.node_weight(node_index);
             let node = node.as_ref().unwrap();
-            let optional_task = 'optional_task: loop {
+            let optional_task = (|| {
                 let mut borrows: Vec<Option<TaskInput>> =
                     vec![None; node.configuration.channels_by_shared_reference.len()];
                 let mut mutable_borrows: Vec<Option<TaskInput>> =
@@ -768,13 +752,7 @@ impl ExecutionGraph {
                             output_value_channel_index: edge.endpoint_from.channel_index,
                         }
                     } else {
-                        let source_task =
-                            if let Some(source_task) = tasks[immediate_source_task_index].as_mut() {
-                                source_task
-                            } else {
-                                break 'optional_task None;
-                            };
-
+                        let source_task = tasks[immediate_source_task_index].as_mut()?;
                         let source_node = self.node_weight(source_task.node_index).unwrap();
                         let global_output_channel_index =
                             source_node.configuration.get_global_channel_index(edge.endpoint_from);
@@ -798,7 +776,7 @@ impl ExecutionGraph {
                     used = true;
                 }
 
-                break 'optional_task if used {
+                if used {
                     let borrows = borrows
                         .into_iter()
                         .map(|value| value.expect("An input channel is missing a value."))
@@ -825,8 +803,8 @@ impl ExecutionGraph {
                     })
                 } else {
                     None
-                };
-            };
+                }
+            })();
 
             tasks.push(optional_task);
         }
@@ -1027,7 +1005,7 @@ impl GraphExecutor {
                     || prepared_execution.as_ref().unwrap().generation != active_schedule.generation
                 {
                     prepared_execution = Some(PreparedExecution::from(
-                        &active_schedule,
+                        active_schedule,
                         &mut self.application_context,
                         prepared_execution.or(last_prepared_execution.take()),
                     ));
@@ -1151,7 +1129,7 @@ impl<T> From<T> for EdgeEndpoint
 where T: Into<UndirectedChannelIdentifier>
 {
     fn from(from: T) -> Self {
-        let UndirectedChannelIdentifier { channel_index, pass_by, .. } = from.into().into();
+        let UndirectedChannelIdentifier { channel_index, pass_by, .. } = from.into();
         Self { channel_index, pass_by }
     }
 }
@@ -1265,7 +1243,7 @@ impl ConnectionValidityError {
         }
     }
 
-    pub fn display(&self, connection: &Connection) -> GraphValidationErrorDisplay<'_> {
+    pub fn display(&self, _connection: &Connection) -> GraphValidationErrorDisplay<'_> {
         use ConnectionValidityError::*;
         match self {
             Loop => GraphValidationErrorDisplay {
@@ -1324,7 +1302,7 @@ impl Connection {
         let channel_from = get_channel(from);
         let channel_to = get_channel(to);
 
-        if !TypeEnum::is_abi_compatible(&channel_from.ty, &channel_to.ty) {
+        if !TypeEnum::is_abi_compatible(channel_from.ty, channel_to.ty) {
             return Err(ConnectionValidityError::IncompatibleType);
         }
 
@@ -1366,7 +1344,7 @@ impl Connection {
             ChannelDirection::In => 1,
             ChannelDirection::Out => 0,
         };
-        self.0[index].clone().into_directed(direction)
+        self.0[index].into_directed(direction)
     }
 
     pub fn to(&self) -> ChannelIdentifier {

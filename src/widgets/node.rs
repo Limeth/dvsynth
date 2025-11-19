@@ -962,7 +962,7 @@ where R: margin::WidgetRenderer
 
         // Draw connection points
         {
-            for (pane_layout, (node_index, pane)) in layout.panes().zip(&panes.children) {
+            for (pane_layout, (&node_index, pane)) in layout.panes().zip(&panes.children) {
                 let node = panes.children.get(&node_index).unwrap();
 
                 fn debug_layout(layout: &Layout, depth: usize) {
@@ -978,7 +978,7 @@ where R: margin::WidgetRenderer
                     }
                 }
 
-                print!("Node #{node_index:?} {}", pane.behaviour_data.);
+                print!("Node #{node_index:?}");
                 debug_layout(&pane_layout.into(), 0);
 
                 let inputs_layout = pane_layout
@@ -1233,7 +1233,7 @@ typed_layout! {
             parent_type_name: FloatingPaneContent,
             fn_name: channels_with_direction,
             fn_args: [channel_direction: ChannelDirection],
-            fn: |parent: Layout<'a>, channel_direction: ChannelDirection| {
+            layout_fn: |parent: Layout<'a>, channel_direction: ChannelDirection| {
                 parent
                     .children()
                     .nth(1)
@@ -1251,6 +1251,26 @@ typed_layout! {
                     })
                     .unwrap()
             },
+            tree_ref_fn: |parent: &'a Tree, channel_direction: ChannelDirection| {
+                &parent
+                    .children[1]
+                    .children[1]
+                    .children[1]
+                    .children[match channel_direction {
+                        ChannelDirection::In => 0,
+                        ChannelDirection::Out => 2,
+                    }]
+            },
+            tree_mut_fn: |parent: &'a mut Tree, channel_direction: ChannelDirection| {
+                &mut parent
+                    .children[1]
+                    .children[1]
+                    .children[1]
+                    .children[match channel_direction {
+                        ChannelDirection::In => 0,
+                        ChannelDirection::Out => 2,
+                    }]
+            },
         },
     ],
 }
@@ -1262,8 +1282,14 @@ typed_layout! {
             parent_type_name: Channels,
             fn_name: channel,
             fn_args: [channel_index: usize],
-            fn: |parent: Layout<'a>, channel_index: usize| {
+            layout_fn: |parent: Layout<'a>, channel_index: usize| {
                 parent.children().nth(channel_index).unwrap()
+            },
+            tree_ref_fn: |parent: &'a Tree, channel_index: usize| {
+                &parent.children[channel_index]
+            },
+            tree_mut_fn: |parent: &'a mut Tree, channel_index: usize| {
+                &mut parent.children[channel_index]
             },
         },
     ],

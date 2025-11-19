@@ -62,13 +62,19 @@ macro_rules! typed_layout {
                 }
             }
 
-            impl<'a> TypedTreeRef for [< $type_name TreeRef >]<'a> {
+            impl<'a> TypedTreeRef<'a> for [< $type_name TreeRef >]<'a> {
                 fn tree_ref(&self) -> &Tree {
                     &self.0
                 }
             }
 
-            impl<'a> TypedTreeMut for [< $type_name TreeMut >]<'a> {
+            impl<'a> TypedTreeRef<'a> for [< $type_name TreeMut >]<'a> {
+                fn tree_ref(&self) -> &Tree {
+                    &self.0
+                }
+            }
+
+            impl<'a> TypedTreeMut<'a> for [< $type_name TreeMut >]<'a> {
                 fn tree_mut(&mut self) -> &mut Tree {
                     &mut self.0
                 }
@@ -100,8 +106,20 @@ macro_rules! typed_layout {
                 }
             }
 
-            impl<'a> From<[< $type_name TreeRef >]<'a>> for ::iced_core::widget::Tree {
-                fn from(tree: [< $type_name Tree >]) -> Self {
+            impl<'a> From<[< $type_name TreeRef >]<'a>> for &'a ::iced_core::widget::Tree {
+                fn from(tree: [< $type_name TreeRef >]<'a>) -> Self {
+                    tree.0
+                }
+            }
+
+            impl<'a> From<&'a mut ::iced_core::widget::Tree> for [< $type_name TreeMut >]<'a> {
+                fn from(tree: &'a mut ::iced_core::widget::Tree) -> Self {
+                    Self(tree)
+                }
+            }
+
+            impl<'a> From<[< $type_name TreeMut >]<'a>> for &'a mut ::iced_core::widget::Tree {
+                fn from(tree: [< $type_name TreeMut >]<'a>) -> Self {
                     tree.0
                 }
             }
@@ -121,16 +139,29 @@ macro_rules! typed_layout {
                         }
                     }
 
-                    impl [< $traverse_parent_type_name Tree >] {
+                    impl<'a> [< $traverse_parent_type_name TreeRef >]<'a> {
                         pub fn [< $traverse_fn_name >](
                             self,
                             $($traverse_fn_arg_name: $traverse_fn_arg_ty, )*
-                        ) -> [< $type_name Tree >]<'a> {
+                        ) -> [< $type_name TreeRef >]<'a> {
                             use ::iced_core::widget::Tree;
-                            // let [< $traverse_parent_type_name Tree >](parent) = self;
+                            // let [< $traverse_parent_type_name TreeRef >](parent) = self;
                             let parent = self.into();
-                            let layout = ($traverse_tree_fn)(parent, $($traverse_fn_arg_name, )*);
-                            [< $type_name Tree >]::from(layout)
+                            let tree = ($traverse_tree_ref_fn)(parent, $($traverse_fn_arg_name, )*);
+                            [< $type_name TreeRef >]::from(tree)
+                        }
+                    }
+
+                    impl<'a> [< $traverse_parent_type_name TreeMut >]<'a> {
+                        pub fn [< $traverse_fn_name >](
+                            self,
+                            $($traverse_fn_arg_name: $traverse_fn_arg_ty, )*
+                        ) -> [< $type_name TreeMut >]<'a> {
+                            use ::iced_core::widget::Tree;
+                            // let [< $traverse_parent_type_name TreeMut >](parent) = self;
+                            let parent = self.into();
+                            let tree = ($traverse_tree_mut_fn)(parent, $($traverse_fn_arg_name, )*);
+                            [< $type_name TreeMut >]::from(tree)
                         }
                     }
                 )*
@@ -148,13 +179,24 @@ macro_rules! typed_layout {
                     }
                 }
 
-                impl [< $children_of_parent_type_name Tree >] {
+                impl<'a> [< $children_of_parent_type_name TreeRef >]<'a> {
                     pub fn [< $children_of_fn_name >](
                         self,
-                    ) -> impl Iterator<Item=[< $type_name Tree >]> {
-                        let [< $children_of_parent_type_name Tree >](parent) = self;
-                        parent.children().map(|layout| {
-                            [< $type_name Tree >]::from(layout)
+                    ) -> impl Iterator<Item=[< $type_name TreeRef >]<'a>> {
+                        let [< $children_of_parent_type_name TreeRef >](parent) = self;
+                        parent.children.iter().map(|layout| {
+                            [< $type_name TreeRef >]::from(layout)
+                        })
+                    }
+                }
+
+                impl<'a> [< $children_of_parent_type_name TreeMut >]<'a> {
+                    pub fn [< $children_of_fn_name >](
+                        self,
+                    ) -> impl Iterator<Item=[< $type_name TreeMut >]<'a>> {
+                        let [< $children_of_parent_type_name TreeMut >](parent) = self;
+                        parent.children.iter_mut().map(|layout| {
+                            [< $type_name TreeMut >]::from(layout)
                         })
                     }
                 }
