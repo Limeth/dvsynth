@@ -4,7 +4,6 @@ use std::borrow::Cow;
 use std::fmt::{Debug, Display};
 use std::marker::PhantomData;
 use std::mem::Discriminant;
-use std::ops::Deref;
 
 pub use array::*;
 pub use list::*;
@@ -54,13 +53,13 @@ pub mod reference;
 pub mod texture;
 
 pub mod prelude {
-    pub use super::array::prelude::*;
+
     pub use super::list::prelude::*;
     pub use super::option::prelude::*;
-    pub use super::primitive::prelude::*;
+
     pub use super::ptr::prelude::*;
     pub use super::reference::prelude::*;
-    pub use super::texture::prelude::*;
+
     pub use super::{
         BytesRefExt, BytesRefMutExt, CloneTypeExt, CloneableTypeExt, DowncastFromTypeEnum,
         DowncastFromTypeEnumExt, SafeBinaryRepresentationTypeExt, SizeRefExt, SizeRefMutExt, SizeTypeExt,
@@ -78,11 +77,13 @@ pub unsafe fn visit_recursive_postorder<'a>(
     typed_bytes: TypedBytes<'a>,
     visit: &mut dyn FnMut(TypedBytes<'_>),
 ) {
-    for child in typed_bytes.children() {
-        visit_recursive_postorder(child, visit);
-    }
+    unsafe {
+        for child in typed_bytes.children() {
+            visit_recursive_postorder(child, visit);
+        }
 
-    (visit)(typed_bytes.borrow());
+        (visit)(typed_bytes.borrow());
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -94,9 +95,9 @@ pub enum Bytes<'a> {
 impl<'a> Bytes<'a> {
     pub fn borrow(&self) -> Bytes<'_> {
         use self::Bytes::*;
-        match self {
-            &Bytes(ref inner) => Bytes(&**inner),
-            &Object { ty_name, ref data } => Object { ty_name, data: &**data },
+        match *self {
+            Bytes(inner) => Bytes(inner),
+            Object { ty_name, data } => Object { ty_name, data },
         }
     }
 
@@ -151,7 +152,7 @@ impl<'a> TypedBytes<'a> {
     }
 
     pub fn borrow(&self) -> TypedBytes<'_> {
-        TypedBytes { bytes: self.bytes.borrow(), ty: Cow::Borrowed(&*self.ty.as_ref()), rc: &*self.rc }
+        TypedBytes { bytes: self.bytes.borrow(), ty: Cow::Borrowed(self.ty.as_ref()), rc: self.rc }
     }
 
     pub fn bytes(self) -> Bytes<'a> {
@@ -167,7 +168,7 @@ impl<'a> TypedBytes<'a> {
     }
 
     pub unsafe fn children(&self) -> Vec<TypedBytes<'_>> {
-        self.ty.as_ref().children(self.borrow())
+        unsafe { self.ty.as_ref().children(self.borrow()) }
     }
 
     pub fn map(
@@ -196,27 +197,31 @@ impl<'a> TypedBytes<'a> {
     }
 
     pub unsafe fn refcount_increment_recursive_for(&self, rc: &dyn Refcounter) {
-        visit_recursive_postorder(self.borrow(), &mut |typed_bytes| {
-            if let Some(ptr) = crate::ty::ptr::typed_bytes_to_ptr(typed_bytes) {
-                rc.refcount_increment(ptr);
-            }
-        });
+        unsafe {
+            visit_recursive_postorder(self.borrow(), &mut |typed_bytes| {
+                if let Some(ptr) = crate::ty::ptr::typed_bytes_to_ptr(typed_bytes) {
+                    rc.refcount_increment(ptr);
+                }
+            });
+        }
     }
 
     pub unsafe fn refcount_decrement_recursive_for(&self, rc: &dyn Refcounter) {
-        visit_recursive_postorder(self.borrow(), &mut |typed_bytes| {
-            if let Some(ptr) = crate::ty::ptr::typed_bytes_to_ptr(typed_bytes) {
-                rc.refcount_decrement(ptr);
-            }
-        });
+        unsafe {
+            visit_recursive_postorder(self.borrow(), &mut |typed_bytes| {
+                if let Some(ptr) = crate::ty::ptr::typed_bytes_to_ptr(typed_bytes) {
+                    rc.refcount_decrement(ptr);
+                }
+            });
+        }
     }
 
     pub unsafe fn refcount_increment_recursive(&self) {
-        self.refcount_increment_recursive_for(self.borrow().refcounter())
+        unsafe { self.refcount_increment_recursive_for(self.borrow().refcounter()) }
     }
 
     pub unsafe fn refcount_decrement_recursive(&self) {
-        self.refcount_decrement_recursive_for(self.borrow().refcounter())
+        unsafe { self.refcount_decrement_recursive_for(self.borrow().refcounter()) }
     }
 }
 
@@ -256,15 +261,15 @@ impl<'a> BytesMut<'a> {
 
     pub fn borrow_mut(&mut self) -> BytesMut<'_> {
         use self::BytesMut::*;
-        match self {
-            &mut Bytes(ref mut inner) => Bytes(&mut **inner),
-            &mut Object { ty_name, ref mut data } => Object { ty_name, data: &mut **data },
+        match *self {
+            Bytes(ref mut inner) => Bytes(inner),
+            Object { ty_name, ref mut data } => Object { ty_name, data: &mut **data },
         }
     }
 
     pub fn borrow(&self) -> Bytes<'_> {
         match self {
-            &BytesMut::Bytes(ref inner) => Bytes::Bytes(&**inner),
+            BytesMut::Bytes(inner) => Bytes::Bytes(inner),
             &BytesMut::Object { ty_name, ref data } => Bytes::Object { ty_name, data: &**data },
         }
     }
@@ -424,37 +429,41 @@ impl<'a> TypedBytesMut<'a> {
     pub fn borrow_mut(&mut self) -> TypedBytesMut<'_> {
         TypedBytesMut {
             bytes: self.bytes.borrow_mut(),
-            ty: Cow::Borrowed(&*self.ty.as_ref()),
+            ty: Cow::Borrowed(self.ty.as_ref()),
             rc: &mut *self.rc,
         }
     }
 
     pub fn borrow(&self) -> TypedBytes<'_> {
-        TypedBytes { bytes: self.bytes.borrow(), ty: Cow::Borrowed(&*self.ty.as_ref()), rc: &*self.rc }
+        TypedBytes { bytes: self.bytes.borrow(), ty: Cow::Borrowed(self.ty.as_ref()), rc: &*self.rc }
     }
 
     pub unsafe fn refcount_increment_recursive_for(&self, rc: &dyn Refcounter) {
-        visit_recursive_postorder(self.borrow(), &mut |typed_bytes| {
-            if let Some(ptr) = crate::ty::ptr::typed_bytes_to_ptr(typed_bytes) {
-                rc.refcount_increment(ptr);
-            }
-        });
+        unsafe {
+            visit_recursive_postorder(self.borrow(), &mut |typed_bytes| {
+                if let Some(ptr) = crate::ty::ptr::typed_bytes_to_ptr(typed_bytes) {
+                    rc.refcount_increment(ptr);
+                }
+            });
+        }
     }
 
     pub unsafe fn refcount_decrement_recursive_for(&self, rc: &dyn Refcounter) {
-        visit_recursive_postorder(self.borrow(), &mut |typed_bytes| {
-            if let Some(ptr) = crate::ty::ptr::typed_bytes_to_ptr(typed_bytes) {
-                rc.refcount_decrement(ptr);
-            }
-        });
+        unsafe {
+            visit_recursive_postorder(self.borrow(), &mut |typed_bytes| {
+                if let Some(ptr) = crate::ty::ptr::typed_bytes_to_ptr(typed_bytes) {
+                    rc.refcount_decrement(ptr);
+                }
+            });
+        }
     }
 
     pub unsafe fn refcount_increment_recursive(&self) {
-        self.refcount_increment_recursive_for(self.borrow().refcounter())
+        unsafe { self.refcount_increment_recursive_for(self.borrow().refcounter()) }
     }
 
     pub unsafe fn refcount_decrement_recursive(&self) {
-        self.refcount_decrement_recursive_for(self.borrow().refcounter())
+        unsafe { self.refcount_decrement_recursive_for(self.borrow().refcounter()) }
     }
 }
 
@@ -757,7 +766,7 @@ where T: DynTypeTrait
     }
 
     unsafe fn children<'a>(&'a self, data: TypedBytes<'a>) -> Vec<TypedBytes<'a>> {
-        <T as DynTypeTrait>::children(self, data)
+        unsafe { <T as DynTypeTrait>::children(self, data) }
     }
 }
 
@@ -821,14 +830,14 @@ macro_rules! define_type_enum {
                 }
             }
 
-            unsafe fn children_impl<'a>(&'a self, data: TypedBytes<'a>) -> Vec<TypedBytes<'a>> {
+            unsafe fn children_impl<'a>(&'a self, data: TypedBytes<'a>) -> Vec<TypedBytes<'a>> { unsafe {
                 use TypeEnum::*;
                 match self {
                     $(
                         $variant(inner) => TypeExt::children(inner, data),
                     )*
                 }
-            }
+            }}
 
             fn is_cloneable_impl(&self) -> bool {
                 use TypeEnum::*;
@@ -930,12 +939,12 @@ unsafe impl TypeExt for TypeEnum {
                     Cow::Owned(ArrayType::single_if_sized(other.clone()).unwrap())
                 };
 
-                return TypeExt::is_abi_compatible(a.as_ref(), b.as_ref());
+                TypeExt::is_abi_compatible(a.as_ref(), b.as_ref())
             }
-            (Unique(a), Unique(b)) => return TypeExt::is_abi_compatible(a, b),
-            (Shared(a), Shared(b)) => return TypeExt::is_abi_compatible(a, b),
-            (List(a), List(b)) => return TypeExt::is_abi_compatible(a, b),
-            (Texture(a), Texture(b)) => return TypeExt::is_abi_compatible(a, b),
+            (Unique(a), Unique(b)) => TypeExt::is_abi_compatible(a, b),
+            (Shared(a), Shared(b)) => TypeExt::is_abi_compatible(a, b),
+            (List(a), List(b)) => TypeExt::is_abi_compatible(a, b),
+            (Texture(a), Texture(b)) => TypeExt::is_abi_compatible(a, b),
             (a, b) => {
                 if let (Some(a), Some(b)) = (a.as_primitive_type_enum(), b.as_primitive_type_enum()) {
                     a.kind().is_abi_compatible(&b.kind())
@@ -953,7 +962,7 @@ unsafe impl TypeExt for TypeEnum {
     }
 
     unsafe fn children<'a>(&'a self, data: TypedBytes<'a>) -> Vec<TypedBytes<'a>> {
-        self.children_impl(data)
+        unsafe { self.children_impl(data) }
     }
 
     fn value_size_if_sized(&self) -> Option<usize> {
@@ -1144,7 +1153,7 @@ where R: RefMutAny<'a>
                 std::mem::swap(a, b);
             });
 
-            return Ok(());
+            Ok(())
         } else {
             unreachable!()
         }

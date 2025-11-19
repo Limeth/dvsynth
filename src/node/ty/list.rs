@@ -1,7 +1,7 @@
 use super::{
-    BorrowedRef, BorrowedRefMut, Bytes, DowncastFromTypeEnum, DynTypeDescriptor, DynTypeTrait, OwnedRefMut,
-    Ref, RefAny, RefAnyExt, RefMut, RefMutAny, RefMutAnyExt, SizeRefMutExt, SizedTypeExt, TypeDesc, TypeEnum,
-    TypeExt, TypeResolution, TypeTrait, TypedBytes, TypedBytesMut,
+    BorrowedRef, BorrowedRefMut, DowncastFromTypeEnum, DynTypeDescriptor, DynTypeTrait, OwnedRefMut, Ref,
+    RefAny, RefAnyExt, RefMut, RefMutAny, SizeRefMutExt, SizedTypeExt, TypeDesc, TypeEnum, TypeExt,
+    TypeResolution, TypeTrait, TypedBytes, TypedBytesMut,
 };
 use crate::node::behaviour::AllocatorHandle;
 use crate::util::CowMapExt;
@@ -132,13 +132,17 @@ impl ListAllocation {
         self.data.len() / self.item_size
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     pub fn push(&mut self, item: &[u8]) {
         assert_eq!(item.len(), self.item_size);
         self.data.extend_from_slice(item);
     }
 
     pub fn pop(&mut self) -> Result<(), ()> {
-        if self.data.len() > 0 {
+        if !self.data.is_empty() {
             self.data.truncate(self.data.len() - self.item_size);
             Ok(())
         } else {
@@ -150,22 +154,14 @@ impl ListAllocation {
         let start_index = index * self.item_size;
         let end_index = (index + 1) * self.item_size;
 
-        if end_index >= self.data.len() {
-            Some(&self.data[start_index..end_index])
-        } else {
-            None
-        }
+        if end_index >= self.data.len() { Some(&self.data[start_index..end_index]) } else { None }
     }
 
     pub fn get_mut(&mut self, index: usize) -> Option<&mut [u8]> {
         let start_index = index * self.item_size;
         let end_index = (index + 1) * self.item_size;
 
-        if end_index >= self.data.len() {
-            Some(&mut self.data[start_index..end_index])
-        } else {
-            None
-        }
+        if end_index >= self.data.len() { Some(&mut self.data[start_index..end_index]) } else { None }
     }
 }
 
@@ -385,7 +381,7 @@ where
 
         let child_size = ty.child_ty.value_size_if_sized().unwrap();
         let list = typed_bytes.bytes_mut().downcast_mut_unwrap::<ListAllocation>();
-        list.data.extend(std::iter::repeat(0).take(child_size));
+        list.data.extend(std::iter::repeat_n(0, child_size));
         let mut item_bytes = self.get_mut(self.len() - 1)?;
 
         (write_bytes)(item_bytes.bytes_mut_if_sized().unwrap());
@@ -416,7 +412,7 @@ where
             .expect("Cannot push references to dynamically allocated objects. Use pointers instead.");
         let tail = list.data.drain((index * item_size)..).collect::<Vec<_>>();
 
-        list.data.extend(bytes.into_iter().copied().chain(tail));
+        list.data.extend(bytes.iter().copied().chain(tail));
 
         // Apply refcounts
         unsafe {
@@ -440,7 +436,7 @@ impl<T: TypeDesc> DowncastFromTypeEnum for ListType<T> {
     fn resolve_from(from: TypeEnum) -> Option<TypeResolution<Self, TypeEnum>>
     where Self: Sized {
         if let TypeEnum::List(inner) = from {
-            inner.downcast_child::<T>().map(|ty| TypeResolution::Resolved(ty))
+            inner.downcast_child::<T>().map(TypeResolution::Resolved)
         } else {
             None
         }
@@ -448,7 +444,7 @@ impl<T: TypeDesc> DowncastFromTypeEnum for ListType<T> {
 
     fn resolve_from_ref(from: &TypeEnum) -> Option<TypeResolution<&Self, &TypeEnum>> {
         if let TypeEnum::List(inner) = from {
-            inner.downcast_child_ref::<T>().map(|ty| TypeResolution::Resolved(ty))
+            inner.downcast_child_ref::<T>().map(TypeResolution::Resolved)
         } else {
             None
         }
@@ -456,7 +452,7 @@ impl<T: TypeDesc> DowncastFromTypeEnum for ListType<T> {
 
     fn resolve_from_mut(from: &mut TypeEnum) -> Option<TypeResolution<&mut Self, &mut TypeEnum>> {
         if let TypeEnum::List(inner) = from {
-            inner.downcast_child_mut::<T>().map(|ty| TypeResolution::Resolved(ty))
+            inner.downcast_child_mut::<T>().map(TypeResolution::Resolved)
         } else {
             None
         }

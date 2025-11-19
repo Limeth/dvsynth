@@ -1,9 +1,7 @@
 #![allow(dead_code)]
 
-use iced::Background;
 use iced::Border;
 use iced::Color;
-use iced::Point;
 use iced::Rectangle;
 use iced::Shadow;
 use iced::border::Radius;
@@ -15,9 +13,7 @@ use iced_graphics::geometry::Fill;
 use iced_graphics::geometry::Path;
 use iced_graphics::geometry::Style;
 use iced_graphics::geometry::fill::Rule;
-use iced_graphics::geometry::frame::Backend;
 use iced_graphics::geometry::path::Builder;
-use iced_graphics::geometry::path::lyon_path::FillRule;
 use lyon_geom::euclid::Point2D;
 use lyon_geom::euclid::UnknownUnit;
 use lyon_geom::{LineSegment, QuadraticBezierSegment, Scalar, Segment};
@@ -25,7 +21,6 @@ use smallvec::{Array, SmallVec, smallvec};
 use std::borrow::Cow;
 use std::ops::Deref;
 use std::ops::DerefMut;
-use std::ops::Range;
 use vek::Vec2;
 
 use crate::widgets::PrimitiveEnum;
@@ -126,7 +121,7 @@ impl ConnectionSegment for QuadraticBezierSegment<f32> {
         roots
             .as_ref()
             .iter()
-            .filter(|&&t| t >= 0.0 && t <= 1.0)
+            .filter(|&&t| (0.0..=1.0).contains(&t))
             .chain([0.0, 1.0].iter())
             .copied()
             .map(|t| ProjectionResult {
@@ -144,12 +139,12 @@ pub struct Segments<T: Segment> {
 
 impl<T: Segment> Segments<T> {
     pub fn new(segments: SmallVec<[T; 2]>) -> Self {
-        assert!(segments.len() > 0, "Cannot create Segments without any segments.");
+        assert!(!segments.is_empty(), "Cannot create Segments without any segments.");
         Self { segments }
     }
 
     pub fn sample(&self, t: f32) -> Vec2<T::Scalar> {
-        assert!(t >= 0.0 && t <= 1.0, "Parameter t out of bounds when sampling Segments.");
+        assert!((0.0..=1.0).contains(&t), "Parameter t out of bounds when sampling Segments.");
 
         if t == 1.0 {
             self.segments[self.segments.len() - 1].sample(T::Scalar::ONE).to_array().into()
@@ -487,7 +482,7 @@ pub const fn rgba(rgba: u32) -> Color {
         ((rgba >> 24) & 0xFF) as f32 / 0xFF as f32,
         ((rgba >> 16) & 0xFF) as f32 / 0xFF as f32,
         ((rgba >> 8) & 0xFF) as f32 / 0xFF as f32,
-        ((rgba >> 0) & 0xFF) as f32 / 0xFF as f32,
+        (rgba & 0xFF) as f32 / 0xFF as f32,
     )
 }
 
@@ -496,7 +491,7 @@ pub const fn rgb(rgb: u32) -> Color {
     Color::from_rgb(
         ((rgb >> 16) & 0xFF) as f32 / 0xFF as f32,
         ((rgb >> 8) & 0xFF) as f32 / 0xFF as f32,
-        ((rgb >> 0) & 0xFF) as f32 / 0xFF as f32,
+        (rgb & 0xFF) as f32 / 0xFF as f32,
     )
 }
 

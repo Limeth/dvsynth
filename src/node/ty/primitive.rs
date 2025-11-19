@@ -1,6 +1,6 @@
 use super::{
-    Bytes, CloneableTypeExt, DowncastFromTypeEnum, SafeBinaryRepresentationTypeExt, SizedTypeExt, TypeDesc,
-    TypeEnum, TypeExt, TypeResolution, TypeTrait, TypedBytes,
+    CloneableTypeExt, DowncastFromTypeEnum, SafeBinaryRepresentationTypeExt, SizedTypeExt, TypeDesc,
+    TypeEnum, TypeExt, TypeTrait, TypedBytes,
 };
 use byteorder::{ByteOrder, ReadBytesExt, WriteBytesExt};
 use std::any::TypeId;

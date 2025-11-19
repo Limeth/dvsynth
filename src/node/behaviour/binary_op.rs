@@ -1,15 +1,16 @@
 use crate::Element;
 use crate::node::PrimitiveChannelValue;
 use crate::node::{
-    BytesRefExt, Channel, NodeConfiguration, OptionRefMutExt, PrimitiveType, PrimitiveTypeEnum,
+    BytesRefExt, Channel, NodeConfiguration, OptionRefMutExt, PrimitiveTypeEnum,
     behaviour::{
         ApplicationContext, ExecutionContext, ExecutorClosure, NodeBehaviour, NodeCommand, NodeEvent,
         NodeStateClosure,
     },
 };
 use byteorder::LittleEndian;
-use iced::widget::{Container, PickList, Row, pick_list};
+use iced::widget::{Container, PickList, Row};
 use iced::{Alignment, Length};
+use std::fmt::Display;
 use std::io::Cursor;
 use std::ops::{Add, Div, Mul, Sub};
 use transient::Static;
@@ -71,7 +72,7 @@ impl NodeBehaviour for BinaryOpNodeBehaviour {
         }
     }
 
-    fn view(&self /*, theme: &dyn Theme*/) -> Option<Element<Self::Message>> {
+    fn view(&self /*, theme: &dyn Theme*/) -> Option<Element<'_, Self::Message>> {
         Some(
             Row::new()
                 // .theme(theme)
@@ -81,7 +82,7 @@ impl NodeBehaviour for BinaryOpNodeBehaviour {
                         PickList::new(
                             &PrimitiveTypeEnum::VALUES[..],
                             Some(self.pick_list_ty_value),
-                            |new_value| BinaryOpMessage::UpdateType(new_value),
+                            BinaryOpMessage::UpdateType,
                         )
                         // .theme(theme)
                         .width(Length::Fill),
@@ -151,16 +152,15 @@ pub enum BinaryOp {
     // Xor,
 }
 
-impl ToString for BinaryOp {
-    fn to_string(&self) -> String {
+impl Display for BinaryOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use BinaryOp::*;
         match self {
-            Add => "+",
-            Sub => "-",
-            Mul => "*",
-            Div => "/",
+            Add => write!(f, "+"),
+            Sub => write!(f, "-"),
+            Mul => write!(f, "*"),
+            Div => write!(f, "/"),
         }
-        .to_string()
     }
 }
 

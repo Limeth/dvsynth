@@ -1,5 +1,5 @@
 use iced_core::{Point, Rectangle, widget::Tree};
-use std::{fmt::Debug, ops::Deref};
+use std::fmt::Debug;
 
 pub trait TypedLayout: Clone + Copy + Debug {
     fn position(&self) -> Point;

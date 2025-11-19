@@ -1,7 +1,7 @@
 use crate::{
     Element,
     node::{
-        BytesRefExt, Channel, NodeConfiguration, PrimitiveType, PrimitiveTypeEnum,
+        BytesRefExt, Channel, NodeConfiguration, PrimitiveTypeEnum,
         behaviour::{
             ApplicationContext, ExecutionContext, ExecutorClosure, NodeBehaviour, NodeCommand, NodeEvent,
             NodeStateClosure,
@@ -12,7 +12,7 @@ use byteorder::LittleEndian;
 use iced::{Alignment, Length};
 use iced::{
     widget::Row,
-    widget::pick_list::{self, PickList},
+    widget::pick_list::PickList,
 };
 use transient::Static;
 
@@ -65,7 +65,7 @@ impl NodeBehaviour for DebugNodeBehaviour {
         }
     }
 
-    fn view(&self /*, theme: &dyn Theme*/) -> Option<Element<Self::Message>> {
+    fn view(&self /*, theme: &dyn Theme*/) -> Option<Element<'_, Self::Message>> {
         Some(
             Row::new()
                 // .theme(theme)

@@ -5,13 +5,12 @@ use iced::event::Status;
 use iced::mouse::{self, Cursor, Interaction};
 use iced::widget::{Column, Container};
 use iced::{Element, Size, Vector, overlay};
+use iced_core::Rectangle;
 use iced_core::layout::{Limits, Node};
 use iced_core::overlay::Group;
 use iced_core::renderer::Quad;
 use iced_core::widget::{Text, Tree};
 use iced_core::{self, Clipboard, Event, Layout, Length, Point, Shell, Widget};
-use iced_core::{Background, Color, Rectangle};
-use iced_winit::winit::event::MouseButton;
 use indexmap::IndexMap;
 use ordered_float::OrderedFloat;
 use std::hash::Hash;
@@ -97,7 +96,7 @@ impl<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer + iced_wgpu::primitive::Renderer>
         cursor: Cursor,
         viewport: &Rectangle,
     ) -> ContentDrawResult {
-        let mut mouse_interaction = Interaction::default();
+        let mouse_interaction = Interaction::default();
         let primitives = panes.children.iter().zip(layout.panes()).map(|((_, child), layout)| {
             // let (primitive, new_mouse_interaction) =
             child.element_tree.as_widget().draw(
@@ -205,16 +204,11 @@ impl<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer + iced_wgpu::primitive::Renderer>
     }
 }
 
-#[derive(PartialEq, Debug, Clone, Copy)]
+#[derive(PartialEq, Debug, Clone, Copy, Default)]
 pub enum FloatingPaneLength {
+    #[default]
     Shrink,
     Fixed(f32),
-}
-
-impl Default for FloatingPaneLength {
-    fn default() -> Self {
-        FloatingPaneLength::Shrink
-    }
 }
 
 impl From<f32> for FloatingPaneLength {
@@ -330,7 +324,7 @@ impl<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a
                     column = column.push(margin);
                 }
 
-                let mut element_container = Container::<M, T, R>::new(self.content);
+                let element_container = Container::<M, T, R>::new(self.content);
 
                 // if let Some(style) = self.style.as_ref() {
                 //     element_container =
@@ -721,7 +715,7 @@ impl<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a
     // }
 
     pub fn insert(mut self, index: C::FloatingPaneIndex, child: FloatingPane<'a, M, T, R, C>) -> Self {
-        self.children.insert(index, child.into());
+        self.children.insert(index, child);
         self
     }
 
@@ -798,7 +792,7 @@ impl<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a
             .height(self.height);
 
         Node::with_children(
-            Size::new(self.extents[0] as f32, self.extents[1] as f32),
+            Size::new(self.extents[0], self.extents[1]),
             self.children
                 .iter()
                 .map(|(_, child)| {
@@ -873,11 +867,11 @@ impl<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a
 
                 match self.state.gesture.clone() {
                     Some(Gesture::GrabPane { pane_index, grab_state }) => {
-                        if let Some((pane_index_2, pane)) = self.children.get_index_mut(pane_index) {
+                        if let Some((node_index, _pane)) = self.children.get_index_mut(pane_index) {
                             let pane_position = cursor_position.as_::<f32>()
                                 + grab_state.grab_element_position
                                 - grab_state.grab_mouse_position;
-                            shell.publish((self.on_pane_move_to)(*pane_index_2, pane_position));
+                            shell.publish((self.on_pane_move_to)(*node_index, pane_position));
                             shell.publish((self.on_layout_change)());
                         }
                     }
@@ -889,7 +883,7 @@ impl<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a
                         shell.publish((self.on_layout_change)());
                     }
                     Some(Gesture::ResizePane { pending: false, pane_index, grab_state, directions }) => {
-                        if let Some((pane_index_2, pane)) = self.children.get_index_mut(pane_index) {
+                        if let Some((node_index, pane)) = self.children.get_index_mut(pane_index) {
                             let mut pane_size = pane.state.size;
                             let mut pane_position = pane.state.position;
 
@@ -901,7 +895,7 @@ impl<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a
                                         grab_state.grab_element_position[component_index];
                                     let original_mouse_position =
                                         grab_state.grab_mouse_position[component_index];
-                                    let current_mouse_position = cursor_position[component_index] as f32;
+                                    let current_mouse_position = cursor_position[component_index];
                                     let mouse_offset = current_mouse_position - original_mouse_position;
                                     let new_element_size: f32 = std::cmp::max(
                                         OrderedFloat(
@@ -930,8 +924,8 @@ impl<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a
                                 }
                             }
 
-                            shell.publish((self.on_pane_move_to)(*pane_index_2, pane_position));
-                            shell.publish((self.on_pane_resize)(*pane_index_2, pane_size));
+                            shell.publish((self.on_pane_move_to)(*node_index, pane_position));
+                            shell.publish((self.on_pane_resize)(*node_index, pane_size));
                             shell.publish((self.on_layout_change)());
                         }
                     }
@@ -945,7 +939,7 @@ impl<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a
             {
                 let pane_to_focus_and_gesture = self.children.iter_mut().enumerate().find_map({
                     let panes_state = &self.state;
-                    move |(pane_index, (pane_index_2, pane))| {
+                    move |(pane_index, (node_index, pane))| {
                         if let Some(Gesture::ResizePane { pane_index, grab_state, directions, .. }) =
                             panes_state.gesture.clone()
                         {
@@ -953,22 +947,19 @@ impl<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a
                                 None,
                                 Gesture::ResizePane { pending: false, pane_index, grab_state, directions },
                             ))
-                        } else {
-                            if pane.state.title_bar_status == InteractionStatus::Hovered {
-                                Some((
-                                    Some(*pane_index_2),
-                                    Gesture::GrabPane {
-                                        pane_index,
-                                        grab_state: GrabStateMove {
-                                            grab_mouse_position: [cursor_position.x, cursor_position.y]
-                                                .into(),
-                                            grab_element_position: pane.state.position,
-                                        },
+                        } else if pane.state.title_bar_status == InteractionStatus::Hovered {
+                            Some((
+                                Some(*node_index),
+                                Gesture::GrabPane {
+                                    pane_index,
+                                    grab_state: GrabStateMove {
+                                        grab_mouse_position: [cursor_position.x, cursor_position.y].into(),
+                                        grab_element_position: pane.state.position,
                                     },
-                                ))
-                            } else {
-                                None
-                            }
+                                },
+                            ))
+                        } else {
+                            None
                         }
                     }
                 });
@@ -1094,12 +1085,8 @@ where R: margin::WidgetRenderer + iced_core::Renderer + iced_core::text::Rendere
         cursor: Cursor,
         viewport: &Rectangle,
     ) {
-        let mut mouse_interaction = element
-            .state
-            .gesture
-            .as_ref()
-            .map(Gesture::get_mouse_interaction)
-            .unwrap_or(Interaction::default());
+        let mouse_interaction =
+            element.state.gesture.as_ref().map(Gesture::get_mouse_interaction).unwrap_or_default();
 
         let background_primitive = PrimitiveEnum::Quad(Quad {
             bounds: Rectangle::new(Point::ORIGIN, layout.bounds().size()),

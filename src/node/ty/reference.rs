@@ -1,17 +1,15 @@
 use super::{
-    AllocationPointer, CloneTypeExt, CloneableTypeExt, Shared, SharedTrait, SizedTypeExt, TypeDesc, TypeEnum,
-    TypeExt, TypeTrait, TypedBytes, TypedBytesMut, Unique, UniqueTrait,
+    AllocationPointer, CloneTypeExt, CloneableTypeExt, Shared, TypeDesc, TypeEnum,
+    TypeExt, TypeTrait, TypedBytes, TypedBytesMut, Unique,
 };
-use crate::graph::alloc::{AllocationInner, Allocator};
+use crate::graph::alloc::Allocator;
 use crate::graph::NodeIndex;
 use crate::node::behaviour::AllocatorHandle;
 use crate::node::ty::DynTypeTrait;
 use crate::util::SmallBoxedSlice;
-use byteorder::{LittleEndian, ReadBytesExt};
-use smallvec::{smallvec, Array, SmallVec};
+use smallvec::{smallvec, Array};
 use std::borrow::Cow;
 use std::fmt::Debug;
-use std::io::Cursor;
 use std::marker::PhantomData;
 
 pub mod prelude {
@@ -122,21 +120,21 @@ pub trait RefAnyExt<'a>: RefAny<'a> {
 impl<'a, R> RefAnyExt<'a> for R
 where R: RefAny<'a>
 {
-    unsafe fn refcount_increment_recursive_for(&self, rc: &dyn Refcounter) {
+    unsafe fn refcount_increment_recursive_for(&self, rc: &dyn Refcounter) { unsafe {
         self.typed_bytes().refcount_increment_recursive_for(rc)
-    }
+    }}
 
-    unsafe fn refcount_decrement_recursive_for(&self, rc: &dyn Refcounter) {
+    unsafe fn refcount_decrement_recursive_for(&self, rc: &dyn Refcounter) { unsafe {
         self.typed_bytes().refcount_decrement_recursive_for(rc)
-    }
+    }}
 
-    unsafe fn refcount_increment_recursive(&self) {
+    unsafe fn refcount_increment_recursive(&self) { unsafe {
         self.typed_bytes().refcount_increment_recursive()
-    }
+    }}
 
-    unsafe fn refcount_decrement_recursive(&self) {
+    unsafe fn refcount_decrement_recursive(&self) { unsafe {
         self.typed_bytes().refcount_decrement_recursive()
-    }
+    }}
 }
 
 // TODO: Remove if remain unused
@@ -200,11 +198,11 @@ impl<'state, T: TypeDesc> OwnedRefMut<'state, T> {
     /// Safety: The method may only be called if one of the following holds:
     /// * `T = ()` and `Self::ty` downcasts to `R`;
     /// * `R = ()`.
-    pub(crate) unsafe fn reinterpret<R: TypeDesc>(self) -> OwnedRefMut<'state, R> {
+    pub(crate) unsafe fn reinterpret<R: TypeDesc>(self) -> OwnedRefMut<'state, R> { unsafe {
         // Safety: Source and target types are of the same layout, the type `T`
         // is only used in `PhantomData`.
         std::mem::transmute(self)
-    }
+    }}
 
     /// Safety: A zeroed buffer may not be a valid value for the provided type and must be
     ///         initialized properly.
@@ -228,14 +226,14 @@ impl<'state, T: TypeDesc> OwnedRefMut<'state, T> {
     pub unsafe fn copied_with_unchecked_type_if_sized(
         typed_bytes: TypedBytes<'_>,
         handle: AllocatorHandle<'_, 'state>,
-    ) -> Option<Self> {
+    ) -> Option<Self> { unsafe {
         let (bytes_src, ty) = typed_bytes.into();
         Self::zeroed_from_enum_with_unchecked_type_if_sized(ty.into_owned(), handle).map(|mut owned| {
             owned.bytes.copy_from_slice(bytes_src.bytes().unwrap());
             owned.typed_bytes().refcount_increment_recursive();
             owned
         })
-    }
+    }}
 
     fn clone_from_if_cloneable<'reference, 'invocation>(
         reference: impl Ref<'reference, T>,

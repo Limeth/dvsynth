@@ -27,17 +27,9 @@ use std::collections::BTreeMap;
 use std::marker::PhantomData;
 
 use graph::{
-    ApplicationContext, ChannelIdentifier, Connection, EdgeData, ExecutionGraph, Graph, GraphExecutor,
-    GraphValidationErrors, NodeData,
+    ChannelIdentifier, Connection, EdgeData, ExecutionGraph, Graph, GraphValidationErrors, NodeData,
 };
-use iced::application::Title;
-use iced::{Application, Executor, Font, Pixels, Point, Renderer, Settings, Task, Theme, window};
-use iced_futures::Runtime;
-use iced_graphics::Antialiasing;
-use iced_wgpu::Engine;
-use iced_winit::winit;
-use iced_winit::winit::event_loop::EventLoop;
-use iced_winit::winit::window::Window;
+use iced::{Settings, Task, Theme, window};
 use node::behaviour::counter::CounterNodeBehaviour;
 use node::behaviour::*;
 use node::*;
@@ -250,7 +242,7 @@ impl ApplicationState {
         task
     }
 
-    fn view(&self, window_id: window::Id) -> Element {
+    fn view(&self, window_id: window::Id) -> Element<'_> {
         let theme = Theme::Dark; // TODO: Theming
         let node_indices = self.graph.node_indices().collect::<Vec<_>>();
         let connections = self.graph.get_connections();
@@ -337,7 +329,7 @@ async fn main() {
         graph.add_node(NodeData::new("My Debug", [210.0, 510.0], Box::new(DebugNodeBehaviour::default())));
         graph.add_node(NodeData::new("My Debug 2", [410.0, 510.0], Box::new(DebugNodeBehaviour::default())));
 
-        graph.add_node(NodeData::new("My Counter", [810.0, 10.0], Box::new(CounterNodeBehaviour::default())));
+        graph.add_node(NodeData::new("My Counter", [810.0, 10.0], Box::new(CounterNodeBehaviour)));
 
         graph.into()
     };
@@ -385,7 +377,8 @@ async fn main() {
     iced::daemon(ApplicationState::title, ApplicationState::update, ApplicationState::view)
         // .subscription(ApplicationState::subscription)
         // .theme(ApplicationState::theme)
-        .run_with(|| ApplicationState::new(ApplicationFlags { graph }));
+        .run_with(|| ApplicationState::new(ApplicationFlags { graph }))
+        .expect("failed to start the GUI");
 
     // Main loop
     /*

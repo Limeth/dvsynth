@@ -1,6 +1,5 @@
-use super::{Bytes, DowncastFromTypeEnum, SizedTypeExt, TypeDesc, TypeEnum, TypeExt, TypeTrait, TypedBytes};
+use super::{DowncastFromTypeEnum, SizedTypeExt, TypeDesc, TypeEnum, TypeExt, TypeTrait, TypedBytes};
 use crate::util::CowMapExt;
-use std::borrow::Cow;
 use std::fmt::Display;
 
 pub mod prelude {}

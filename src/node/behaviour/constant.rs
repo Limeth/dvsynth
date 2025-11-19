@@ -3,7 +3,7 @@ use crate::node::PrimitiveChannelValue;
 use crate::{
     graph::ApplicationContext,
     node::{
-        Channel, NodeConfiguration, OptionRefMutExt, PrimitiveType, PrimitiveTypeEnum,
+        Channel, NodeConfiguration, OptionRefMutExt, PrimitiveTypeEnum,
         behaviour::{
             ExecutionContext, ExecutorClosure, NodeBehaviour, NodeCommand, NodeEvent, NodeStateClosure,
         },
@@ -12,13 +12,13 @@ use crate::{
 use byteorder::LittleEndian;
 use iced::widget::{
     Row,
-    pick_list::{self, PickList},
+    pick_list::PickList,
     text_input::{self, TextInput},
 };
 use iced::{Alignment, Length};
 use iced_graphics::text::Paragraph;
 use std::io::Cursor;
-use transient::{Static, Transient};
+use transient::Static;
 
 #[derive(Debug, Clone)]
 pub enum ConstantNodeMessage {
@@ -103,7 +103,7 @@ impl NodeBehaviour for ConstantNodeBehaviour {
         }
     }
 
-    fn view(&self /*, theme: &dyn Theme*/) -> Option<Element<Self::Message>> {
+    fn view(&self /*, theme: &dyn Theme*/) -> Option<Element<'_, Self::Message>> {
         Some(
             Row::new()
                 // .theme(theme)
@@ -120,8 +120,8 @@ impl NodeBehaviour for ConstantNodeBehaviour {
                         &self.text_input_placeholder,
                         &self.text_input_value,
                     )
-                    .on_input(|new_raw_value| ConstantNodeMessage::UpdateValue(new_raw_value))
-                    .on_paste(|new_raw_value| ConstantNodeMessage::UpdateValue(new_raw_value))
+                    .on_input(ConstantNodeMessage::UpdateValue)
+                    .on_paste(ConstantNodeMessage::UpdateValue)
                     // .theme(theme)
                     .width(Length::Fill),
                 )

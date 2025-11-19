@@ -1,11 +1,10 @@
 use super::{
     BorrowedRef, BorrowedRefMut, Bytes, BytesMut, DowncastFromTypeEnum, OwnedRefMut, Ref, RefAny, RefAnyExt,
-    RefMut, RefMutAny, RefMutAnyExt, SizedTypeExt, TypeDesc, TypeEnum, TypeExt, TypeResolution, TypeTrait,
+    RefMut, RefMutAny, SizedTypeExt, TypeDesc, TypeEnum, TypeExt, TypeResolution, TypeTrait,
     TypedBytes, TypedBytesMut,
 };
 use crate::node::behaviour::AllocatorHandle;
 use crate::util::CowMapExt;
-use std::borrow::Cow;
 use std::convert::{TryFrom, TryInto};
 use std::fmt::Display;
 use std::marker::PhantomData;
@@ -160,7 +159,7 @@ impl<T: TypeDesc> DowncastFromTypeEnum for OptionType<T> {
     fn resolve_from(from: TypeEnum) -> Option<TypeResolution<Self, TypeEnum>>
     where Self: Sized {
         if let TypeEnum::Option(inner) = from {
-            inner.downcast_child::<T>().map(|ty| TypeResolution::Resolved(ty))
+            inner.downcast_child::<T>().map(TypeResolution::Resolved)
         } else {
             None
         }
@@ -168,7 +167,7 @@ impl<T: TypeDesc> DowncastFromTypeEnum for OptionType<T> {
 
     fn resolve_from_ref(from: &TypeEnum) -> Option<TypeResolution<&Self, &TypeEnum>> {
         if let TypeEnum::Option(inner) = from {
-            inner.downcast_child_ref::<T>().map(|ty| TypeResolution::Resolved(ty))
+            inner.downcast_child_ref::<T>().map(TypeResolution::Resolved)
         } else {
             None
         }
@@ -176,7 +175,7 @@ impl<T: TypeDesc> DowncastFromTypeEnum for OptionType<T> {
 
     fn resolve_from_mut(from: &mut TypeEnum) -> Option<TypeResolution<&mut Self, &mut TypeEnum>> {
         if let TypeEnum::Option(inner) = from {
-            inner.downcast_child_mut::<T>().map(|ty| TypeResolution::Resolved(ty))
+            inner.downcast_child_mut::<T>().map(TypeResolution::Resolved)
         } else {
             None
         }

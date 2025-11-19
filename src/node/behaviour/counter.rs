@@ -33,7 +33,7 @@ impl NodeBehaviour for CounterNodeBehaviour {
         }
     }
 
-    fn view(&self /*, _theme: &dyn Theme*/) -> Option<Element<Self::Message>> {
+    fn view(&self /*, _theme: &dyn Theme*/) -> Option<Element<'_, Self::Message>> {
         None
     }
 

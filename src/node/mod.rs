@@ -1,6 +1,5 @@
 use crate::graph::{ChannelIdentifier, Connection, EdgeEndpoint, NodeIndex};
 use crate::util::StrokeType;
-use std::cmp::Ordering;
 use std::fmt::Debug;
 use std::ops::{Deref, DerefMut, Index, IndexMut};
 
@@ -134,7 +133,7 @@ impl<'a> ChannelRef<'a> {
     fn from(other: &'a Channel, edge_endpoint: EdgeEndpoint, direction: ChannelDirection) -> Self {
         Self {
             title: &other.title,
-            description: other.description.as_ref().map(String::as_str),
+            description: other.description.as_deref(),
             ty: &other.ty,
             edge_endpoint,
             direction,
@@ -351,7 +350,7 @@ pub struct ChannelValue {
 }
 
 impl ChannelValue {
-    pub fn as_channel_value_ref(&self) -> ChannelValueRef {
+    pub fn as_channel_value_ref(&self) -> ChannelValueRef<'_> {
         ChannelValueRef { data: &self.data }
     }
 

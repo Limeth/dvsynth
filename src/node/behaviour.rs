@@ -3,11 +3,10 @@ use crate::graph::{ApplicationContext, NodeIndex};
 use crate::node::{BorrowedRef, BorrowedRefMut, DynTypeTrait, NodeConfiguration, OptionType};
 use downcast_rs::{Downcast, impl_downcast};
 use dyn_clone::DynClone;
-use iced::Theme;
 use iced_winit::winit::event_loop::EventLoop;
 use std::fmt::Debug;
 use std::marker::PhantomData;
-use transient::{Any, CanRecoverFrom, Co, Downcast as _, Static, Timeless, Transient};
+use transient::{Any, Co, Downcast as _, Static, Transient};
 
 pub use array_constructor::*;
 pub use binary_op::*;
@@ -296,7 +295,7 @@ pub type MainThreadTask = dyn Send + FnOnce(&EventLoop<crate::Message>);
 pub trait NodeBehaviourContainer: DynClone + std::fmt::Debug + Send + Sync + 'static {
     fn name(&self) -> &str;
     fn update(&mut self, event: NodeEventContainer) -> Vec<NodeCommand>;
-    fn view(&self) -> Option<Element<Box<dyn NodeBehaviourMessage>>>;
+    fn view(&self) -> Option<Element<'_, Box<dyn NodeBehaviourMessage>>>;
     fn create_state<'state>(&self, context: &ApplicationContext) -> NodeStateContainer<'state>;
     fn update_state<'state>(&self, context: &ApplicationContext, state: &mut NodeStateContainer<'state>);
 }
@@ -311,7 +310,7 @@ where Self: std::fmt::Debug + Clone + Send + Sync + 'static + Static
 
     fn name(&self) -> &str;
     fn update(&mut self, event: NodeEvent<Self::Message>) -> Vec<NodeCommand>;
-    fn view(&self) -> Option<Element<Self::Message>>;
+    fn view(&self) -> Option<Element<'_, Self::Message>>;
     fn create_state<'state>(&self, context: &ApplicationContext) -> Self::State<'state>;
 }
 
@@ -324,7 +323,7 @@ impl<T: NodeBehaviour> NodeBehaviourContainer for T {
         NodeBehaviour::update(self, NodeEvent::from_container(event).unwrap())
     }
 
-    fn view(&self) -> Option<Element<Box<dyn NodeBehaviourMessage>>> {
+    fn view(&self) -> Option<Element<'_, Box<dyn NodeBehaviourMessage>>> {
         NodeBehaviour::view(self)
             .map(|element| element.map(|message| Box::new(message) as Box<dyn NodeBehaviourMessage>))
     }

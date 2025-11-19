@@ -1,8 +1,4 @@
-use crate::util::rgb;
-use crate::widgets::{floating_panes, node};
 use crate::Spacing;
-use iced::widget::{self, checkbox, container, pick_list, text_input};
-use iced::Color;
 
 pub mod consts {
     use super::*;
@@ -15,17 +11,14 @@ pub mod consts {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash, PartialOrd, Ord)]
+#[derive(Default)]
 pub enum InteractionStatus {
+    #[default]
     Idle,
     Hovered,
     Focused,
 }
 
-impl Default for InteractionStatus {
-    fn default() -> Self {
-        InteractionStatus::Idle
-    }
-}
 
 /*
 pub trait Themeable: Sized {

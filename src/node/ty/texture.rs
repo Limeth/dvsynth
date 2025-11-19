@@ -1,6 +1,6 @@
 use crate::graph::TextureAllocation;
 
-use super::{Bytes, DowncastFromTypeEnum, DynTypeDescriptor, DynTypeTrait, TypeEnum, TypedBytes};
+use super::{DowncastFromTypeEnum, DynTypeDescriptor, DynTypeTrait, TypeEnum, TypedBytes};
 use std::fmt::Display;
 
 pub mod prelude {}
@@ -8,6 +8,12 @@ pub mod prelude {}
 #[derive(Debug, Hash, PartialEq, Eq, Clone)]
 pub struct TextureType {
     // TODO texture format, size?
+}
+
+impl Default for TextureType {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl TextureType {
@@ -24,7 +30,7 @@ impl Display for TextureType {
 
 impl From<TextureType> for TypeEnum {
     fn from(other: TextureType) -> Self {
-        TypeEnum::Texture(other).into()
+        TypeEnum::Texture(other)
     }
 }
 

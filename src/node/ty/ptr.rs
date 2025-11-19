@@ -2,15 +2,13 @@ use byteorder::{LittleEndian, ReadBytesExt};
 use std::fmt::Display;
 use std::io::Cursor;
 use std::marker::PhantomData;
-use std::ops::{Deref, DerefMut};
 
 use crate::graph::alloc::Allocator;
 use crate::node::behaviour::AllocatorHandle;
 
 use super::{
-    AllocationPointer, BorrowedRef, BorrowedRefMut, Bytes, CloneableTypeExt, DowncastFromTypeEnum,
-    OwnedRefMut, Ref, RefAnyExt, RefMut, RefMutAny, SizedTypeExt, TypeDesc, TypeEnum, TypeExt,
-    TypeResolution, TypeTrait, TypedBytes,
+    AllocationPointer, BorrowedRef, BorrowedRefMut, Bytes, CloneableTypeExt, DowncastFromTypeEnum, Ref,
+    RefMut, RefMutAny, SizedTypeExt, TypeDesc, TypeEnum, TypeExt, TypeResolution, TypeTrait, TypedBytes,
 };
 
 pub mod prelude {
@@ -112,9 +110,11 @@ unsafe impl<T: TypeDesc> TypeExt for Unique<T> {
     }
 
     unsafe fn children<'a>(&'a self, data: TypedBytes<'a>) -> Vec<TypedBytes<'a>> {
-        let ptr = typed_bytes_to_ptr(data.borrow()).unwrap();
-        let typed_bytes = Allocator::get().deref_ptr(ptr, data.refcounter()).unwrap();
-        vec![typed_bytes]
+        unsafe {
+            let ptr = typed_bytes_to_ptr(data.borrow()).unwrap();
+            let typed_bytes = Allocator::get().deref_ptr(ptr, data.refcounter()).unwrap();
+            vec![typed_bytes]
+        }
     }
 
     fn value_size_if_sized(&self) -> Option<usize> {
@@ -132,7 +132,7 @@ impl<T: TypeDesc> DowncastFromTypeEnum for Unique<T> {
     fn resolve_from(from: TypeEnum) -> Option<TypeResolution<Self, TypeEnum>>
     where Self: Sized {
         if let TypeEnum::Unique(inner) = from {
-            inner.downcast_child::<T>().map(|ty| TypeResolution::Resolved(ty))
+            inner.downcast_child::<T>().map(TypeResolution::Resolved)
         } else {
             None
         }
@@ -140,7 +140,7 @@ impl<T: TypeDesc> DowncastFromTypeEnum for Unique<T> {
 
     fn resolve_from_ref(from: &TypeEnum) -> Option<TypeResolution<&Self, &TypeEnum>> {
         if let TypeEnum::Unique(inner) = from {
-            inner.downcast_child_ref::<T>().map(|ty| TypeResolution::Resolved(ty))
+            inner.downcast_child_ref::<T>().map(TypeResolution::Resolved)
         } else {
             None
         }
@@ -148,7 +148,7 @@ impl<T: TypeDesc> DowncastFromTypeEnum for Unique<T> {
 
     fn resolve_from_mut(from: &mut TypeEnum) -> Option<TypeResolution<&mut Self, &mut TypeEnum>> {
         if let TypeEnum::Unique(inner) = from {
-            inner.downcast_child_mut::<T>().map(|ty| TypeResolution::Resolved(ty))
+            inner.downcast_child_mut::<T>().map(TypeResolution::Resolved)
         } else {
             None
         }
@@ -262,7 +262,7 @@ impl Shared<!> {
     pub fn downcast_child_ref<T: TypeDesc>(&self) -> Option<&Shared<T>> {
         if self.child_ty.downcast_ref::<T>().is_some() {
             // Safety: No fields except for the marker `PhantomData` are affected.
-            Some(unsafe { std::mem::transmute(self) })
+            Some(unsafe { std::mem::transmute::<&Self, &Shared<T>>(self) })
         } else {
             None
         }
@@ -271,7 +271,7 @@ impl Shared<!> {
     pub fn downcast_child_mut<T: TypeDesc>(&mut self) -> Option<&mut Shared<T>> {
         if self.child_ty.downcast_ref::<T>().is_some() {
             // Safety: No fields except for the marker `PhantomData` are affected.
-            Some(unsafe { std::mem::transmute(self) })
+            Some(unsafe { std::mem::transmute::<&mut Self, &mut Shared<T>>(self) })
         } else {
             None
         }
@@ -311,9 +311,11 @@ unsafe impl<T: TypeDesc> TypeExt for Shared<T> {
     }
 
     unsafe fn children<'a>(&'a self, data: TypedBytes<'a>) -> Vec<TypedBytes<'a>> {
-        let ptr = typed_bytes_to_ptr(data.borrow()).unwrap();
-        let typed_bytes = Allocator::get().deref_ptr(ptr, data.refcounter()).unwrap();
-        vec![typed_bytes]
+        unsafe {
+            let ptr = typed_bytes_to_ptr(data.borrow()).unwrap();
+            let typed_bytes = Allocator::get().deref_ptr(ptr, data.refcounter()).unwrap();
+            vec![typed_bytes]
+        }
     }
 
     fn value_size_if_sized(&self) -> Option<usize> {
@@ -335,7 +337,7 @@ impl<T: TypeDesc> DowncastFromTypeEnum for Shared<T> {
     fn resolve_from(from: TypeEnum) -> Option<TypeResolution<Self, TypeEnum>>
     where Self: Sized {
         if let TypeEnum::Shared(inner) = from {
-            inner.downcast_child::<T>().map(|ty| TypeResolution::Resolved(ty))
+            inner.downcast_child::<T>().map(TypeResolution::Resolved)
         } else {
             None
         }
@@ -343,7 +345,7 @@ impl<T: TypeDesc> DowncastFromTypeEnum for Shared<T> {
 
     fn resolve_from_ref(from: &TypeEnum) -> Option<TypeResolution<&Self, &TypeEnum>> {
         if let TypeEnum::Shared(inner) = from {
-            inner.downcast_child_ref::<T>().map(|ty| TypeResolution::Resolved(ty))
+            inner.downcast_child_ref::<T>().map(TypeResolution::Resolved)
         } else {
             None
         }
@@ -351,7 +353,7 @@ impl<T: TypeDesc> DowncastFromTypeEnum for Shared<T> {
 
     fn resolve_from_mut(from: &mut TypeEnum) -> Option<TypeResolution<&mut Self, &mut TypeEnum>> {
         if let TypeEnum::Shared(inner) = from {
-            inner.downcast_child_mut::<T>().map(|ty| TypeResolution::Resolved(ty))
+            inner.downcast_child_mut::<T>().map(TypeResolution::Resolved)
         } else {
             None
         }

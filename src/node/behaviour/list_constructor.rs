@@ -1,6 +1,6 @@
 use crate::Element;
 use crate::node::prelude::*;
-use crate::node::{BorrowedRef, BorrowedRefMut, ListDescriptor, ListType, OwnedRefMut, Unique};
+use crate::node::{BorrowedRefMut, ListDescriptor, ListType, OwnedRefMut, Unique};
 use crate::node::{
     Channel, NodeConfiguration, PrimitiveType, PrimitiveTypeEnum,
     behaviour::{
@@ -12,10 +12,9 @@ use iced::{Alignment, Length};
 use iced::{
     widget::Row,
     widget::Text,
-    widget::button::{self, Button},
-    widget::pick_list::{self, PickList},
+    widget::button::Button,
+    widget::pick_list::PickList,
 };
-use std::io::{Cursor, Write};
 use std::num::NonZeroUsize;
 use transient::Static;
 
@@ -44,7 +43,6 @@ impl ListConstructorNodeBehaviour {
     pub fn get_configure_command(&self) -> NodeCommand {
         NodeCommand::Configure(NodeConfiguration {
             input_channels_by_value: (0..self.channel_count.get())
-                .into_iter()
                 .map(|channel_index| Channel::new(format!("item #{}", channel_index), self.ty))
                 .collect(),
             output_channels_by_value: vec![Channel::new(
@@ -92,7 +90,7 @@ impl NodeBehaviour for ListConstructorNodeBehaviour {
         }
     }
 
-    fn view(&self /*, theme: &dyn Theme */) -> Option<Element<Self::Message>> {
+    fn view(&self /*, theme: &dyn Theme */) -> Option<Element<'_, Self::Message>> {
         Some(
             Row::new()
                 // .theme(theme)
@@ -157,12 +155,12 @@ impl NodeBehaviour for ListConstructorNodeBehaviour {
                                 .upcast(),
                             );
                         let mut list: BorrowedRefMut<ListType> = list.deref_mut();
-                        let mut inner_list_1: OwnedRefMut<Unique<ListType<PrimitiveType<u8>>>> =
+                        let inner_list_1: OwnedRefMut<Unique<ListType<PrimitiveType<u8>>>> =
                             context.allocator_handle.allocate_object::<ListType<_>>(ListDescriptor::new(
                                 PrimitiveType::<u8>::default(),
                             ));
                         list.push(inner_list_1.upcast()).unwrap();
-                        let mut inner_list_2: OwnedRefMut<Unique<ListType<PrimitiveType<u8>>>> =
+                        let inner_list_2: OwnedRefMut<Unique<ListType<PrimitiveType<u8>>>> =
                             context.allocator_handle.allocate_object::<ListType<_>>(ListDescriptor::new(
                                 PrimitiveType::<u8>::default(),
                             ));

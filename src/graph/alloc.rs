@@ -1,7 +1,7 @@
 use std::any::{Any, TypeId};
 use std::borrow::Cow;
 use std::collections::HashSet;
-use std::collections::{hash_map::Entry, HashMap};
+use std::collections::{HashMap, hash_map::Entry};
 use std::convert::TryInto;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -72,12 +72,12 @@ impl<T> AllocationCell<T> {
 
     /// Safety: Access safety must be ensured externally by the execution graph.
     pub unsafe fn as_mut<'a>(&self) -> &'a mut T {
-        &mut *self.as_mut_ptr()
+        unsafe { &mut *self.as_mut_ptr() }
     }
 
     /// Safety: Access safety must be ensured externally by the execution graph.
     pub unsafe fn as_ref<'a>(&self) -> &'a T {
-        &*self.as_ptr()
+        unsafe { &*self.as_ptr() }
     }
 }
 
@@ -168,7 +168,7 @@ impl AllocationInner {
     }
 
     pub fn new_bytes<T: TypeTrait + SizedTypeExt>(ty: T) -> Self {
-        let data: Vec<u8> = std::iter::repeat(0u8).take(ty.value_size()).collect();
+        let data: Vec<u8> = std::iter::repeat_n(0u8, ty.value_size()).collect();
         let data: Box<[u8]> = data.into_boxed_slice();
         let inner = AllocationType::Bytes(data);
         let ty_enum: TypeEnum = ty.into();
@@ -178,7 +178,7 @@ impl AllocationInner {
 
     pub fn from_enum_if_sized(ty: impl Into<TypeEnum>) -> Option<Self> {
         let ty = ty.into();
-        let data: Vec<u8> = std::iter::repeat(0u8).take(ty.value_size_if_sized()?).collect();
+        let data: Vec<u8> = std::iter::repeat_n(0u8, ty.value_size_if_sized()?).collect();
         let data: Box<[u8]> = data.into_boxed_slice();
         let inner = AllocationType::Bytes(data);
 
@@ -246,21 +246,25 @@ impl Allocation {
 
 impl Allocation {
     unsafe fn claim_with(&self, new_inner: AllocationInner) {
-        let inner = self.inner.as_mut();
+        unsafe {
+            let inner = self.inner.as_mut();
 
-        assert!(inner.is_none(), "Allocation already claimed.");
+            assert!(inner.is_none(), "Allocation already claimed.");
 
-        *inner = Some(AllocationCell::new(new_inner));
-        self.refcount.store(0, Ordering::SeqCst);
-        self.deallocating.store(false, Ordering::SeqCst);
+            *inner = Some(AllocationCell::new(new_inner));
+            self.refcount.store(0, Ordering::SeqCst);
+            self.deallocating.store(false, Ordering::SeqCst);
+        }
     }
 
     unsafe fn free(&self) {
-        let inner = self.inner.as_mut();
+        unsafe {
+            let inner = self.inner.as_mut();
 
-        *inner = None;
-        self.refcount.store(0, Ordering::SeqCst);
-        self.deallocating.store(true, Ordering::SeqCst);
+            *inner = None;
+            self.refcount.store(0, Ordering::SeqCst);
+            self.deallocating.store(true, Ordering::SeqCst);
+        }
     }
 }
 
@@ -271,13 +275,13 @@ struct Allocations {
 }
 
 /// The refcount of allocations is tracked in two ways:
-/// - globally:
-///     Within each allocation, there is a global refcount that is used to determine
-///     whether the allocation should be freed.
-/// - task-wise:
-///     Each task tracks the refcount of all _owned_ references, so that those references
-///     can be subtracted when the task is removed. This refcount does **not** track the references
-///     written to output channels, which is done separately.
+/// - **globally**:
+///   Within each allocation, there is a global refcount that is used to determine
+///   whether the allocation should be freed.
+/// - **task-wise**:
+///   Each task tracks the refcount of all _owned_ references, so that those references
+///   can be subtracted when the task is removed. This refcount does **not** track the references
+///   written to output channels, which is done separately.
 #[derive(Default)]
 pub struct Allocator {
     allocations: RwLock<Allocations>,
@@ -294,7 +298,7 @@ impl Allocator {
         lazy_static! {
             static ref INSTANCE: Allocator = Allocator::default();
         }
-        &*INSTANCE
+        &INSTANCE
     }
 
     // TODO:
@@ -306,10 +310,8 @@ impl Allocator {
         let mut task_ref_counters = self.task_ref_counters.counters.write().unwrap();
         task_ref_counters.clear();
 
-        for task in &*schedule.tasks {
-            if let Some(task) = task {
-                task_ref_counters.insert(task.node_index, Default::default());
-            }
+        for task in (*schedule.tasks).iter().flatten() {
+            task_ref_counters.insert(task.node_index, Default::default());
         }
     }
 
@@ -387,7 +389,11 @@ impl Allocator {
         let allocation =
             allocations.vec.get(allocation_ptr.as_usize()).expect("Attempt to free a freed value.");
 
-        if allocation.deallocating.compare_and_swap(false, true, Ordering::SeqCst) {
+        if allocation
+            .deallocating
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .unwrap_or_else(|previous_value| previous_value)
+        {
             // Already deallocated.
             return;
         }
@@ -401,23 +407,25 @@ impl Allocator {
     }
 
     pub unsafe fn apply_owned_and_output_refcounts(&self, node: NodeIndex) -> Result<(), ()> {
-        let task_ref_counters = self.task_ref_counters.counters.write().map_err(|_| ())?;
+        unsafe {
+            let task_ref_counters = self.task_ref_counters.counters.write().map_err(|_| ())?;
 
-        {
-            let mut task_ref_counter = task_ref_counters[&node].lock().map_err(|_| ())?;
-            let altered_ptrs: HashSet<AllocationPointer> =
-                task_ref_counter.refcount_deltas.keys().copied().collect();
+            {
+                let mut task_ref_counter = task_ref_counters[&node].lock().map_err(|_| ())?;
+                let altered_ptrs: HashSet<AllocationPointer> =
+                    task_ref_counter.refcount_deltas.keys().copied().collect();
 
-            for altered_ptr in altered_ptrs {
-                let delta = task_ref_counter.refcount_deltas[&altered_ptr];
+                for altered_ptr in altered_ptrs {
+                    let delta = task_ref_counter.refcount_deltas[&altered_ptr];
 
-                self.refcount_global_add(altered_ptr, delta)?;
+                    self.refcount_global_add(altered_ptr, delta)?;
+                }
+
+                task_ref_counter.refcount_deltas.clear();
             }
 
-            task_ref_counter.refcount_deltas.clear();
+            Ok(())
         }
-
-        Ok(())
     }
 
     /// Increment the task-wise refcount of owned values by 1.
@@ -426,7 +434,7 @@ impl Allocator {
         allocation_ptr: AllocationPointer,
         node: NodeIndex,
     ) -> Result<(), ()> {
-        self.refcount_owned_add(allocation_ptr, node, 1)
+        unsafe { self.refcount_owned_add(allocation_ptr, node, 1) }
     }
 
     /// Decrement the task-wise refcount of owned values by 1.
@@ -435,7 +443,7 @@ impl Allocator {
         allocation_ptr: AllocationPointer,
         node: NodeIndex,
     ) -> Result<(), ()> {
-        self.refcount_owned_add(allocation_ptr, node, -1)
+        unsafe { self.refcount_owned_add(allocation_ptr, node, -1) }
     }
 
     /// Alter the task-wise refcount of owned values.
@@ -473,10 +481,12 @@ impl Allocator {
         allocation_ptr: AllocationPointer,
         delta: usize,
     ) -> Result<(), ()> {
-        if let Ok(delta) = delta.try_into() {
-            self.refcount_global_add(allocation_ptr, delta).map(|_| ())
-        } else {
-            Err(())
+        unsafe {
+            if let Ok(delta) = delta.try_into() {
+                self.refcount_global_add(allocation_ptr, delta).map(|_| ())
+            } else {
+                Err(())
+            }
         }
     }
 
@@ -502,8 +512,14 @@ impl Allocator {
 
                 loop {
                     refcount_new = refcount_before_swap.saturating_sub((-delta) as usize);
-                    let refcount_during_swap =
-                        refcount.compare_and_swap(refcount_before_swap, refcount_new, Ordering::SeqCst);
+                    let refcount_during_swap = refcount
+                        .compare_exchange(
+                            refcount_before_swap,
+                            refcount_new,
+                            Ordering::SeqCst,
+                            Ordering::SeqCst,
+                        )
+                        .unwrap_or_else(|previous_value| previous_value);
 
                     if refcount_during_swap == refcount_before_swap {
                         break;
@@ -532,13 +548,15 @@ impl Allocator {
         allocation_ptr: AllocationPointer,
         rc: &'a dyn Refcounter,
     ) -> Option<TypedBytes<'a>> {
-        let allocations = self.allocations.read().unwrap();
-        allocations.vec.get(allocation_ptr.as_usize()).map(move |allocation| {
-            let allocation_inner =
-                allocation.inner.as_ref().as_ref().expect("Dereferencing a freed value.").as_ref();
+        unsafe {
+            let allocations = self.allocations.read().unwrap();
+            allocations.vec.get(allocation_ptr.as_usize()).map(move |allocation| {
+                let allocation_inner =
+                    allocation.inner.as_ref().as_ref().expect("Dereferencing a freed value.").as_ref();
 
-            allocation_inner.as_ref(rc)
-        })
+                allocation_inner.as_ref(rc)
+            })
+        }
     }
 
     /// Safety: Access safety must be ensured externally by the execution graph.
@@ -548,13 +566,15 @@ impl Allocator {
         allocation_ptr: AllocationPointer,
         rc: &'a mut dyn Refcounter,
     ) -> Option<TypedBytesMut<'a>> {
-        let allocations = self.allocations.read().unwrap();
-        allocations.vec.get(allocation_ptr.as_usize()).map(move |allocation| {
-            let allocation_inner =
-                allocation.inner.as_ref().as_ref().expect("Dereferencing a freed value.").as_mut();
+        unsafe {
+            let allocations = self.allocations.read().unwrap();
+            allocations.vec.get(allocation_ptr.as_usize()).map(move |allocation| {
+                let allocation_inner =
+                    allocation.inner.as_ref().as_ref().expect("Dereferencing a freed value.").as_mut();
 
-            allocation_inner.as_mut(rc)
-        })
+                allocation_inner.as_mut(rc)
+            })
+        }
     }
 
     pub unsafe fn map_type<'a>(
@@ -562,16 +582,18 @@ impl Allocator {
         allocation_ptr: AllocationPointer,
         map: impl FnOnce(&mut TypeEnum),
     ) -> Result<(), ()> {
-        let allocations = self.allocations.read().unwrap();
-        allocations
-            .vec
-            .get(allocation_ptr.as_usize())
-            .map(|allocation| {
-                let allocation_inner =
-                    allocation.inner.as_ref().as_ref().expect("Dereferencing a freed value.").as_mut();
+        unsafe {
+            let allocations = self.allocations.read().unwrap();
+            allocations
+                .vec
+                .get(allocation_ptr.as_usize())
+                .map(|allocation| {
+                    let allocation_inner =
+                        allocation.inner.as_ref().as_ref().expect("Dereferencing a freed value.").as_mut();
 
-                (map)(&mut allocation_inner.ty);
-            })
-            .ok_or(())
+                    (map)(&mut allocation_inner.ty);
+                })
+                .ok_or(())
+        }
     }
 }

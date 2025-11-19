@@ -42,7 +42,6 @@ impl ArrayConstructorNodeBehaviour {
     pub fn get_configure_command(&self) -> NodeCommand {
         NodeCommand::Configure(NodeConfiguration {
             input_channels_by_value: (0..self.channel_count.get())
-                .into_iter()
                 .map(|channel_index| Channel::new(format!("item #{}", channel_index), self.ty))
                 .collect(),
             output_channels_by_value: vec![Channel::new(
@@ -89,7 +88,7 @@ impl NodeBehaviour for ArrayConstructorNodeBehaviour {
         }
     }
 
-    fn view(&self /*, theme: &dyn Theme*/) -> Option<Element<Self::Message>> {
+    fn view(&self /*, theme: &dyn Theme*/) -> Option<Element<'_, Self::Message>> {
         Some(
             Row::new()
                 .push(
