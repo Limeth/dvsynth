@@ -768,15 +768,15 @@ where R: margin::WidgetRenderer
         let mut mouse_interaction = mouse::Interaction::default();
         let mut primitives = Vec::new();
 
-        primitives.extend(panes.children.iter().zip(layout.panes()).map(
-            |((_child_index, child), layout)| {
+        primitives.extend(panes.children.iter().zip(layout.panes()).zip(&state.children).map(
+            |(((_child_index, child), child_layout), child_state)| {
                 /*let (primitive, new_mouse_interaction) =*/
                 child.element_tree.as_widget().draw(
-                    state,
+                    child_state,
                     self,
                     theme,
                     style,
-                    layout.into(),
+                    child_layout.into(),
                     cursor,
                     viewport,
                 );
@@ -962,8 +962,25 @@ where R: margin::WidgetRenderer
 
         // Draw connection points
         {
-            for (pane_layout, node_index) in layout.panes().zip(panes.children.keys().copied()) {
+            for (pane_layout, (node_index, pane)) in layout.panes().zip(&panes.children) {
                 let node = panes.children.get(&node_index).unwrap();
+
+                fn debug_layout(layout: &Layout, depth: usize) {
+                    let prefix = std::iter::repeat_n(' ', depth).collect::<String>();
+                    if layout.children().next().is_none() {
+                        println!("{prefix}{{}}");
+                    } else {
+                        println!("{prefix}{{");
+                        for child in layout.children() {
+                            debug_layout(&child, depth + 1);
+                        }
+                        println!("{prefix}}}");
+                    }
+                }
+
+                print!("Node #{node_index:?} {}", pane.behaviour_data.);
+                debug_layout(&pane_layout.into(), 0);
+
                 let inputs_layout = pane_layout
                     .content()
                     .channels_with_direction(ChannelDirection::In)

@@ -1220,7 +1220,10 @@ typed_layout! {
             parent_type_name: FloatingPanes,
             fn_name: pane_with_index,
             fn_args: [pane_index: usize],
-            fn: |parent: Layout<'a>, pane_index: usize| {
+            layout_fn: |parent: Layout<'a>, pane_index: usize| {
+                parent.children().nth(pane_index).unwrap()
+            },
+            tree_fn: |parent: &Tree, pane_index: usize| {
                 parent.children().nth(pane_index).unwrap()
             },
         },
@@ -1238,8 +1241,17 @@ typed_layout! {
             parent_type_name: FloatingPane,
             fn_name: content,
             fn_args: [],
-            fn: |parent: Layout<'a>| {
-                parent.children().nth(0).unwrap().children().nth(1).unwrap().children().nth(0).unwrap()
+            layout_fn: |parent: Layout<'a>| {
+                parent
+                    .children().nth(0).unwrap()
+                    .children().nth(1).unwrap()
+                    .children().nth(0).unwrap()
+            },
+            tree_fn: |parent: &Tree| {
+                parent
+                    .children().nth(0).unwrap()
+                    .children().nth(1).unwrap()
+                    .children().nth(0).unwrap()
             },
         },
     ],
