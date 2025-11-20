@@ -116,7 +116,7 @@ where
             height: self.height,
             element_tree: {
                 // Element { Margin { Row [ Column [ .. ], Column [ .. ] ] } }
-                Margin::new(
+                margin(
                     {
                         let mut column =
                             Column::new().width(Length::Fill).spacing(style::consts::SPACING_VERTICAL);
@@ -162,7 +162,6 @@ where
                     },
                     style::consts::SPACING,
                 )
-                .into()
             },
         }
     }
@@ -246,13 +245,54 @@ where
         Size::new(self.width, self.height)
     }
 
-    fn layout(&self, state: &mut Tree, renderer: &R, limits: &Limits) -> Node {
-        // let limits = limits
-        //     .max_width(self.extents[0])
-        //     .max_height(self.extents[1])
-        //     .width(self.width)
-        //     .height(self.height);
-        self.element_tree.as_widget().layout(state, renderer, limits)
+    fn layout(&self, tree: &mut Tree, renderer: &R, limits: &Limits) -> Node {
+        // TODO: typed state
+        Node::with_children(
+            limits.resolve(self.width, self.height, Size::ZERO),
+            vec![self.element_tree.as_widget().layout(&mut tree.children[0], renderer, limits)],
+        )
+    }
+
+    fn children(&self) -> Vec<Tree> {
+        vec![Tree::new(&self.element_tree)]
+    }
+
+    fn diff(&self, tree: &mut Tree) {
+        tree.diff_children(&[&self.element_tree]);
+    }
+
+    fn mouse_interaction(
+        &self,
+        state: &Tree,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        viewport: &Rectangle,
+        renderer: &R,
+    ) -> mouse::Interaction {
+        // TODO: typed state, layout
+        self.element_tree.as_widget().mouse_interaction(
+            &state.children[0],
+            layout.children().nth(0).unwrap(),
+            cursor,
+            viewport,
+            renderer,
+        )
+    }
+
+    fn operate(
+        &self,
+        state: &mut Tree,
+        layout: Layout<'_>,
+        renderer: &R,
+        operation: &mut dyn iced_core::widget::Operation,
+    ) {
+        // TODO: typed state, layout
+        self.element_tree.as_widget().operate(
+            &mut state.children[0],
+            layout.children().nth(0).unwrap(),
+            renderer,
+            operation,
+        );
     }
 
     fn draw(
@@ -265,7 +305,16 @@ where
         cursor: mouse::Cursor,
         viewport: &Rectangle,
     ) {
-        self.element_tree.as_widget().draw(tree, renderer, theme, style, layout, cursor, viewport)
+        // TODO: typed state, layout
+        self.element_tree.as_widget().draw(
+            &tree.children[0],
+            renderer,
+            theme,
+            style,
+            layout.children().nth(0).unwrap(),
+            cursor,
+            viewport,
+        )
     }
 
     fn on_event(
@@ -279,9 +328,17 @@ where
         shell: &mut Shell<'_, M>,
         viewport: &Rectangle,
     ) -> Status {
-        self.element_tree
-            .as_widget_mut()
-            .on_event(state, event, layout, cursor, renderer, clipboard, shell, viewport)
+        // TODO: typed state, layout
+        self.element_tree.as_widget_mut().on_event(
+            &mut state.children[0],
+            event,
+            layout.children().nth(0).unwrap(),
+            cursor,
+            renderer,
+            clipboard,
+            shell,
+            viewport,
+        )
     }
 
     fn overlay<'b>(
@@ -291,7 +348,13 @@ where
         renderer: &R,
         translation: Vector,
     ) -> Option<overlay::Element<'b, M, T, R>> {
-        self.element_tree.as_widget_mut().overlay(state, layout, renderer, translation)
+        // TODO: typed state, layout
+        self.element_tree.as_widget_mut().overlay(
+            &mut state.children[0],
+            layout.children().nth(0).unwrap(),
+            renderer,
+            translation,
+        )
     }
 }
 
@@ -631,7 +694,7 @@ where
                     );
                 }
 
-                let container = Container::<M, T, R>::new(Margin::new(error_element, style::consts::SPACING));
+                let container = Container::<M, T, R>::new(margin(error_element, style::consts::SPACING));
 
                 // if let Some(style) = panes.behaviour.tooltip_style.as_ref() {
                 //     container = container.style(style.container_style());
@@ -702,8 +765,7 @@ pub struct FloatingPanesBehaviourState {
 /// Good practice: Rendering is made to be generic over the backend using this trait, which
 /// is to be implemented on the specific `Renderer`.
 pub trait WidgetRenderer:
-    margin::WidgetRenderer
-    + iced_graphics::geometry::Renderer
+    iced_graphics::geometry::Renderer
     + floating_panes::WidgetRenderer
     + iced_core::Renderer
     + iced_core::text::Renderer
@@ -727,8 +789,7 @@ pub trait WidgetRenderer:
 }
 
 impl<R> WidgetRenderer for R
-where R: margin::WidgetRenderer
-        + iced_graphics::geometry::Renderer
+where R: iced_graphics::geometry::Renderer
         + floating_panes::WidgetRenderer
         + iced_core::Renderer
         + iced_core::text::Renderer
@@ -750,6 +811,9 @@ where R: margin::WidgetRenderer
         M: Clone,
         T: iced::widget::text::Catalog + iced::widget::container::Catalog,
     {
+        // dbg!(state);
+        // dbg!(layout);
+
         let mouse_interaction = mouse::Interaction::default();
         let mut primitives = Vec::new();
 
@@ -949,22 +1013,6 @@ where R: margin::WidgetRenderer
         {
             for (pane_layout, (&node_index, pane)) in layout.panes().zip(&panes.children) {
                 let node = panes.children.get(&node_index).unwrap();
-
-                fn debug_layout(layout: &Layout, depth: usize) {
-                    let prefix = std::iter::repeat_n(' ', depth).collect::<String>();
-                    if layout.children().next().is_none() {
-                        println!("{prefix}{{}}");
-                    } else {
-                        println!("{prefix}{{");
-                        for child in layout.children() {
-                            debug_layout(&child, depth + 1);
-                        }
-                        println!("{prefix}}}");
-                    }
-                }
-
-                print!("Node #{node_index:?}");
-                debug_layout(&pane_layout.into(), 0);
 
                 let inputs_layout = pane_layout
                     .content()
@@ -1221,6 +1269,9 @@ typed_layout! {
             layout_fn: |parent: Layout<'a>, channel_direction: ChannelDirection| {
                 parent
                     .children()
+                    .nth(0)
+                    .unwrap()
+                    .children()
                     .nth(1)
                     .unwrap()
                     .children()
@@ -1238,6 +1289,7 @@ typed_layout! {
             },
             tree_ref_fn: |parent: &'a Tree, channel_direction: ChannelDirection| {
                 &parent
+                    .children[0]
                     .children[1]
                     .children[1]
                     .children[1]
@@ -1248,6 +1300,7 @@ typed_layout! {
             },
             tree_mut_fn: |parent: &'a mut Tree, channel_direction: ChannelDirection| {
                 &mut parent
+                    .children[0]
                     .children[1]
                     .children[1]
                     .children[1]

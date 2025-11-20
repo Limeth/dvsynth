@@ -311,18 +311,15 @@ impl<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a
             resizeable: self.resizeable,
             element_tree: {
                 let mut column = Column::<M, T, R>::new();
+                let title = self.title.unwrap_or("Untitled");
+                let mut text = Text::<T, R>::new(title.to_string());
 
-                if let Some(title) = self.title.take() {
-                    let mut text = Text::<T, R>::new(title.to_string());
-
-                    if let Some(title_size) = self.title_size.take() {
-                        text = text.size(title_size);
-                    }
-
-                    let element: Element<M, T, R> = text.into();
-                    let margin = Margin::<M, T, R>::new(element, self.title_margin.clone());
-                    column = column.push(margin);
+                if let Some(title_size) = self.title_size.take() {
+                    text = text.size(title_size);
                 }
+
+                let margin = margin::<M, T, R>(text, self.title_margin.clone());
+                column = column.push(margin);
 
                 let element_container = Container::<M, T, R>::new(self.content);
 
@@ -784,23 +781,53 @@ impl<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a
         Size::new(self.width, self.height)
     }
 
+    fn children(&self) -> Vec<Tree> {
+        self.children.values().map(|child| Tree::new(&child.element_tree)).collect()
+    }
+
+    fn diff(&self, tree: &mut Tree) {
+        let child_trees = self.children.values().map(|child| &child.element_tree).collect::<Vec<_>>();
+        tree.diff_children(&child_trees);
+    }
+
+    fn mouse_interaction(
+        &self,
+        tree: &Tree,
+        layout: Layout<'_>,
+        cursor: iced_core::mouse::Cursor,
+        viewport: &Rectangle,
+        renderer: &R,
+    ) -> iced_core::mouse::Interaction {
+        self.children
+            .values()
+            .zip(&tree.children)
+            .zip(layout.children())
+            .map(|((child, state), layout)| {
+                child.element_tree.as_widget().mouse_interaction(state, layout, cursor, viewport, renderer)
+            })
+            .max()
+            .unwrap_or_default()
+    }
+
     fn layout(&self, tree: &mut Tree, renderer: &R, limits: &Limits) -> Node {
         let limits = limits
             .max_width(self.extents[0])
             .max_height(self.extents[1])
             .width(self.width)
             .height(self.height);
+        let tree: FloatingPanesTreeMut = tree.into();
 
         Node::with_children(
             Size::new(self.extents[0], self.extents[1]),
             self.children
                 .iter()
-                .map(|(_, child)| {
-                    child
+                .zip(tree.panes())
+                .map(|((_, child), pane_tree)| {
+                    let layout = child
                         .element_tree
                         .as_widget()
-                        .layout(tree, renderer, &limits)
-                        .move_to(child.state.position.into_array())
+                        .layout(pane_tree.into(), renderer, &limits);
+                    layout.move_to(child.state.position.into_array())
                 })
                 .collect::<Vec<_>>(),
         )
@@ -836,6 +863,22 @@ impl<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a
 
     //     C::hash_panes(&self, state);
     // }
+
+    fn operate(
+        &self,
+        tree: &mut Tree,
+        layout: Layout<'_>,
+        renderer: &R,
+        operation: &mut dyn iced_core::widget::Operation,
+    ) {
+        operation.container(None, layout.bounds(), &mut |operation| {
+            self.children.values().zip(&mut tree.children).zip(layout.children()).for_each(
+                |((child, state), layout)| {
+                    child.element_tree.as_widget().operate(state, layout, renderer, operation);
+                },
+            );
+        });
+    }
 
     fn on_event(
         &mut self,
@@ -1047,8 +1090,7 @@ impl<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a
 /// Good practice: Rendering is made to be generic over the backend using this trait, which
 /// is to be implemented on the specific `Renderer`.
 pub trait WidgetRenderer:
-    margin::WidgetRenderer
-    + iced_core::Renderer
+    iced_core::Renderer
     + iced_core::text::Renderer
     // + iced_runtime::column::Renderer
     // + iced_runtime::widget::container::Renderer
@@ -1070,7 +1112,7 @@ pub trait WidgetRenderer:
 }
 
 impl<R> WidgetRenderer for R
-where R: margin::WidgetRenderer + iced_core::Renderer + iced_core::text::Renderer + Sized
+where R: iced_core::Renderer + iced_core::text::Renderer + Sized
 {
     // type StyleFloatingPane = Box<dyn FloatingPaneStyleSheet>;
     // type StyleFloatingPanes = Box<dyn FloatingPanesStyleSheet>;

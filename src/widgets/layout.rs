@@ -1,4 +1,4 @@
-use iced_core::{Point, Rectangle, widget::Tree};
+use iced_core::{Layout, Point, Rectangle, widget::Tree};
 use std::fmt::Debug;
 
 pub trait TypedLayout: Clone + Copy + Debug {
@@ -202,5 +202,18 @@ macro_rules! typed_layout {
                 }
             )?
         }
+    }
+}
+
+pub fn debug_layout(layout: &Layout, depth: usize) {
+    let prefix = std::iter::repeat_n(' ', depth).collect::<String>();
+    if layout.children().next().is_none() {
+        println!("{prefix}{{}}");
+    } else {
+        println!("{prefix}{{");
+        for child in layout.children() {
+            debug_layout(&child, depth + 1);
+        }
+        println!("{prefix}}}");
     }
 }

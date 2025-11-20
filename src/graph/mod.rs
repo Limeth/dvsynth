@@ -19,6 +19,7 @@ use alloc::Allocator;
 use arc_swap::ArcSwapOption;
 use iced::Settings;
 use iced::Theme;
+use iced_core::Widget;
 use iced_wgpu::wgpu::{self, Backends, TextureFormat};
 use iced_winit::winit::window::Window;
 use petgraph::{Directed, Direction, stable_graph::StableGraph, visit::EdgeRef};
