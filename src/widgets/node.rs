@@ -6,7 +6,6 @@ use crate::util::{RectangleExt, Segments, StrokeType};
 use crate::{ChannelDirection, ChannelIdentifier, Connection, style, util};
 use iced::alignment::Horizontal;
 use iced::mouse::Cursor;
-use iced::widget::canvas::Frame;
 use iced::widget::{Column, Container, Row, Space, Text};
 use iced::{Size, Vector};
 use iced_core::event::Status;
@@ -16,7 +15,7 @@ use iced_core::overlay::{self, Group, Overlay};
 use iced_core::widget::{Tree, Widget};
 use iced_core::{self, Clipboard, Element, Event, Length, Point, Rectangle};
 use iced_core::{Color, Shell};
-use iced_graphics::geometry::{LineCap, LineJoin, Path, Stroke, Style};
+use iced_graphics::geometry::{Frame, LineCap, LineJoin, Path, Stroke, Style};
 use lyon_geom::QuadraticBezierSegment;
 use petgraph::graph::NodeIndex;
 use std::marker::PhantomData;
@@ -815,28 +814,27 @@ where R: iced_graphics::geometry::Renderer
         // dbg!(layout);
 
         let mouse_interaction = mouse::Interaction::default();
-        let mut primitives = Vec::new();
 
-        primitives.extend(panes.children.iter().zip(layout.panes()).zip(&state.children).map(
-            |(((_child_index, child), child_layout), child_state)| {
-                /*let (primitive, new_mouse_interaction) =*/
-                child.element_tree.as_widget().draw(
-                    child_state,
-                    self,
-                    theme,
-                    style,
-                    child_layout.into(),
-                    cursor,
-                    viewport,
-                );
+        for (((_child_index, child), child_layout), child_state) in
+            panes.children.iter().zip(layout.panes()).zip(&state.children)
+        {
+            /*let (primitive, new_mouse_interaction) =*/
+            child.element_tree.as_widget().draw(
+                child_state,
+                self,
+                theme,
+                style,
+                child_layout.into(),
+                cursor,
+                viewport,
+            );
 
-                // if new_mouse_interaction > mouse_interaction {
-                //     mouse_interaction = new_mouse_interaction;
-                // }
+            // if new_mouse_interaction > mouse_interaction {
+            //     mouse_interaction = new_mouse_interaction;
+            // }
 
-                // primitive
-            },
-        ));
+            // primitive
+        }
 
         let mut frame = Frame::new(self, layout.bounds().size());
 
@@ -1043,6 +1041,7 @@ where R: iced_graphics::geometry::Renderer
 
                     draw_connection_point(
                         self,
+                        &mut frame,
                         panes,
                         node_index,
                         position,
@@ -1053,6 +1052,8 @@ where R: iced_graphics::geometry::Renderer
                 }
             }
         }
+
+        self.draw_geometry(frame.into_geometry());
 
         ContentDrawResult {
             override_parent_cursor: panes.behaviour_state.highlight.is_some(),
@@ -1081,6 +1082,7 @@ where R: iced_graphics::geometry::Renderer
 
 fn draw_connection_point<M, T, R>(
     renderer: &mut R,
+    frame: &mut Frame<R>,
     panes: &FloatingPanes<'_, M, T, R, FloatingPanesBehaviour<M, R>>,
     node_index: NodeIndex,
     position: Vec2<f32>,
@@ -1100,8 +1102,9 @@ fn draw_connection_point<M, T, R>(
         color = Color::from_rgb(1.0, 0.0, 0.0);
     }
 
-    util::draw_point(renderer, position, color, radius);
+    frame.fill(&Path::circle(position.into_array().into(), radius), color);
 
+    // TODO: Consider using Frame::stroke instead.
     if !solid {
         let pane = panes.children.get(&node_index).unwrap();
         // TODO
@@ -1109,7 +1112,7 @@ fn draw_connection_point<M, T, R>(
         // pane.style.as_ref().unwrap().style(style::InteractionStatus::Idle).body_background_color;
         let color = Color::from_rgb(1.0, 0.8, 0.2);
 
-        util::draw_point(renderer, position, color, radius * (2.0 / 3.0));
+        frame.fill(&Path::circle(position.into_array().into(), radius * (2.0 / 3.0)), color);
     }
 }
 

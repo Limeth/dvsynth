@@ -4,23 +4,19 @@ use crate::util::RectangleExt;
 use iced::event::Status;
 use iced::mouse::{self, Cursor, Interaction};
 use iced::widget::{Column, Container};
-use iced::{Element, Size, Vector, overlay};
+use iced::{Color, Element, Size, Vector, overlay};
 use iced_core::Rectangle;
 use iced_core::layout::{Limits, Node};
 use iced_core::overlay::Group;
 use iced_core::renderer::Quad;
 use iced_core::widget::{Text, Tree};
 use iced_core::{self, Clipboard, Event, Layout, Length, Point, Shell, Widget};
+use iced_graphics::geometry::frame::Backend;
 use indexmap::IndexMap;
 use ordered_float::OrderedFloat;
 use std::hash::Hash;
 use std::ops::{Deref, DerefMut};
 use vek::Vec2;
-
-pub enum PrimitiveEnum {
-    Quad(Quad),
-    Group(Vec<PrimitiveEnum>),
-}
 
 pub struct ContentDrawResult /*<R: WidgetRenderer>*/ {
     pub override_parent_cursor: bool,
@@ -97,7 +93,7 @@ impl<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer + iced_wgpu::primitive::Renderer>
         viewport: &Rectangle,
     ) -> ContentDrawResult {
         let mouse_interaction = Interaction::default();
-        let primitives = panes.children.iter().zip(layout.panes()).map(|((_, child), layout)| {
+        for ((_, child), layout) in panes.children.iter().zip(layout.panes()) {
             // let (primitive, new_mouse_interaction) =
             child.element_tree.as_widget().draw(
                 tree,
@@ -114,42 +110,8 @@ impl<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer + iced_wgpu::primitive::Renderer>
             // }
 
             // primitive
-        });
-
-        // for primitive in primitives {
-        //     renderer.draw_primitive(viewport, primitive);
-        // }
-
-        /*
-        ContentDrawResult {
-            override_parent_cursor: false,
-            output: (
-                PrimitiveEnum::Group(
-                    panes
-                        .children
-                        .iter()
-                        .zip(layout.panes())
-                        .map(|((_, child), layout)| {
-                            let (primitive, new_mouse_interaction) = child.element_tree.draw(
-                                renderer,
-                                defaults,
-                                layout.into(),
-                                cursor_position,
-                                viewport,
-                            );
-
-                            if new_mouse_interaction > mouse_interaction {
-                                mouse_interaction = new_mouse_interaction;
-                            }
-
-                            primitive
-                        })
-                        .collect(),
-                ),
-                mouse_interaction,
-            ),
         }
-        */
+
         ContentDrawResult { override_parent_cursor: false }
     }
 
@@ -322,6 +284,12 @@ impl<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a
                 column = column.push(margin);
 
                 let element_container = Container::<M, T, R>::new(self.content);
+                // .style(|theme| {
+                //     let extended = theme.ex;
+                //     iced::widget::container::Style {
+                //         background:
+                //     }
+                // });
 
                 // if let Some(style) = self.style.as_ref() {
                 //     element_container =
@@ -823,10 +791,7 @@ impl<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a
                 .iter()
                 .zip(tree.panes())
                 .map(|((_, child), pane_tree)| {
-                    let layout = child
-                        .element_tree
-                        .as_widget()
-                        .layout(pane_tree.into(), renderer, &limits);
+                    let layout = child.element_tree.as_widget().layout(pane_tree.into(), renderer, &limits);
                     layout.move_to(child.state.position.into_array())
                 })
                 .collect::<Vec<_>>(),
@@ -1092,6 +1057,7 @@ impl<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a
 pub trait WidgetRenderer:
     iced_core::Renderer
     + iced_core::text::Renderer
+    + iced_graphics::geometry::Renderer
     // + iced_runtime::column::Renderer
     // + iced_runtime::widget::container::Renderer
     + Sized
@@ -1112,7 +1078,7 @@ pub trait WidgetRenderer:
 }
 
 impl<R> WidgetRenderer for R
-where R: iced_core::Renderer + iced_core::text::Renderer + Sized
+where R: iced_core::Renderer + iced_core::text::Renderer + iced_graphics::geometry::Renderer + Sized
 {
     // type StyleFloatingPane = Box<dyn FloatingPaneStyleSheet>;
     // type StyleFloatingPanes = Box<dyn FloatingPanesStyleSheet>;
@@ -1129,19 +1095,24 @@ where R: iced_core::Renderer + iced_core::text::Renderer + Sized
     ) {
         let mouse_interaction =
             element.state.gesture.as_ref().map(Gesture::get_mouse_interaction).unwrap_or_default();
+        let mut frame = self.new_frame(viewport.size());
 
-        let background_primitive = PrimitiveEnum::Quad(Quad {
-            bounds: Rectangle::new(Point::ORIGIN, layout.bounds().size()),
-            // background: Background::Color(
-            //     element
-            //         .style
-            //         .as_ref()
-            //         .map(|style| style.style().background_color)
-            //         .unwrap_or(Color::TRANSPARENT),
-            // ),
-            border: iced::Border::default(),
-            shadow: iced::Shadow::default(),
-        });
+        // TODO
+        frame.fill_rectangle(Point::ORIGIN, viewport.size(), Color::from_rgb(0.5, 0.5, 0.0));
+        self.draw_geometry(frame.into_geometry());
+
+        // let background_primitive = PrimitiveEnum::Quad(Quad {
+        //     bounds: Rectangle::new(Point::ORIGIN, layout.bounds().size()),
+        //     // background: Background::Color(
+        //     //     element
+        //     //         .style
+        //     //         .as_ref()
+        //     //         .map(|style| style.style().background_color)
+        //     //         .unwrap_or(Color::TRANSPARENT),
+        //     // ),
+        //     border: iced::Border::default(),
+        //     shadow: iced::Shadow::default(),
+        // });
 
         let ContentDrawResult {
             override_parent_cursor,

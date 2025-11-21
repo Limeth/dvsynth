@@ -1,16 +1,14 @@
 #![allow(dead_code)]
 
-use iced::Border;
 use iced::Color;
 use iced::Rectangle;
-use iced::Shadow;
-use iced::border::Radius;
-use iced::widget::canvas::Frame;
 use iced_core::Layout;
 use iced_core::Renderer;
-use iced_core::renderer::Quad;
 use iced_graphics::geometry::Fill;
+use iced_graphics::geometry::Frame;
+use iced_graphics::geometry::LineCap;
 use iced_graphics::geometry::Path;
+use iced_graphics::geometry::Stroke;
 use iced_graphics::geometry::Style;
 use iced_graphics::geometry::fill::Rule;
 use iced_graphics::geometry::path::Builder;
@@ -22,8 +20,6 @@ use std::borrow::Cow;
 use std::ops::Deref;
 use std::ops::DerefMut;
 use vek::Vec2;
-
-use crate::widgets::PrimitiveEnum;
 
 pub enum StrokeType {
     Contiguous,
@@ -339,54 +335,40 @@ pub fn softminabs(abs_softness: f32, max_sharpness: f32, max: f32, x: f32) -> f3
     softmax(-max, max_sharpness, 0.0) - softmax(-max, max_sharpness, -softabs2(abs_softness, x))
 }
 
-pub fn draw_point<R: Renderer + iced_graphics::geometry::Renderer>(
-    renderer: &mut R,
-    position: Vec2<f32>,
+// pub fn draw_point<R: Renderer + iced_graphics::geometry::Renderer>(
+//     frame: &mut Frame<R>,
+//     position: Vec2<f32>,
+//     color: Color,
+//     radius: f32,
+// ) {
+//     let connection_point_center = radius + 1.0; // extra pixel for anti aliasing
+//     let path = Path::new(|builder| {
+//         builder.circle([connection_point_center, connection_point_center].into(), radius);
+//     });
+
+//     // let offset: Vector =
+//     //     (position - Vec2::new(connection_point_center, connection_point_center)).into_array().into();
+//     frame.translate([connection_point_center, connection_point_center].into());
+//     frame.fill(&path, Fill { style: Style::Solid(color), rule: Rule::NonZero });
+
+//     renderer.draw_geometry(frame.into_geometry());
+
+//     // TODO:
+//     // translation: (position - Vec2::new(connection_point_center, connection_point_center))
+//     //     .into_array()
+//     //     .into(),
+// }
+
+pub fn draw_bounds<R: Renderer + iced_graphics::geometry::Renderer>(
+    frame: &mut Frame<R>,
+    layout: Layout<'_>,
     color: Color,
-    radius: f32,
 ) {
-    let connection_point_center = radius + 1.0; // extra pixel for anti aliasing
-    let frame_size = connection_point_center * 2.0;
-    let mut frame = Frame::<R>::new(renderer, [frame_size, frame_size].into());
-    let path = Path::new(|builder| {
-        builder.circle([connection_point_center, connection_point_center].into(), radius);
-    });
-
-    frame.fill(&path, Fill { style: Style::Solid(color), rule: Rule::NonZero });
-    renderer.draw_geometry(frame.into_geometry());
-
-    // TODO:
-    // translation: (position - Vec2::new(connection_point_center, connection_point_center))
-    //     .into_array()
-    //     .into(),
-}
-
-pub fn draw_rectangle(rectangle: Rectangle<f32>, color: Color) -> PrimitiveEnum {
-    // let layout_position = Vector::new(layout.position().x, layout.position().y);
-    // let layout_size = Vector::new(layout.bounds().size().width, layout.bounds().size().height);
-
-    // Primitive::Group {
-    //     primitives: vec![
-    //         draw_point(
-    //             layout_position,
-    //             color,
-    //         ),
-    //         draw_point(
-    //             layout_position + layout_size,
-    //             color,
-    //         ),
-    //     ],
-    // }
-    PrimitiveEnum::Quad(Quad {
-        bounds: rectangle,
-        // background: Background::Color(Color::TRANSPARENT),
-        border: Border { radius: Radius::new(0), width: 1.0, color },
-        shadow: Shadow::default(),
-    })
-}
-
-pub fn draw_bounds(layout: Layout<'_>, color: Color) -> PrimitiveEnum {
-    draw_rectangle(layout.bounds(), color)
+    frame.stroke_rectangle(
+        layout.bounds().min().into_array().into(),
+        layout.bounds().size(),
+        Stroke { line_cap: LineCap::Square, style: color.into(), width: 1.0, ..Default::default() },
+    );
 }
 
 pub trait RectangleExt: Sized {
