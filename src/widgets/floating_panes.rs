@@ -3,8 +3,9 @@ use crate::style::InteractionStatus;
 use crate::util::RectangleExt;
 use iced::event::Status;
 use iced::mouse::{self, Cursor, Interaction};
+use iced::theme::palette::Extended;
 use iced::widget::{Column, Container};
-use iced::{Color, Element, Size, Vector, overlay};
+use iced::{Background, Color, Element, Size, Theme, Vector, overlay};
 use iced_core::Rectangle;
 use iced_core::layout::{Limits, Node};
 use iced_core::overlay::Group;
@@ -16,6 +17,7 @@ use indexmap::IndexMap;
 use ordered_float::OrderedFloat;
 use std::hash::Hash;
 use std::ops::{Deref, DerefMut};
+use std::sync::Arc;
 use vek::Vec2;
 
 pub struct ContentDrawResult /*<R: WidgetRenderer>*/ {
@@ -193,15 +195,21 @@ pub struct FloatingPaneBuilder<
     pub title: Option<&'a str>,
     pub title_size: Option<u16>,
     pub title_margin: Spacing,
-    // pub style: Option<<R as WidgetRenderer>::StyleFloatingPane>,
+    pub class: Arc<dyn Fn(&T) -> FloatingPaneStyle + 'a>,
     /// Whether the floating pane is resizeable in each axis
     pub min_size: Vec2<f32>,
     pub resizeable: Vec2<bool>,
     pub __marker: std::marker::PhantomData<(M, C)>,
 }
 
-impl<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a, M, T, R>>
-    FloatingPaneBuilder<'a, M, T, R, C>
+impl<'a, M, T, R, C> FloatingPaneBuilder<'a, M, T, R, C>
+where
+    M: 'a,
+    T: 'a + Catalog + iced::widget::text::Catalog + iced::widget::container::Catalog,
+    <T as iced::widget::text::Catalog>::Class<'a>: From<iced::widget::text::StyleFn<'a, T>>,
+    <T as iced::widget::container::Catalog>::Class<'a>: From<iced::widget::container::StyleFn<'a, T>>,
+    R: 'a + WidgetRenderer,
+    C: 'a + FloatingPanesBehaviour<'a, M, T, R>,
 {
     pub fn new(
         content: impl Into<Element<'a, M, T, R>>,
@@ -217,7 +225,7 @@ impl<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a
             title: Default::default(),
             title_size: Default::default(),
             title_margin: Default::default(),
-            // style: Default::default(),
+            class: Arc::new(|_| Default::default()),
             min_size: [0.0, 0.0].into(),
             resizeable: Default::default(),
             __marker: Default::default(),
@@ -239,11 +247,10 @@ impl<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a
         self
     }
 
-    // pub fn style<T>(mut self, style: Option<T>) -> Self
-    // where T: Into<<R as WidgetRenderer>::StyleFloatingPane> {
-    //     self.style = style.map(Into::into);
-    //     self
-    // }
+    pub fn style(mut self, class: impl Fn(&T) -> FloatingPaneStyle + 'a) -> Self {
+        self.class = Arc::new(class);
+        self
+    }
 
     pub fn min_width(mut self, min_width: f32) -> Self {
         self.min_size[0] = min_width;
@@ -265,8 +272,7 @@ impl<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a
         self
     }
 
-    pub fn build(mut self) -> FloatingPane<'a, M, T, R, C>
-    where T: iced::widget::text::Catalog + iced::widget::container::Catalog {
+    pub fn build(mut self) -> FloatingPane<'a, M, T, R, C> {
         FloatingPane {
             behaviour_data: self.behaviour_data,
             min_size: self.min_size,
@@ -283,20 +289,28 @@ impl<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a
                 let margin = margin::<M, T, R>(text, self.title_margin.clone());
                 column = column.push(margin);
 
-                let element_container = Container::<M, T, R>::new(self.content);
-                // .style(|theme| {
-                //     let extended = theme.ex;
-                //     iced::widget::container::Style {
-                //         background:
-                //     }
-                // });
+                let element_container = Container::<M, T, R>::new(self.content).style({
+                    let class = self.class.clone();
+                    move |theme| {
+                        let floating_pane_style = (class)(theme);
+                        iced::widget::container::Style {
+                            background: floating_pane_style.body_background,
+                            ..Default::default()
+                        }
+                    }
+                });
 
-                // if let Some(style) = self.style.as_ref() {
-                //     element_container =
-                //         element_container.style(style.content_container_style(self.state.title_bar_status));
-                // }
-
-                let mut container = Container::new(column.push(element_container));
+                let mut container = Container::new(column.push(element_container)).style({
+                    let class = self.class;
+                    move |theme| {
+                        let floating_pane_style = (class)(theme);
+                        iced::widget::container::Style {
+                            background: floating_pane_style.title_background,
+                            text_color: Some(floating_pane_style.title_text_color),
+                            ..Default::default()
+                        }
+                    }
+                });
 
                 // if let Some(style) = self.style.as_ref() {
                 //     container = container.style(style.root_container_style(self.state.title_bar_status));
@@ -370,8 +384,14 @@ pub struct FloatingPane<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer, C: 'a + Floati
     pub __marker: std::marker::PhantomData<C>,
 }
 
-impl<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a, M, T, R>>
-    FloatingPane<'a, M, T, R, C>
+impl<'a, M, T, R, C> FloatingPane<'a, M, T, R, C>
+where
+    M: 'a,
+    T: 'a + Catalog + iced::widget::text::Catalog + iced::widget::container::Catalog,
+    <T as iced::widget::text::Catalog>::Class<'a>: From<iced::widget::text::StyleFn<'a, T>>,
+    <T as iced::widget::container::Catalog>::Class<'a>: From<iced::widget::container::StyleFn<'a, T>>,
+    R: 'a + WidgetRenderer,
+    C: 'a + FloatingPanesBehaviour<'a, M, T, R>,
 {
     pub fn builder(
         content: impl Into<Element<'a, M, T, R>>,
@@ -616,8 +636,12 @@ pub struct FloatingPanes<
     pub on_pane_title_bar_status_change: Box<dyn Fn(C::FloatingPaneIndex, InteractionStatus) -> M>,
 }
 
-impl<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a, M, T, R>>
-    FloatingPanes<'a, M, T, R, C>
+impl<'a, M, T, R, C> FloatingPanes<'a, M, T, R, C>
+where
+    M: 'a,
+    T: 'a,
+    R: 'a + WidgetRenderer,
+    C: 'a + FloatingPanesBehaviour<'a, M, T, R>,
 {
     pub fn new(
         state: &'a FloatingPanesState,
@@ -692,7 +716,17 @@ impl<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a
     pub fn get_layout_index_from_pane_index(&self, pane_index: &C::FloatingPaneIndex) -> Option<usize> {
         self.children.get_index_of(pane_index)
     }
+}
 
+impl<'a, M, T, R, C> FloatingPanes<'a, M, T, R, C>
+where
+    M: 'a,
+    T: 'a + Catalog + iced::widget::text::Catalog + iced::widget::container::Catalog,
+    <T as iced::widget::text::Catalog>::Class<'a>: From<iced::widget::text::StyleFn<'a, T>>,
+    <T as iced::widget::container::Catalog>::Class<'a>: From<iced::widget::container::StyleFn<'a, T>>,
+    R: 'a + WidgetRenderer,
+    C: 'a + FloatingPanesBehaviour<'a, M, T, R>,
+{
     pub fn update_pending_gestures(
         &mut self,
         cursor_position: Vec2<f32>,
@@ -742,8 +776,14 @@ impl<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a
     }
 }
 
-impl<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a, M, T, R>> Widget<M, T, R>
-    for FloatingPanes<'a, M, T, R, C>
+impl<'a, M, T, R, C> Widget<M, T, R> for FloatingPanes<'a, M, T, R, C>
+where
+    M: 'a,
+    T: 'a + Catalog + iced::widget::text::Catalog + iced::widget::container::Catalog,
+    <T as iced::widget::text::Catalog>::Class<'a>: From<iced::widget::text::StyleFn<'a, T>>,
+    <T as iced::widget::container::Catalog>::Class<'a>: From<iced::widget::container::StyleFn<'a, T>>,
+    R: 'a + WidgetRenderer,
+    C: 'a + FloatingPanesBehaviour<'a, M, T, R>,
 {
     fn size(&self) -> Size<Length> {
         Size::new(self.width, self.height)
@@ -1044,8 +1084,14 @@ impl<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a
     }
 }
 
-impl<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a, M, T, R>>
-    From<FloatingPanes<'a, M, T, R, C>> for Element<'a, M, T, R>
+impl<'a, M, T, R, C> From<FloatingPanes<'a, M, T, R, C>> for Element<'a, M, T, R>
+where
+    M: 'a,
+    T: 'a + Catalog + iced::widget::text::Catalog + iced::widget::container::Catalog,
+    <T as iced::widget::text::Catalog>::Class<'a>: From<iced::widget::text::StyleFn<'a, T>>,
+    <T as iced::widget::container::Catalog>::Class<'a>: From<iced::widget::container::StyleFn<'a, T>>,
+    R: 'a + WidgetRenderer,
+    C: 'a + FloatingPanesBehaviour<'a, M, T, R>,
 {
     fn from(other: FloatingPanes<'a, M, T, R, C>) -> Self {
         Element::new(other)
@@ -1095,11 +1141,11 @@ where R: iced_core::Renderer + iced_core::text::Renderer + iced_graphics::geomet
     ) {
         let mouse_interaction =
             element.state.gesture.as_ref().map(Gesture::get_mouse_interaction).unwrap_or_default();
-        let mut frame = self.new_frame(viewport.size());
+        // let mut frame = self.new_frame(viewport.size());
 
-        // TODO
-        frame.fill_rectangle(Point::ORIGIN, viewport.size(), Color::from_rgb(0.5, 0.5, 0.0));
-        self.draw_geometry(frame.into_geometry());
+        // // TODO
+        // frame.fill_rectangle(Point::ORIGIN, viewport.size(), Color::from_rgb(0.5, 0.5, 0.0));
+        // self.draw_geometry(frame.into_geometry());
 
         // let background_primitive = PrimitiveEnum::Quad(Quad {
         //     bounds: Rectangle::new(Point::ORIGIN, layout.bounds().size()),
@@ -1131,74 +1177,50 @@ where R: iced_core::Renderer + iced_core::text::Renderer + iced_graphics::geomet
     }
 }
 
-/*
+/// The theme catalog of a [`Container`].
+pub trait Catalog {
+    /// The item class of the [`Catalog`].
+    type Class<'a>;
+
+    /// The default class produced by the [`Catalog`].
+    fn default<'a>() -> <Self as Catalog>::Class<'a>;
+
+    /// The [`Style`] of a class with the given status.
+    fn style(&self, class: &<Self as Catalog>::Class<'_>) -> FloatingPaneStyle;
+}
+
+/// A styling function for a [`Container`].
+pub type StyleFn<'a, T> = Box<dyn Fn(&T) -> FloatingPaneStyle + 'a>;
+
+impl Catalog for Theme {
+    type Class<'a> = StyleFn<'a, Theme>;
+
+    fn default<'a>() -> <Self as Catalog>::Class<'a> {
+        Box::new(classes::transparent)
+    }
+
+    fn style(&self, class: &<Self as Catalog>::Class<'_>) -> FloatingPaneStyle {
+        class(self)
+    }
+}
+
+// TODO: Rename to `Style` for consistency with Iced widgets.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct FloatingPaneStyle {
-    pub title_background_color: Color,
+    pub title_background: Option<Background>,
     pub title_text_color: Color,
-    pub body_background_color: Color,
+    pub body_background: Option<Background>,
 }
 
-pub trait StyleFloatingPaneBounds<R: WidgetRenderer> {
-    fn root_container_style(
-        &self,
-        title_bar_status: InteractionStatus,
-    ) -> <R as iced_runtime::widget::container::StyleSheet>::Style;
-    fn content_container_style(
-        &self,
-        title_bar_status: InteractionStatus,
-    ) -> <R as iced_runtime::widget::container::StyleSheet>::Style;
-}
+pub mod classes {
+    use super::FloatingPaneStyle;
 
-pub trait FloatingPaneStyleSheet {
-    fn style(&self, title_bar_status: InteractionStatus) -> FloatingPaneStyle;
-}
-
-impl<B> StyleFloatingPaneBounds<iced_graphics::Renderer<B>> for Box<dyn FloatingPaneStyleSheet>
-where B: Backend + iced_graphics::backend::Text
-{
-    fn root_container_style(
-        &self,
-        title_bar_status: InteractionStatus,
-    ) -> Box<(dyn iced::widget::container::StyleSheet + 'static)> {
-        struct StyleSheet(FloatingPaneStyle);
-
-        impl iced::widget::container::StyleSheet for StyleSheet {
-            type Style = FloatingPaneStyle;
-
-            fn appearance(&self, style: &Self::Style) -> iced::widget::container::Appearance {
-                iced::widget::container::Appearance {
-                    background: Some(Background::Color(self.0.title_background_color)),
-                    text_color: Some(self.0.title_text_color),
-                    ..Default::default()
-                }
-            }
-        }
-
-        Box::new(StyleSheet(self.style(title_bar_status)))
-    }
-
-    fn content_container_style(
-        &self,
-        title_bar_status: InteractionStatus,
-    ) -> Box<(dyn iced::widget::container::StyleSheet + 'static)> {
-        struct StyleSheet(FloatingPaneStyle);
-
-        impl iced::widget::container::StyleSheet for StyleSheet {
-            type Style = FloatingPaneStyle;
-
-            fn appearance(&self, style: &Self::Style) -> iced::widget::container::Appearance {
-                iced::widget::container::Appearance {
-                    background: Some(Background::Color(self.0.body_background_color)),
-                    ..Default::default()
-                }
-            }
-        }
-
-        Box::new(StyleSheet(self.style(title_bar_status)))
+    pub fn transparent<Theme>(_theme: &Theme) -> FloatingPaneStyle {
+        FloatingPaneStyle::default()
     }
 }
 
+/*
 #[derive(Clone, Copy, Debug, Default)]
 pub struct FloatingPanesStyle {
     pub background_color: Color,

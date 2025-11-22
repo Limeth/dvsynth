@@ -101,6 +101,7 @@ pub struct ApplicationFlags {
 pub struct WindowHandle {}
 
 pub struct ApplicationState {
+    theme: Theme,
     graph: ExecutionGraph,
     floating_panes_state: FloatingPanesState,
     // TODO: rename from content to behaviour
@@ -119,6 +120,7 @@ impl ApplicationState {
 
         (
             Self {
+                theme: Theme::Dark,
                 graph: flags.graph,
                 floating_panes_state: Default::default(),
                 floating_panes_content_state: FloatingPanesBehaviourState::default(),
@@ -131,6 +133,10 @@ impl ApplicationState {
 
     fn title(&self, window_id: window::Id) -> String {
         format!("DVSynth Window #{window_id}")
+    }
+
+    fn theme(&self, _window_id: window::Id) -> Theme {
+        self.theme.clone()
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
@@ -376,7 +382,7 @@ async fn main() {
 
     iced::daemon(ApplicationState::title, ApplicationState::update, ApplicationState::view)
         // .subscription(ApplicationState::subscription)
-        // .theme(ApplicationState::theme)
+        .theme(ApplicationState::theme)
         .run_with(|| ApplicationState::new(ApplicationFlags { graph }))
         .expect("failed to start the GUI");
 

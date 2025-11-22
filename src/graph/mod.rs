@@ -11,6 +11,7 @@ use crate::node::{
     NodeStateRefcounter, OptionRefMutExt, RefAnyExt,
 };
 use crate::style::{self, consts};
+use crate::widgets::FloatingPaneStyle;
 use crate::widgets::{
     FloatingPane, FloatingPaneBehaviourData, FloatingPaneBehaviourState, FloatingPaneState, NodeElement,
     NodeElementState, node::FloatingPanesBehaviour,
@@ -1109,6 +1110,15 @@ impl NodeData {
         .title_margin(consts::SPACING)
         .width_resizeable(true)
         .min_width(128.0)
+        .style(|theme| {
+            let palette = theme.extended_palette();
+
+            FloatingPaneStyle {
+                body_background: Some(iced::Background::Color(palette.background.base.color)),
+                title_background: Some(iced::Background::Color(palette.background.strong.color)),
+                title_text_color: palette.background.strong.text,
+            }
+        })
         .build()
     }
 }

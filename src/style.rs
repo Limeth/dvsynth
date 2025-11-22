@@ -1,4 +1,9 @@
-use crate::Spacing;
+use iced::widget::{checkbox, container, pick_list, text_input};
+
+use crate::{
+    Spacing,
+    widgets::{floating_panes, node},
+};
 
 pub mod consts {
     use super::*;
@@ -10,15 +15,13 @@ pub mod consts {
     pub const SPACING: Spacing = Spacing::from_axes(SPACING_HORIZONTAL, SPACING_VERTICAL);
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash, PartialOrd, Ord)]
-#[derive(Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash, PartialOrd, Ord, Default)]
 pub enum InteractionStatus {
     #[default]
     Idle,
     Hovered,
     Focused,
 }
-
 
 /*
 pub trait Themeable: Sized {
