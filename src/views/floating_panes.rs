@@ -12,7 +12,7 @@ use xilem::core::{
 };
 use xilem::{AnyWidgetView, Pod, ViewCtx, WidgetView};
 
-pub fn floating_panes<State, Action, Seq: FlexSequence<State, Action>>(
+pub fn floating_panes<State, Action, Seq: FloatingPaneSequence<State, Action>>(
     sequence: Seq,
 ) -> FloatingPanes<Seq, State, Action> {
     FloatingPanes { sequence, phantom: PhantomData }
@@ -115,7 +115,7 @@ impl<State, Action, Seq> View<State, Action, ViewCtx> for FloatingPanes<Seq, Sta
 where
     State: 'static,
     Action: 'static,
-    Seq: FlexSequence<State, Action>,
+    Seq: FloatingPaneSequence<State, Action>,
 {
     type Element = Pod<widgets::FloatingPanes>;
 
@@ -326,12 +326,12 @@ impl ElementSplice<FloatingPaneElement> for FlexSplice<'_, '_> {
 ///     labels.map(|l| label(l).flex(flex)).collect::<Vec<_>>()
 /// }
 /// ```
-pub trait FlexSequence<State, Action = ()>:
+pub trait FloatingPaneSequence<State, Action = ()>:
     ViewSequence<State, Action, ViewCtx, FloatingPaneElement>
 {
 }
 
-impl<Seq, State, Action> FlexSequence<State, Action> for Seq where Seq: ViewSequence<State, Action, ViewCtx, FloatingPaneElement>
+impl<Seq, State, Action> FloatingPaneSequence<State, Action> for Seq where Seq: ViewSequence<State, Action, ViewCtx, FloatingPaneElement>
 {}
 
 /// A trait which extends a [`WidgetView`] with methods to provide parameters for a flex item, or being able to use it interchangeably with a spacer.
@@ -354,13 +354,13 @@ pub trait FloatingPaneExt<State, Action>: WidgetView<State, Action> {
     /// # }
     ///
     /// ```
-    fn flex(self, params: impl Into<FloatingPaneParams>) -> FloatingPaneItem<Self, State, Action>
+    fn floating_pane(self, params: impl Into<FloatingPaneParams>) -> FloatingPaneItem<Self, State, Action>
     where
         State: 'static,
         Action: 'static,
         Self: Sized,
     {
-        flex_item(self, params)
+        floating_pane_item(self, params)
     }
 
     // /// Turns this [`WidgetView`] into an [`AnyFlexChild`],
@@ -383,7 +383,7 @@ pub trait FloatingPaneExt<State, Action>: WidgetView<State, Action> {
     //     Action: 'static,
     //     Self: Sized,
     // {
-    //     AnyFlexChild::Item(flex_item(self.boxed(), FloatingPaneParams::default()))
+    //     AnyFlexChild::Item(floating_pane_item(self.boxed(), FloatingPaneParams::default()))
     // }
 }
 
@@ -401,20 +401,20 @@ pub struct FloatingPaneItem<V, State, Action> {
 /// # Examples
 /// ```
 /// use xilem::masonry::properties::types::AsUnit;
-/// use xilem::view::{Axis, text_button, label, flex_item, flex, CrossAxisAlignment, FlexSpacer};
+/// use xilem::view::{Axis, text_button, label, floating_pane_item, flex, CrossAxisAlignment, FlexSpacer};
 /// # use xilem::{WidgetView};
 ///
 /// # fn view<State: 'static>() -> impl WidgetView<State> {
 /// flex(Axis::Vertical, (
-///     flex_item(text_button("click me", |_| ()), 2.0),
+///     floating_pane_item(text_button("click me", |_| ()), 2.0),
 ///     FlexSpacer::Fixed(2.px()),
-///     flex_item(label("a label"), CrossAxisAlignment::Fill),
+///     floating_pane_item(label("a label"), CrossAxisAlignment::Fill),
 ///     FlexSpacer::Fixed(2.px()),
 /// ))
 /// # }
 ///
 /// ```
-pub fn flex_item<V, State, Action>(
+pub fn floating_pane_item<V, State, Action>(
     view: V,
     params: impl Into<FloatingPaneParams>,
 ) -> FloatingPaneItem<V, State, Action>
@@ -433,7 +433,7 @@ where
 //     V: WidgetView<State, Action, ViewState: 'static>,
 // {
 //     fn from(value: FlexItem<V, State, Action>) -> Self {
-//         Self::Item(flex_item(value.view.boxed(), value.params))
+//         Self::Item(floating_pane_item(value.view.boxed(), value.params))
 //     }
 // }
 
@@ -514,16 +514,16 @@ where
 //     ///
 //     /// # Examples
 //     /// ```
-//     /// use xilem::view::{Axis, flex, flex_item, label};
+//     /// use xilem::view::{Axis, flex, floating_pane_item, label};
 //     /// # use xilem::{WidgetView};
 //     ///
 //     /// # fn view<State: 'static>() -> impl WidgetView<State> {
-//     /// flex(Axis::Vertical, flex_item(label("Industry"), 4.0).into_any_flex())
+//     /// flex(Axis::Vertical, floating_pane_item(label("Industry"), 4.0).into_any_flex())
 //     /// # }
 //     ///
 //     /// ```
 //     pub fn into_any_flex(self) -> AnyFlexChild<State, Action> {
-//         AnyFlexChild::Item(flex_item(Box::new(self.view), self.params))
+//         AnyFlexChild::Item(floating_pane_item(Box::new(self.view), self.params))
 //     }
 // }
 
@@ -540,9 +540,9 @@ where
 //     fn build(&self, ctx: &mut ViewCtx, app_state: &mut State) -> (Self::Element, Self::ViewState) {
 //         let generation = 0;
 //         let (element, view_state) = match self {
-//             Self::Item(flex_item) => {
+//             Self::Item(floating_pane_item) => {
 //                 let (element, state) =
-//                     ctx.with_id(ViewId::new(generation), |ctx| flex_item.build(ctx, app_state));
+//                     ctx.with_id(ViewId::new(generation), |ctx| floating_pane_item.build(ctx, app_state));
 //                 (element, Some(state))
 //             }
 //             Self::Spacer(spacer) => {
@@ -631,8 +631,8 @@ where
 
 //     fn teardown(&self, view_state: &mut Self::ViewState, ctx: &mut ViewCtx, element: Mut<'_, Self::Element>) {
 //         match self {
-//             Self::Item(flex_item) => {
-//                 flex_item.teardown(view_state.inner.as_mut().unwrap(), ctx, element);
+//             Self::Item(floating_pane_item) => {
+//                 floating_pane_item.teardown(view_state.inner.as_mut().unwrap(), ctx, element);
 //             }
 //             Self::Spacer(spacer) => {
 //                 View::<(), (), ViewCtx>::teardown(spacer, &mut (), ctx, element);
@@ -652,10 +652,10 @@ where
 //             // The message was sent to a previous edition of the inner value
 //             return MessageResult::Stale;
 //         }
-//         let Self::Item(flex_item) = self else {
+//         let Self::Item(floating_pane_item) = self else {
 //             unreachable!("this should be unreachable as the generation was increased on the falling edge")
 //         };
 
-//         flex_item.message(view_state.inner.as_mut().unwrap(), message, element, app_state)
+//         floating_pane_item.message(view_state.inner.as_mut().unwrap(), message, element, app_state)
 //     }
 // }

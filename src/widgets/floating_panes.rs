@@ -3,6 +3,8 @@ use std::any::TypeId;
 use tracing::{Span, trace_span};
 use xilem::masonry::accesskit::{Node, Role};
 use xilem::masonry::core::HasProperty;
+use xilem::masonry::kurbo::{Rect, RoundedRect};
+use xilem::masonry::peniko::color::AlphaColor;
 use xilem::masonry::vello::Scene;
 use xilem::masonry::vello::kurbo::{Affine, Line, Point, Size, Stroke};
 
@@ -64,14 +66,16 @@ pub struct FloatingPanes {
 #[derive(Default, Debug, Clone, PartialEq)]
 pub struct FloatingPaneParams {
     pub title: String,
+    pub position: Point,
 }
 
 // TODO: Make generic over widget type
 struct Child {
     content: WidgetPod<dyn Widget>,
     params: FloatingPaneParams,
+    calculated_size: Size,
     // TODO: Should this be part of FloatingPaneParams?
-    position: Point,
+    // extra_data: Point,
 }
 
 // --- MARK: IMPL FLEX
@@ -131,7 +135,7 @@ impl FloatingPanes {
     ///
     /// Convenient for assembling a group of widgets in a single expression.
     pub fn with_child(mut self, child: NewWidget<impl Widget + ?Sized>, params: FloatingPaneParams) -> Self {
-        let child = Child { content: child.erased().to_pod(), params, position: Default::default() };
+        let child = Child { content: child.erased().to_pod(), params, calculated_size: Size::ZERO };
         self.children.push(child);
         self
     }
@@ -199,7 +203,7 @@ impl FloatingPanes {
         child: NewWidget<impl Widget + ?Sized>,
         params: FloatingPaneParams,
     ) {
-        let child = Child { content: child.erased().to_pod(), params, position: Default::default() };
+        let child = Child { content: child.erased().to_pod(), params, calculated_size: Size::ZERO };
         this.widget.children.insert(idx, child);
         this.ctx.children_changed();
     }
@@ -350,9 +354,9 @@ impl Widget for FloatingPanes {
         let loosened_bc = bc.loosen();
 
         for child in &mut self.children {
-            let child_size = ctx.run_layout(&mut child.content, &loosened_bc);
+            child.calculated_size = ctx.run_layout(&mut child.content, &loosened_bc);
             // let child_baseline = ctx.child_baseline_offset(widget);
-            ctx.place_child(&mut child.content, child.position);
+            ctx.place_child(&mut child.content, child.params.position);
         }
 
         bc.max()
@@ -370,6 +374,15 @@ impl Widget for FloatingPanes {
         let brush = bg.get_peniko_brush_for_rect(bg_rect.rect());
         fill(scene, &bg_rect, &brush);
         stroke(scene, &border_rect, border_color.color, border_width.width);
+
+        for child in &self.children {
+            let child_bg_rect = Rect::from_origin_size(child.params.position, child.calculated_size);
+            // TODO: customizable background
+            let brush = Background::Color(AlphaColor::from_rgb8(0x3F, 0x3F, 0x1F))
+                .get_peniko_brush_for_rect(child_bg_rect);
+
+            fill(scene, &child_bg_rect, &brush);
+        }
 
         // paint the baseline if we're debugging layout
         if ctx.debug_paint_enabled() && ctx.baseline_offset() != 0.0 {

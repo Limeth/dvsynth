@@ -38,11 +38,15 @@ use petgraph::graph::NodeIndex;
 use tokio::runtime::Runtime;
 use tracing::trace_span;
 use vek::Vec2;
-use views::floating_panes;
+use views::{FloatingPaneExt, FloatingPaneParams, floating_panes};
+use xilem::dpi::Position;
 use xilem::masonry::accesskit::{Node, Role};
 use xilem::masonry::core::{AccessCtx, BoxConstraints, ComposeCtx, LayoutCtx, PaintCtx, PropertiesRef};
 use xilem::masonry::kurbo::Size;
+use xilem::masonry::peniko::color::{AlphaColor, Srgb};
 use xilem::masonry::vello::Scene;
+use xilem::style::Background;
+use xilem::view::{FlexExt, FlexParams, flex_item};
 use xilem::{
     EventLoop, WidgetView, WindowOptions, Xilem,
     core::View,
@@ -265,7 +269,18 @@ impl ApplicationState {
             (
                 label(format!("{}", self.graph.node_count())),
                 text_button("increment", |state: &mut ApplicationState| state.graph.clear()),
-                floating_panes((label("Foo"), label("Bar"))),
+                label("Flex").flex(FlexParams::new(Some(100.0), None)),
+                floating_panes((
+                    label("Foo").floating_pane(FloatingPaneParams {
+                        title: "Foo's Title".into(),
+                        position: (0.0, 100.0).into(),
+                    }),
+                    label("Bar").floating_pane(FloatingPaneParams {
+                        title: "Bar's Title".into(),
+                        position: (100.0, 0.0).into(),
+                    }),
+                ))
+                .prop(Background::Color(AlphaColor::from_rgb8(0x1F, 0x1F, 0x1F))),
             ),
         )
     }
