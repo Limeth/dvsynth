@@ -478,6 +478,9 @@ impl Widget for FloatingPanes {
         fill(scene, &bg_rect, &brush);
         stroke(scene, &border_rect, border_color.color, border_width.width);
 
+        // Clip children drawn outside the layout area.
+        scene.push_clip_layer(Affine::IDENTITY, &bg_rect);
+
         for child in &self.children {
             let child_bg_rect = Rect::from_origin_size(
                 child.params.position + self.background_position.to_vec2(),
