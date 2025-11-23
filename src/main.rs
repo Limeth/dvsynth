@@ -23,20 +23,40 @@
 //! * Display type tooltips when hovering over channels
 //!
 
-use std::collections::BTreeMap;
 use std::marker::PhantomData;
+use std::{any::TypeId, collections::BTreeMap};
 
 use graph::{
     ChannelIdentifier, Connection, EdgeData, ExecutionGraph, Graph, GraphValidationErrors, NodeData,
 };
 use iced::{Settings, Task, Theme, window};
+use indexmap::IndexMap;
 use node::behaviour::counter::CounterNodeBehaviour;
 use node::behaviour::*;
 use node::*;
 use petgraph::graph::NodeIndex;
-use style::InteractionStatus;
+use tokio::runtime::Runtime;
+use tracing::trace_span;
 use vek::Vec2;
-use widgets::*;
+use views::floating_panes;
+use xilem::masonry::accesskit::{Node, Role};
+use xilem::masonry::core::{AccessCtx, BoxConstraints, ComposeCtx, LayoutCtx, PaintCtx, PropertiesRef};
+use xilem::masonry::kurbo::Size;
+use xilem::masonry::vello::Scene;
+use xilem::{
+    EventLoop, WidgetView, WindowOptions, Xilem,
+    core::View,
+    masonry::{
+        core::{
+            AccessEvent, ChildrenIds, EventCtx, NoAction, PointerEvent, PropertiesMut, QueryCtx, RegisterCtx,
+            TextEvent, Update, UpdateCtx, Widget, WidgetId, WidgetPod,
+        },
+        kurbo::Point,
+    },
+    view::{Axis, flex, label, text_button},
+    winit::window::CursorIcon,
+};
+use xilem::{Pod, ViewCtx};
 
 #[macro_use]
 pub mod util;
@@ -44,70 +64,19 @@ pub mod util;
 pub mod graph;
 pub mod node;
 pub mod style;
+pub mod views;
 pub mod widgets;
 
-pub type Element<'a, M = Message, T = Theme> = iced::Element<'a, M, T, iced_wgpu::Renderer>;
-
-#[derive(Debug, Clone)]
-pub enum NodeMessage {
-    NodeBehaviourMessage(Box<dyn NodeBehaviourMessage>),
-}
-
-#[derive(Debug, Clone)]
-pub enum Message {
-    WindowOpened(window::Id),
-    NodeMessage {
-        node: NodeIndex<u32>,
-        message: NodeMessage,
-    },
-    DisconnectChannel {
-        channel: ChannelIdentifier,
-    },
-    InsertConnection {
-        connection: Connection,
-    },
-    FloatingPanesPaneMoveTo {
-        pane_index: NodeIndex,
-        position: Vec2<f32>,
-    },
-    FloatingPanesPaneResize {
-        pane_index: NodeIndex,
-        size: Vec2<FloatingPaneLength>,
-    },
-    FloatingPanesBackgroundMoveTo {
-        position: Vec2<f32>,
-    },
-    FloatingPanesGestureChange {
-        gesture: Option<Gesture>,
-    },
-    FloatingPanesPaneTitleBarStatusChange {
-        pane_index: NodeIndex,
-        title_bar_status: InteractionStatus,
-    },
-    FloatingPanesHighlightChanged {
-        highlight: Option<Highlight>,
-    },
-    FloatingPanesSelectedChannelChanged {
-        selected_channel: Option<ChannelIdentifier>,
-    },
-    /// Workaround for layouts not being updated when we only change its mutable state
-    RecomputeLayout,
-}
+type Message = ();
+type Element<'a, M, T = Theme> = iced::Element<'a, M, T, iced_wgpu::Renderer>;
 
 pub struct ApplicationFlags {
     graph: ExecutionGraph,
 }
 
-pub struct WindowHandle {}
-
 pub struct ApplicationState {
-    theme: Theme,
     graph: ExecutionGraph,
-    floating_panes_state: FloatingPanesState,
-    // TODO: rename from content to behaviour
-    floating_panes_content_state: FloatingPanesBehaviourState,
     graph_validation_errors: GraphValidationErrors,
-    windows: BTreeMap<window::Id, WindowHandle>,
 }
 
 impl ApplicationState {
@@ -115,179 +84,190 @@ impl ApplicationState {
     // type Message = Message;
     // type Flags = ApplicationFlags; // The data needed to initialize your Application.
 
-    fn new(flags: ApplicationFlags) -> (Self, Task<Message>) {
-        let (_window_id, task_window_open) = window::open(window::Settings::default());
+    // fn new(flags: ApplicationFlags) -> (Self, Task<Message>) {
+    //     let (_window_id, task_window_open) = window::open(window::Settings::default());
 
-        (
-            Self {
-                theme: Theme::Dark,
-                graph: flags.graph,
-                floating_panes_state: Default::default(),
-                floating_panes_content_state: FloatingPanesBehaviourState::default(),
-                graph_validation_errors: Default::default(),
-                windows: Default::default(),
-            },
-            task_window_open.map(Message::WindowOpened),
+    //     (
+    //         Self {
+    //             theme: Theme::Dark,
+    //             graph: flags.graph,
+    //             floating_panes_state: Default::default(),
+    //             floating_panes_content_state: FloatingPanesBehaviourState::default(),
+    //             graph_validation_errors: Default::default(),
+    //             windows: Default::default(),
+    //         },
+    //         task_window_open.map(Message::WindowOpened),
+    //     )
+    // }
+
+    // fn title(&self, window_id: window::Id) -> String {
+    //     format!("DVSynth Window #{window_id}")
+    // }
+
+    // fn theme(&self, _window_id: window::Id) -> Theme {
+    //     self.theme.clone()
+    // }
+
+    // fn update(&mut self, message: Message) -> Task<Message> {
+    //     let mut update_schedule = false;
+    //     let task = match message {
+    //         Message::WindowOpened(id) => {
+    //             let window = WindowHandle {};
+    //             // Focus an element:
+    //             // let focus_input = text_input::focus(format!("input-{id}"));
+
+    //             self.windows.insert(id, window);
+
+    //             // focus_input
+    //             Task::none()
+    //         }
+    //         Message::NodeMessage { node, message } => {
+    //             match message {
+    //                 NodeMessage::NodeBehaviourMessage(message) => {
+    //                     if let Some(node_data) = self.graph.node_weight_mut(node) {
+    //                         node_data.update(NodeEvent::Message(message));
+    //                     }
+    //                 }
+    //             }
+
+    //             update_schedule = true;
+    //             Task::none()
+    //         }
+    //         Message::DisconnectChannel { channel } => {
+    //             self.graph.retain_edges(|frozen, edge| {
+    //                 let (from, to) = frozen.edge_endpoints(edge).unwrap();
+    //                 let node_index = match channel.channel_direction {
+    //                     ChannelDirection::In => to,
+    //                     ChannelDirection::Out => from,
+    //                 };
+
+    //                 if node_index == channel.node_index {
+    //                     let edge_data = frozen.edge_weight(edge).unwrap();
+
+    //                     if edge_data.get_endpoint(channel.channel_direction.inverse()) == channel.into() {
+    //                         return false;
+    //                     }
+    //                 }
+
+    //                 true
+    //             });
+
+    //             update_schedule = true;
+    //             Task::none()
+    //         }
+    //         Message::InsertConnection { connection } => {
+    //             let from = connection.from();
+    //             let to = connection.to();
+
+    //             self.graph.add_edge(
+    //                 from.node_index,
+    //                 to.node_index,
+    //                 EdgeData { endpoint_from: from.into(), endpoint_to: to.into() },
+    //             );
+
+    //             update_schedule = true;
+    //             Task::none()
+    //         }
+    //         Message::FloatingPanesPaneMoveTo { pane_index, position } => {
+    //             if let Some(pane) = self.graph.node_weight_mut(pane_index) {
+    //                 pane.floating_pane_state.position = position;
+    //             }
+    //             Task::none()
+    //         }
+    //         Message::FloatingPanesPaneResize { pane_index, size } => {
+    //             if let Some(pane) = self.graph.node_weight_mut(pane_index) {
+    //                 pane.floating_pane_state.size = size;
+    //             }
+    //             Task::none()
+    //         }
+    //         Message::FloatingPanesBackgroundMoveTo { position } => {
+    //             self.floating_panes_state.panes_offset = position;
+    //             Task::none()
+    //         }
+    //         Message::FloatingPanesGestureChange { gesture } => {
+    //             self.floating_panes_state.gesture = gesture;
+    //             Task::none()
+    //         }
+    //         Message::FloatingPanesPaneTitleBarStatusChange { pane_index, title_bar_status } => {
+    //             if let Some(pane) = self.graph.node_weight_mut(pane_index) {
+    //                 pane.floating_pane_state.title_bar_status = title_bar_status;
+    //             }
+    //             Task::none()
+    //         }
+    //         Message::FloatingPanesHighlightChanged { highlight } => {
+    //             self.floating_panes_content_state.highlight = highlight;
+    //             Task::none()
+    //         }
+    //         Message::FloatingPanesSelectedChannelChanged { selected_channel } => {
+    //             self.floating_panes_content_state.selected_channel = selected_channel;
+    //             Task::none()
+    //         }
+    //         Message::RecomputeLayout => Task::none(),
+    //     };
+
+    //     if update_schedule {
+    //         if let Err(vec) = self.graph.update_schedule() {
+    //             eprintln!("Could not construct the graph schedule:\n{:?}", vec);
+    //             self.graph_validation_errors = vec.into();
+    //         } else {
+    //             self.graph_validation_errors = Default::default();
+    //         }
+    //     }
+
+    //     task
+    // }
+
+    // fn view_old(&self, window_id: window::Id) -> Element<'_> {
+    //     let theme = Theme::Dark; // TODO: Theming
+    //     let node_indices = self.graph.node_indices().collect::<Vec<_>>();
+    //     let connections = self.graph.get_connections();
+
+    //     // TODO: Pass const references, and send messages back instead of trying to mutate state through
+    //     // the references.
+
+    //     let mut panes = FloatingPanes::new(
+    //         &self.floating_panes_state,
+    //         &self.floating_panes_content_state,
+    //         crate::widgets::node::FloatingPanesBehaviour {
+    //             on_channel_disconnect: |channel| Message::DisconnectChannel { channel },
+    //             on_connection_create: |connection| Message::InsertConnection { connection },
+    //             on_highlight_change: |highlight| Message::FloatingPanesHighlightChanged { highlight },
+    //             on_selected_channel_changed: |selected_channel| {
+    //                 Message::FloatingPanesSelectedChannelChanged { selected_channel }
+    //             },
+    //             connections,
+    //             graph_validation_errors: self.graph_validation_errors.clone(),
+    //             // tooltip_style: Some(theme.tooltip()),
+    //             __marker: PhantomData,
+    //         },
+    //         Box::new(|| Message::RecomputeLayout),
+    //         Box::new(|pane_index, position| Message::FloatingPanesPaneMoveTo { pane_index, position }),
+    //         Box::new(|pane_index, size| Message::FloatingPanesPaneResize { pane_index, size }),
+    //         Box::new(|position| Message::FloatingPanesBackgroundMoveTo { position }),
+    //         Box::new(|gesture| Message::FloatingPanesGestureChange { gesture }),
+    //         Box::new(|pane_index, title_bar_status| Message::FloatingPanesPaneTitleBarStatusChange {
+    //             pane_index,
+    //             title_bar_status,
+    //         }),
+    //     );
+    //     // .theme(&*theme);
+
+    //     for (node_index, node_data) in node_indices.iter().zip(self.graph.node_weights()) {
+    //         panes = panes.insert(*node_index, node_data.view(*node_index, &theme));
+    //     }
+
+    //     panes.into()
+    // }
+
+    fn view(&mut self) -> impl WidgetView<ApplicationState> + use<> {
+        flex(
+            Axis::Vertical,
+            (
+                label(format!("{}", self.graph.node_count())),
+                text_button("increment", |state: &mut ApplicationState| state.graph.clear()),
+                floating_panes((label("Foo"), label("Bar"))),
+            ),
         )
-    }
-
-    fn title(&self, window_id: window::Id) -> String {
-        format!("DVSynth Window #{window_id}")
-    }
-
-    fn theme(&self, _window_id: window::Id) -> Theme {
-        self.theme.clone()
-    }
-
-    fn update(&mut self, message: Message) -> Task<Message> {
-        let mut update_schedule = false;
-        let task = match message {
-            Message::WindowOpened(id) => {
-                let window = WindowHandle {};
-                // Focus an element:
-                // let focus_input = text_input::focus(format!("input-{id}"));
-
-                self.windows.insert(id, window);
-
-                // focus_input
-                Task::none()
-            }
-            Message::NodeMessage { node, message } => {
-                match message {
-                    NodeMessage::NodeBehaviourMessage(message) => {
-                        if let Some(node_data) = self.graph.node_weight_mut(node) {
-                            node_data.update(NodeEvent::Message(message));
-                        }
-                    }
-                }
-
-                update_schedule = true;
-                Task::none()
-            }
-            Message::DisconnectChannel { channel } => {
-                self.graph.retain_edges(|frozen, edge| {
-                    let (from, to) = frozen.edge_endpoints(edge).unwrap();
-                    let node_index = match channel.channel_direction {
-                        ChannelDirection::In => to,
-                        ChannelDirection::Out => from,
-                    };
-
-                    if node_index == channel.node_index {
-                        let edge_data = frozen.edge_weight(edge).unwrap();
-
-                        if edge_data.get_endpoint(channel.channel_direction.inverse()) == channel.into() {
-                            return false;
-                        }
-                    }
-
-                    true
-                });
-
-                update_schedule = true;
-                Task::none()
-            }
-            Message::InsertConnection { connection } => {
-                let from = connection.from();
-                let to = connection.to();
-
-                self.graph.add_edge(
-                    from.node_index,
-                    to.node_index,
-                    EdgeData { endpoint_from: from.into(), endpoint_to: to.into() },
-                );
-
-                update_schedule = true;
-                Task::none()
-            }
-            Message::FloatingPanesPaneMoveTo { pane_index, position } => {
-                if let Some(pane) = self.graph.node_weight_mut(pane_index) {
-                    pane.floating_pane_state.position = position;
-                }
-                Task::none()
-            }
-            Message::FloatingPanesPaneResize { pane_index, size } => {
-                if let Some(pane) = self.graph.node_weight_mut(pane_index) {
-                    pane.floating_pane_state.size = size;
-                }
-                Task::none()
-            }
-            Message::FloatingPanesBackgroundMoveTo { position } => {
-                self.floating_panes_state.panes_offset = position;
-                Task::none()
-            }
-            Message::FloatingPanesGestureChange { gesture } => {
-                self.floating_panes_state.gesture = gesture;
-                Task::none()
-            }
-            Message::FloatingPanesPaneTitleBarStatusChange { pane_index, title_bar_status } => {
-                if let Some(pane) = self.graph.node_weight_mut(pane_index) {
-                    pane.floating_pane_state.title_bar_status = title_bar_status;
-                }
-                Task::none()
-            }
-            Message::FloatingPanesHighlightChanged { highlight } => {
-                self.floating_panes_content_state.highlight = highlight;
-                Task::none()
-            }
-            Message::FloatingPanesSelectedChannelChanged { selected_channel } => {
-                self.floating_panes_content_state.selected_channel = selected_channel;
-                Task::none()
-            }
-            Message::RecomputeLayout => Task::none(),
-        };
-
-        if update_schedule {
-            if let Err(vec) = self.graph.update_schedule() {
-                eprintln!("Could not construct the graph schedule:\n{:?}", vec);
-                self.graph_validation_errors = vec.into();
-            } else {
-                self.graph_validation_errors = Default::default();
-            }
-        }
-
-        task
-    }
-
-    fn view(&self, window_id: window::Id) -> Element<'_> {
-        let theme = Theme::Dark; // TODO: Theming
-        let node_indices = self.graph.node_indices().collect::<Vec<_>>();
-        let connections = self.graph.get_connections();
-
-        // TODO: Pass const references, and send messages back instead of trying to mutate state through
-        // the references.
-
-        let mut panes = FloatingPanes::new(
-            &self.floating_panes_state,
-            &self.floating_panes_content_state,
-            crate::widgets::node::FloatingPanesBehaviour {
-                on_channel_disconnect: |channel| Message::DisconnectChannel { channel },
-                on_connection_create: |connection| Message::InsertConnection { connection },
-                on_highlight_change: |highlight| Message::FloatingPanesHighlightChanged { highlight },
-                on_selected_channel_changed: |selected_channel| {
-                    Message::FloatingPanesSelectedChannelChanged { selected_channel }
-                },
-                connections,
-                graph_validation_errors: self.graph_validation_errors.clone(),
-                // tooltip_style: Some(theme.tooltip()),
-                __marker: PhantomData,
-            },
-            Box::new(|| Message::RecomputeLayout),
-            Box::new(|pane_index, position| Message::FloatingPanesPaneMoveTo { pane_index, position }),
-            Box::new(|pane_index, size| Message::FloatingPanesPaneResize { pane_index, size }),
-            Box::new(|position| Message::FloatingPanesBackgroundMoveTo { position }),
-            Box::new(|gesture| Message::FloatingPanesGestureChange { gesture }),
-            Box::new(|pane_index, title_bar_status| Message::FloatingPanesPaneTitleBarStatusChange {
-                pane_index,
-                title_bar_status,
-            }),
-        );
-        // .theme(&*theme);
-
-        for (node_index, node_data) in node_indices.iter().zip(self.graph.node_weights()) {
-            panes = panes.insert(*node_index, node_data.view(*node_index, &theme));
-        }
-
-        panes.into()
     }
 }
 
@@ -380,11 +360,12 @@ async fn main() {
     //     Pixels(16.0),
     // );
 
-    iced::daemon(ApplicationState::title, ApplicationState::update, ApplicationState::view)
-        // .subscription(ApplicationState::subscription)
-        .theme(ApplicationState::theme)
-        .run_with(|| ApplicationState::new(ApplicationFlags { graph }))
-        .expect("failed to start the GUI");
+    let app = Xilem::new_simple(
+        ApplicationState { graph, graph_validation_errors: Default::default() },
+        ApplicationState::view,
+        WindowOptions::new("dvsynth"),
+    );
+    app.run_in(EventLoop::with_user_event()).unwrap();
 
     // Main loop
     /*

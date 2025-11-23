@@ -1,5 +1,3 @@
-use crate::Message;
-use crate::NodeMessage;
 use crate::graph::alloc::AllocationInner;
 use crate::node::behaviour::{
     AllocatorHandle, ExecutionContext, MainThreadTask, NodeBehaviourContainer, NodeCommand,
@@ -11,11 +9,6 @@ use crate::node::{
     NodeStateRefcounter, OptionRefMutExt, RefAnyExt,
 };
 use crate::style::{self, consts};
-use crate::widgets::FloatingPaneStyle;
-use crate::widgets::{
-    FloatingPane, FloatingPaneBehaviourData, FloatingPaneBehaviourState, FloatingPaneState, NodeElement,
-    NodeElementState, node::FloatingPanesBehaviour,
-};
 use alloc::Allocator;
 use arc_swap::ArcSwapOption;
 use iced::Settings;
@@ -1025,9 +1018,9 @@ impl GraphExecutor {
 
 pub struct NodeData {
     pub title: String,
-    pub element_state: NodeElementState,
-    pub floating_pane_state: FloatingPaneState,
-    pub floating_pane_behaviour_state: FloatingPaneBehaviourState,
+    // pub element_state: NodeElementState,
+    // pub floating_pane_state: FloatingPaneState,
+    // pub floating_pane_behaviour_state: FloatingPaneBehaviourState,
     pub behaviour: Box<dyn NodeBehaviourContainer>,
     pub configuration: NodeConfiguration,
 }
@@ -1040,9 +1033,9 @@ impl NodeData {
     ) -> Self {
         let mut result = Self {
             title: title.to_string(),
-            element_state: Default::default(),
-            floating_pane_state: FloatingPaneState::new().with_position(position).with_width(200.0),
-            floating_pane_behaviour_state: Default::default(),
+            // element_state: Default::default(),
+            // floating_pane_state: FloatingPaneState::new().with_position(position).with_width(200.0),
+            // floating_pane_behaviour_state: Default::default(),
             configuration: Default::default(),
             behaviour,
         };
@@ -1060,67 +1053,67 @@ impl NodeData {
         }
     }
 
-    pub fn view(
-        &self,
-        index: NodeIndex,
-        theme: &Theme,
-    ) -> FloatingPane<
-        '_,
-        Message,
-        Theme,
-        iced_wgpu::Renderer,
-        FloatingPanesBehaviour<Message, iced_wgpu::Renderer>,
-    > {
-        let mut builder = NodeElement::builder(index, &self.element_state).node_behaviour_element(
-            self.behaviour.view(/*theme*/).map(move |element| {
-                element.map(move |message| Message::NodeMessage {
-                    node: index,
-                    message: NodeMessage::NodeBehaviourMessage(message),
-                })
-            }),
-        );
+    // pub fn view(
+    //     &self,
+    //     index: NodeIndex,
+    //     theme: &Theme,
+    // ) -> FloatingPane<
+    //     '_,
+    //     Message,
+    //     Theme,
+    //     iced_wgpu::Renderer,
+    //     FloatingPanesBehaviour<Message, iced_wgpu::Renderer>,
+    // > {
+    //     let mut builder = NodeElement::builder(index, &self.element_state).node_behaviour_element(
+    //         self.behaviour.view(/*theme*/).map(move |element| {
+    //             element.map(move |message| Message::NodeMessage {
+    //                 node: index,
+    //                 message: NodeMessage::NodeBehaviourMessage(message),
+    //             })
+    //         }),
+    //     );
 
-        for input_channel in self.configuration.channels(ChannelDirection::In) {
-            builder = builder.push_input_channel(input_channel);
-        }
+    //     for input_channel in self.configuration.channels(ChannelDirection::In) {
+    //         builder = builder.push_input_channel(input_channel);
+    //     }
 
-        for output_channel in self.configuration.channels(ChannelDirection::Out) {
-            builder = builder.push_output_channel(output_channel);
-        }
+    //     for output_channel in self.configuration.channels(ChannelDirection::Out) {
+    //         builder = builder.push_output_channel(output_channel);
+    //     }
 
-        let node_element = builder.build(/*|index, new_value| {
-            Message::NodeMessage {
-                node: index,
-                message: NodeMessage::UpdateTextInput(new_value),
-            }
-        }*/);
+    //     let node_element = builder.build(/*|index, new_value| {
+    //         Message::NodeMessage {
+    //             node: index,
+    //             message: NodeMessage::UpdateTextInput(new_value),
+    //         }
+    //     }*/);
 
-        // Themeable::theme(
-        FloatingPane::builder(
-            node_element,
-            &self.floating_pane_state,
-            &self.floating_pane_behaviour_state,
-            FloatingPaneBehaviourData { node_configuration: self.configuration.clone() },
-        )
-        //,
-        //     theme,
-        // )
-        .title(Some(&self.title))
-        .title_size(Some(style::consts::TEXT_SIZE_TITLE))
-        .title_margin(consts::SPACING)
-        .width_resizeable(true)
-        .min_width(128.0)
-        .style(|theme| {
-            let palette = theme.extended_palette();
+    //     // Themeable::theme(
+    //     FloatingPane::builder(
+    //         node_element,
+    //         &self.floating_pane_state,
+    //         &self.floating_pane_behaviour_state,
+    //         FloatingPaneBehaviourData { node_configuration: self.configuration.clone() },
+    //     )
+    //     //,
+    //     //     theme,
+    //     // )
+    //     .title(Some(&self.title))
+    //     .title_size(Some(style::consts::TEXT_SIZE_TITLE))
+    //     .title_margin(consts::SPACING)
+    //     .width_resizeable(true)
+    //     .min_width(128.0)
+    //     .style(|theme| {
+    //         let palette = theme.extended_palette();
 
-            FloatingPaneStyle {
-                body_background: Some(iced::Background::Color(palette.background.base.color)),
-                title_background: Some(iced::Background::Color(palette.background.strong.color)),
-                title_text_color: palette.background.strong.text,
-            }
-        })
-        .build()
-    }
+    //         FloatingPaneStyle {
+    //             body_background: Some(iced::Background::Color(palette.background.base.color)),
+    //             title_background: Some(iced::Background::Color(palette.background.strong.color)),
+    //             title_text_color: palette.background.strong.text,
+    //         }
+    //     })
+    //     .build()
+    // }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

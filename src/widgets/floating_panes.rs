@@ -1,1289 +1,861 @@
-use super::*;
-use crate::style::InteractionStatus;
-use crate::util::RectangleExt;
-use iced::event::Status;
-use iced::mouse::{self, Cursor, Interaction};
-use iced::theme::palette::Extended;
-use iced::widget::{Column, Container};
-use iced::{Background, Color, Element, Size, Theme, Vector, overlay};
-use iced_core::Rectangle;
-use iced_core::layout::{Limits, Node};
-use iced_core::overlay::Group;
-use iced_core::renderer::Quad;
-use iced_core::widget::{Text, Tree};
-use iced_core::{self, Clipboard, Event, Layout, Length, Point, Shell, Widget};
-use iced_graphics::geometry::frame::Backend;
-use indexmap::IndexMap;
-use ordered_float::OrderedFloat;
-use std::hash::Hash;
-use std::ops::{Deref, DerefMut};
-use std::sync::Arc;
-use vek::Vec2;
+use std::any::TypeId;
 
-pub struct ContentDrawResult /*<R: WidgetRenderer>*/ {
-    pub override_parent_cursor: bool,
-    // pub output: R::Output,
+use tracing::{Span, trace_span};
+use xilem::masonry::accesskit::{Node, Role};
+use xilem::masonry::core::HasProperty;
+use xilem::masonry::vello::Scene;
+use xilem::masonry::vello::kurbo::{Affine, Line, Point, Size, Stroke};
+
+use xilem::masonry::core::{
+    AccessCtx, Axis, BoxConstraints, ChildrenIds, LayoutCtx, NewWidget, NoAction, PaintCtx, PropertiesMut,
+    PropertiesRef, RegisterCtx, UpdateCtx, Widget, WidgetId, WidgetMut, WidgetPod,
+};
+use xilem::masonry::properties::types::Length;
+use xilem::masonry::properties::types::{CrossAxisAlignment, MainAxisAlignment};
+use xilem::masonry::properties::{Background, BorderColor, BorderWidth, CornerRadius, Padding};
+use xilem::masonry::theme::DEFAULT_GAP;
+use xilem::masonry::util::{debug_panic, fill, include_screenshot, stroke};
+
+/// A container with either horizontal or vertical layout.
+///
+/// This widget is the foundation of most layouts, and is highly configurable.
+///
+/// The flex model used by Masonry has different behaviour than you might be familiar with from the web.
+/// Only children which have an explicit flex factor, set by the first parameter of
+/// [`FlexParams::new`](FlexParams::new) being `Some`, will share remaining space flexibly.
+/// Children which do not have an explicit flex factor set will be laid out as their natural size.
+/// For some widgets (such as [`TextInput`](crate::widgets::TextInput)), this will be
+/// all the space made available to the flex (in at least one axis).
+/// In the web model, this is equivalent to the default `flex` being `none` (on the web, this is instead `auto`).
+/// This can lead to surprising results, including later siblings of the expanded child being pushed off-screen.
+/// A general rule of thumb is to set a flex factor on all "large" children in the flex axis, especially
+/// portals, sized boxes, and text inputs (in horizontal flex areas).
+/// That is, any item which needs to shrink to fit within the viewport should have a
+/// flex factor set.
+///
+/// There is also no support for flex grow or flex shrink; instead, each flexible child takes up
+/// the proportion of remaining space (after all "non-flex" children are laid out) specified
+/// by its flex factor.
+/// In the web flex algorithm, if a widget cannot expand to its target flex size, that remaining space is distributed
+/// to the other sibling flex widgets recursively.
+/// However, this widget does not implement this behaviour at the moment, as it uses a single-pass layout algorithm.
+/// Instead, if a flex child of this widget does not expand to the target size provided by this parent, the difference is distributed
+/// to the space between widgets according to this widget's [`MainAxisAlignment`](Flex::set_main_axis_alignment).
+///
+#[doc = include_screenshot!("flex_col_main_axis_spaceAround.png", "Flex column with multiple labels.")]
+pub struct FloatingPanes {
+    // direction: Axis,
+    // cross_alignment: CrossAxisAlignment,
+    // main_alignment: MainAxisAlignment,
+    // fill_major_axis: bool,
+    children: Vec<Child>,
+    // gap: Length,
 }
 
-/// A widget-like trait for customizing the behaviour of the [`FloatingPanes`] widget
-pub trait FloatingPanesBehaviour<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer>: Sized {
-    type FloatingPaneIndex: Clone + Copy + Hash + Eq;
-
-    /// Additional data passed by value during construction of each pane.
-    /// Custom data to pass to the FloatingPanes widget (shared by all floating panes) can be
-    /// stored within the implementation of `Self`.
-    type FloatingPaneBehaviourData;
-
-    /// Mutable state of each pane stored externally from the widget.
-    type FloatingPaneBehaviourState;
-
-    /// Mutable state of all floating panes stored externally from the widget.
-    type FloatingPanesBehaviourState;
-
-    fn draw_panes(
-        panes: &FloatingPanes<'a, M, T, R, Self>,
-        tree: &Tree,
-        renderer: &mut R,
-        theme: &T,
-        style: &iced_core::renderer::Style,
-        layout: FloatingPanesLayout<'_>,
-        cursor: Cursor,
-        viewport: &Rectangle,
-    ) -> ContentDrawResult;
-
-    /// Handle event before it isi processed by the main event handler.
-    /// Returns `true` if the main event handler should be skipped.
-    fn on_event(
-        panes: &mut FloatingPanes<'a, M, T, R, Self>,
-        tree: &mut Tree,
-        event: Event,
-        layout: FloatingPanesLayout<'_>,
-        cursor: Cursor,
-        renderer: &R,
-        clipboard: &mut dyn Clipboard,
-        shell: &mut Shell<'_, M>,
-        viewport: &Rectangle,
-    ) -> Status;
-
-    fn overlay<'b>(
-        panes: &'b mut FloatingPanes<'a, M, T, R, Self>,
-        state: &'b mut Tree,
-        layout: FloatingPanesLayout<'_>,
-        renderer: &R,
-        translation: Vector,
-    ) -> Option<overlay::Element<'b, M, T, R>>;
+/// Optional parameters for an item in a [`Flex`] container (row or column).
+///
+/// Generally, when you would like to add a flexible child to a container,
+/// you can simply call [`with_flex_child`](Flex::with_flex_child) or [`add_flex_child`](Flex::add_flex_child),
+/// passing the child and the desired flex factor as a `f64`, which has an impl of
+/// `Into<FlexParams>`.
+///
+/// You can also add spacers and flexible spacers using e.g. [`with_spacer`](Flex::with_spacer).
+/// Spacers are children which take up space but don't paint anything.
+#[derive(Default, Debug, Clone, PartialEq)]
+pub struct FloatingPaneParams {
+    pub title: String,
 }
 
-pub struct FloatingPanesBehaviourDefault;
-
-impl<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer + iced_wgpu::primitive::Renderer>
-    FloatingPanesBehaviour<'a, M, T, R> for FloatingPanesBehaviourDefault
-{
-    type FloatingPaneIndex = u32;
-    type FloatingPaneBehaviourData = ();
-    type FloatingPaneBehaviourState = ();
-    type FloatingPanesBehaviourState = ();
-
-    fn draw_panes(
-        panes: &FloatingPanes<'a, M, T, R, Self>,
-        tree: &Tree,
-        renderer: &mut R,
-        theme: &T,
-        style: &iced_core::renderer::Style,
-        layout: FloatingPanesLayout<'_>,
-        cursor: Cursor,
-        viewport: &Rectangle,
-    ) -> ContentDrawResult {
-        let mouse_interaction = Interaction::default();
-        for ((_, child), layout) in panes.children.iter().zip(layout.panes()) {
-            // let (primitive, new_mouse_interaction) =
-            child.element_tree.as_widget().draw(
-                tree,
-                renderer,
-                theme,
-                style,
-                layout.into(),
-                cursor,
-                viewport,
-            );
-
-            // if new_mouse_interaction > mouse_interaction {
-            //     mouse_interaction = new_mouse_interaction;
-            // }
-
-            // primitive
-        }
-
-        ContentDrawResult { override_parent_cursor: false }
-    }
-
-    fn on_event(
-        panes: &mut FloatingPanes<'a, M, T, R, Self>,
-        tree: &mut Tree,
-        event: Event,
-        layout: FloatingPanesLayout<'_>,
-        cursor: Cursor,
-        renderer: &R,
-        clipboard: &mut dyn Clipboard,
-        shell: &mut Shell<'_, M>,
-        viewport: &Rectangle,
-    ) -> Status {
-        Status::Ignored
-    }
-
-    fn overlay<'b>(
-        panes: &'b mut FloatingPanes<'a, M, T, R, Self>,
-        state: &'b mut Tree,
-        layout: FloatingPanesLayout<'_>,
-        renderer: &R,
-        translation: Vector,
-    ) -> Option<overlay::Element<'b, M, T, R>> {
-        let mut group = Group::new();
-
-        for (((_, child), child_state), child_layout) in
-            panes.children.iter_mut().zip(state.children.iter_mut()).zip(layout.panes())
-        {
-            if let Some(overlay) = child.element_tree.as_widget_mut().overlay(
-                child_state,
-                child_layout.into(),
-                renderer,
-                translation,
-            ) {
-                group = group.push(overlay);
-            }
-        }
-
-        Some(group.into())
-        // Some(overlay::Element::new(Box::new(group)))
-
-        // for ((_, pane), layout) in panes.children.iter_mut().zip(layout.panes()) {
-        //     if let Some(overlay) =
-        //         pane.element_tree.as_widget_mut().overlay(state, layout.into(), renderer, translation)
-        //     {
-        //         return Some(overlay);
-        //     }
-        // }
-
-        // None
-    }
+// TODO: Make generic over widget type
+struct Child {
+    content: WidgetPod<dyn Widget>,
+    params: FloatingPaneParams,
+    // TODO: Should this be part of FloatingPaneParams?
+    position: Point,
 }
 
-#[derive(PartialEq, Debug, Clone, Copy, Default)]
-pub enum FloatingPaneLength {
-    #[default]
-    Shrink,
-    Fixed(f32),
-}
-
-impl From<f32> for FloatingPaneLength {
-    fn from(other: f32) -> Self {
-        FloatingPaneLength::Fixed(other)
-    }
-}
-
-pub struct FloatingPaneBuilder<
-    'a,
-    M: 'a,
-    T: 'a,
-    R: 'a + WidgetRenderer,
-    C: 'a + FloatingPanesBehaviour<'a, M, T, R>,
-> {
-    pub content: Element<'a, M, T, R>,
-    pub state: &'a FloatingPaneState,
-    pub behaviour_state: &'a C::FloatingPaneBehaviourState,
-    pub behaviour_data: C::FloatingPaneBehaviourData,
-    pub title: Option<&'a str>,
-    pub title_size: Option<u16>,
-    pub title_margin: Spacing,
-    pub class: Arc<dyn Fn(&T) -> FloatingPaneStyle + 'a>,
-    /// Whether the floating pane is resizeable in each axis
-    pub min_size: Vec2<f32>,
-    pub resizeable: Vec2<bool>,
-    pub __marker: std::marker::PhantomData<(M, C)>,
-}
-
-impl<'a, M, T, R, C> FloatingPaneBuilder<'a, M, T, R, C>
-where
-    M: 'a,
-    T: 'a + Catalog + iced::widget::text::Catalog + iced::widget::container::Catalog,
-    <T as iced::widget::text::Catalog>::Class<'a>: From<iced::widget::text::StyleFn<'a, T>>,
-    <T as iced::widget::container::Catalog>::Class<'a>: From<iced::widget::container::StyleFn<'a, T>>,
-    R: 'a + WidgetRenderer,
-    C: 'a + FloatingPanesBehaviour<'a, M, T, R>,
-{
-    pub fn new(
-        content: impl Into<Element<'a, M, T, R>>,
-        state: &'a FloatingPaneState,
-        behaviour_state: &'a C::FloatingPaneBehaviourState,
-        behaviour_data: C::FloatingPaneBehaviourData,
-    ) -> Self {
-        Self {
-            content: content.into(),
-            state,
-            behaviour_data,
-            behaviour_state,
-            title: Default::default(),
-            title_size: Default::default(),
-            title_margin: Default::default(),
-            class: Arc::new(|_| Default::default()),
-            min_size: [0.0, 0.0].into(),
-            resizeable: Default::default(),
-            __marker: Default::default(),
-        }
-    }
-
-    pub fn title(mut self, title: Option<&'a str>) -> Self {
-        self.title = title;
-        self
-    }
-
-    pub fn title_size(mut self, title_size: Option<u16>) -> Self {
-        self.title_size = title_size;
-        self
-    }
-
-    pub fn title_margin(mut self, title_margin: Spacing) -> Self {
-        self.title_margin = title_margin;
-        self
-    }
-
-    pub fn style(mut self, class: impl Fn(&T) -> FloatingPaneStyle + 'a) -> Self {
-        self.class = Arc::new(class);
-        self
-    }
-
-    pub fn min_width(mut self, min_width: f32) -> Self {
-        self.min_size[0] = min_width;
-        self
-    }
-
-    pub fn min_height(mut self, min_height: f32) -> Self {
-        self.min_size[1] = min_height;
-        self
-    }
-
-    pub fn width_resizeable(mut self, resizeable: bool) -> Self {
-        self.resizeable[0] = resizeable;
-        self
-    }
-
-    pub fn height_resizeable(mut self, resizeable: bool) -> Self {
-        self.resizeable[1] = resizeable;
-        self
-    }
-
-    pub fn build(mut self) -> FloatingPane<'a, M, T, R, C> {
-        FloatingPane {
-            behaviour_data: self.behaviour_data,
-            min_size: self.min_size,
-            resizeable: self.resizeable,
-            element_tree: {
-                let mut column = Column::<M, T, R>::new();
-                let title = self.title.unwrap_or("Untitled");
-                let mut text = Text::<T, R>::new(title.to_string());
-
-                if let Some(title_size) = self.title_size.take() {
-                    text = text.size(title_size);
-                }
-
-                let margin = margin::<M, T, R>(text, self.title_margin.clone());
-                column = column.push(margin);
-
-                let element_container = Container::<M, T, R>::new(self.content).style({
-                    let class = self.class.clone();
-                    move |theme| {
-                        let floating_pane_style = (class)(theme);
-                        iced::widget::container::Style {
-                            background: floating_pane_style.body_background,
-                            ..Default::default()
-                        }
-                    }
-                });
-
-                let mut container = Container::new(column.push(element_container)).style({
-                    let class = self.class;
-                    move |theme| {
-                        let floating_pane_style = (class)(theme);
-                        iced::widget::container::Style {
-                            background: floating_pane_style.title_background,
-                            text_color: Some(floating_pane_style.title_text_color),
-                            ..Default::default()
-                        }
-                    }
-                });
-
-                // if let Some(style) = self.style.as_ref() {
-                //     container = container.style(style.root_container_style(self.state.title_bar_status));
-                // }
-
-                container = match self.state.size[0] {
-                    FloatingPaneLength::Shrink => container,
-                    FloatingPaneLength::Fixed(units) => container.width(Length::Fixed(units)),
-                };
-
-                container = match self.state.size[1] {
-                    FloatingPaneLength::Shrink => container,
-                    FloatingPaneLength::Fixed(units) => container.height(Length::Fixed(units)),
-                };
-
-                container.into() // Container { Column [ title, Container { element } ] }
-            },
-            state: self.state,
-            // style: self.style,
-            __marker: Default::default(),
-        }
-    }
-}
-
-#[derive(Default, Debug)]
-pub struct FloatingPaneState {
-    pub position: Vec2<f32>,
-    pub size: Vec2<FloatingPaneLength>,
-    pub title_bar_status: InteractionStatus,
-}
-
-// impl Hash for FloatingPaneState {
-//     fn hash<H>(&self, state: &mut H)
-//     where H: std::hash::Hasher {
-//         self.position.map(OrderedFloat::from).as_slice().hash(state);
-//         self.size.hash(state);
-//         self.title_bar_status.hash(state);
-//     }
-// }
-
-impl FloatingPaneState {
+// --- MARK: IMPL FLEX
+impl FloatingPanes {
+    /// Create a new `Flex` oriented along the provided axis.
     pub fn new() -> Self {
-        Default::default()
-    }
-
-    pub fn with_position(mut self, position: impl Into<Vec2<f32>>) -> Self {
-        self.position = position.into();
-        self
-    }
-
-    pub fn with_width(mut self, width: impl Into<FloatingPaneLength>) -> Self {
-        self.size[0] = width.into();
-        self
-    }
-
-    pub fn with_height(mut self, height: impl Into<FloatingPaneLength>) -> Self {
-        self.size[1] = height.into();
-        self
-    }
-}
-
-/// A single floating pane within the [`FloatingPanes`] widget.
-pub struct FloatingPane<'a, M: 'a, T: 'a, R: 'a + WidgetRenderer, C: 'a + FloatingPanesBehaviour<'a, M, T, R>>
-{
-    pub state: &'a FloatingPaneState,
-    pub behaviour_data: C::FloatingPaneBehaviourData,
-    // pub style: Option<<R as WidgetRenderer>::StyleFloatingPane>,
-    pub element_tree: Element<'a, M, T, R>,
-    pub min_size: Vec2<f32>,
-    pub resizeable: Vec2<bool>,
-    pub __marker: std::marker::PhantomData<C>,
-}
-
-impl<'a, M, T, R, C> FloatingPane<'a, M, T, R, C>
-where
-    M: 'a,
-    T: 'a + Catalog + iced::widget::text::Catalog + iced::widget::container::Catalog,
-    <T as iced::widget::text::Catalog>::Class<'a>: From<iced::widget::text::StyleFn<'a, T>>,
-    <T as iced::widget::container::Catalog>::Class<'a>: From<iced::widget::container::StyleFn<'a, T>>,
-    R: 'a + WidgetRenderer,
-    C: 'a + FloatingPanesBehaviour<'a, M, T, R>,
-{
-    pub fn builder(
-        content: impl Into<Element<'a, M, T, R>>,
-        state: &'a FloatingPaneState,
-        behaviour_state: &'a C::FloatingPaneBehaviourState,
-        behaviour_data: C::FloatingPaneBehaviourData,
-    ) -> FloatingPaneBuilder<'a, M, T, R, C> {
-        FloatingPaneBuilder::new(content, state, behaviour_state, behaviour_data)
-    }
-
-    pub fn get_pane_resize_directions(
-        &self,
-        pane_layout: FloatingPaneLayout,
-        cursor_position: Vec2<f32>,
-    ) -> PaneResizeDirections {
-        const RESIZE_BOUND_OUTER_SIZE: f32 = 8.0;
-        const RESIZE_BOUND_OVERLAP_SIZE: f32 = 12.0;
-
-        // Nothing to compute if the pane is not resizeable
-        if !self.resizeable[0] && !self.resizeable[1] {
-            return PaneResizeDirections::NONE;
-        }
-
-        let cursor_point: Point = cursor_position.into_array().into();
-        let pane_bounds = pane_layout.bounds();
-
-        // Cannot resize while the cursor is inside of the pane
-        if pane_bounds.contains(cursor_point) {
-            return PaneResizeDirections::NONE;
-        }
-
-        // Early bounds check for optimization
-        if !pane_bounds.grow_uniform(RESIZE_BOUND_OUTER_SIZE).contains(cursor_point) {
-            return PaneResizeDirections::NONE;
-        }
-
-        let pane_layout_size: Vec2<f32> = Into::<[f32; 2]>::into(pane_bounds.size()).into();
-        let omnidirectional = self.resizeable[0] && self.resizeable[1];
-        let outer_size_secondary = if omnidirectional { RESIZE_BOUND_OUTER_SIZE } else { 0.0 };
-        let overlap_size: Vec2<f32> = if omnidirectional {
-            (pane_layout_size / 2.0)
-                .map(|c| std::cmp::min(OrderedFloat(c), OrderedFloat(RESIZE_BOUND_OVERLAP_SIZE)).into())
-        } else {
-            Vec2::<f32>::zero()
-        };
-
-        let horizontal_direction = if self.resizeable[0] {
-            let left = Rectangle {
-                x: pane_bounds.min_x() - RESIZE_BOUND_OUTER_SIZE,
-                y: pane_bounds.min_y() - outer_size_secondary,
-                width: RESIZE_BOUND_OUTER_SIZE + overlap_size[0],
-                height: pane_bounds.height + 2.0 * outer_size_secondary,
-            };
-            let right = Rectangle {
-                x: pane_bounds.max_x() - overlap_size[0],
-                y: pane_bounds.min_y() - outer_size_secondary,
-                width: RESIZE_BOUND_OUTER_SIZE + overlap_size[0],
-                height: pane_bounds.height + 2.0 * outer_size_secondary,
-            };
-            PaneResizeDirection::from_hovered_regions(
-                left.contains(cursor_point),
-                right.contains(cursor_point),
-            )
-        } else {
-            PaneResizeDirection::None
-        };
-        let vertical_direction = if self.resizeable[1] {
-            let top = Rectangle {
-                x: pane_bounds.min_x() - outer_size_secondary,
-                y: pane_bounds.min_y() - RESIZE_BOUND_OUTER_SIZE,
-                width: pane_bounds.width + 2.0 * outer_size_secondary,
-                height: RESIZE_BOUND_OUTER_SIZE + overlap_size[1],
-            };
-            let bottom = Rectangle {
-                x: pane_bounds.min_x() - outer_size_secondary,
-                y: pane_bounds.max_y() - overlap_size[1],
-                width: pane_bounds.width + 2.0 * outer_size_secondary,
-                height: RESIZE_BOUND_OUTER_SIZE + overlap_size[1],
-            };
-            PaneResizeDirection::from_hovered_regions(
-                top.contains(cursor_point),
-                bottom.contains(cursor_point),
-            )
-        } else {
-            PaneResizeDirection::None
-        };
-
-        [horizontal_direction, vertical_direction].into()
-    }
-}
-
-#[derive(Default, Debug, Clone, PartialEq)]
-pub struct GrabStateResize {
-    pub grab_element_position: Vec2<f32>,
-    pub grab_element_size: Vec2<f32>,
-    pub grab_mouse_position: Vec2<f32>,
-}
-
-impl Hash for GrabStateResize {
-    fn hash<H>(&self, state: &mut H)
-    where H: std::hash::Hasher {
-        self.grab_element_position.map(OrderedFloat::from).as_slice().hash(state);
-        self.grab_element_size.map(OrderedFloat::from).as_slice().hash(state);
-        self.grab_mouse_position.map(OrderedFloat::from).as_slice().hash(state);
-    }
-}
-
-#[derive(Default, Debug, Clone, PartialEq)]
-pub struct GrabStateMove {
-    pub grab_element_position: Vec2<f32>,
-    pub grab_mouse_position: Vec2<f32>,
-}
-
-impl Hash for GrabStateMove {
-    fn hash<H>(&self, state: &mut H)
-    where H: std::hash::Hasher {
-        self.grab_element_position.map(OrderedFloat::from).as_slice().hash(state);
-        self.grab_mouse_position.map(OrderedFloat::from).as_slice().hash(state);
-    }
-}
-
-#[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
-pub enum PaneResizeDirection {
-    None,
-    Negative,
-    Positive,
-}
-
-impl PaneResizeDirection {
-    pub fn from_hovered_regions(negative: bool, positive: bool) -> Self {
-        match (negative, positive) {
-            (false, true) => PaneResizeDirection::Positive,
-            (true, false) => PaneResizeDirection::Negative,
-            _ => PaneResizeDirection::None,
-        }
-    }
-}
-
-#[derive(Debug, Hash, Clone, Copy, PartialEq)]
-pub struct PaneResizeDirections(Vec2<PaneResizeDirection>);
-
-impl PaneResizeDirections {
-    pub const NONE: Self =
-        PaneResizeDirections(Vec2 { x: PaneResizeDirection::None, y: PaneResizeDirection::None });
-
-    pub fn is_none(&self) -> bool {
-        self.x == PaneResizeDirection::None && self.y == PaneResizeDirection::None
-    }
-}
-
-impl<T: Into<Vec2<PaneResizeDirection>>> From<T> for PaneResizeDirections {
-    fn from(other: T) -> Self {
-        PaneResizeDirections(other.into())
-    }
-}
-
-impl Deref for PaneResizeDirections {
-    type Target = Vec2<PaneResizeDirection>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl DerefMut for PaneResizeDirections {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
-
-#[derive(Debug, Hash, Clone, PartialEq)]
-pub enum Gesture {
-    /// To pan across the pane view (via panes_offset)
-    GrabBackground(GrabStateMove),
-    /// To move panes around
-    GrabPane { pane_index: usize, grab_state: GrabStateMove },
-    /// To resize panes, if possible
-    ResizePane {
-        pending: bool,
-        pane_index: usize,
-        grab_state: GrabStateResize,
-        directions: PaneResizeDirections,
-    },
-}
-
-impl Gesture {
-    pub fn get_mouse_interaction(&self) -> Interaction {
-        use Gesture::*;
-        match self {
-            GrabBackground(_) => Interaction::Grabbing,
-            GrabPane { .. } => Interaction::Grabbing,
-            ResizePane { directions, .. } => {
-                // FIXME: Iced currently only supports vertical and horizontal resize cursors
-                if directions[0] != PaneResizeDirection::None {
-                    Interaction::ResizingHorizontally
-                } else if directions[1] != PaneResizeDirection::None {
-                    Interaction::ResizingVertically
-                } else {
-                    Interaction::default()
-                }
-            }
-        }
-    }
-}
-
-#[derive(Default, Debug)]
-pub struct FloatingPanesState {
-    /// The vector to offset all floating panes' positions by
-    pub panes_offset: Vec2<f32>,
-    pub gesture: Option<Gesture>,
-}
-
-impl Hash for FloatingPanesState {
-    fn hash<H>(&self, state: &mut H)
-    where H: std::hash::Hasher {
-        self.panes_offset.map(OrderedFloat::from).as_slice().hash(state);
-        self.gesture.hash(state);
-    }
-}
-
-pub struct FloatingPanes<
-    'a,
-    M: 'a,
-    T: 'a,
-    R: 'a + WidgetRenderer,
-    C: 'a + FloatingPanesBehaviour<'a, M, T, R>,
-> {
-    pub state: &'a FloatingPanesState,
-    pub behaviour_state: &'a C::FloatingPanesBehaviourState,
-    pub behaviour: C,
-    pub width: Length,
-    pub height: Length,
-    pub extents: Vec2<f32>,
-    // pub style: Option<<R as WidgetRenderer>::StyleFloatingPanes>,
-    pub children: IndexMap<C::FloatingPaneIndex, FloatingPane<'a, M, T, R, C>>,
-    // TODO: This shouldn't be necessary -- consider removing.
-    pub on_layout_change: Box<dyn Fn() -> M>,
-    pub on_pane_move_to: Box<dyn Fn(C::FloatingPaneIndex, Vec2<f32>) -> M>,
-    pub on_pane_resize: Box<dyn Fn(C::FloatingPaneIndex, Vec2<FloatingPaneLength>) -> M>,
-    pub on_background_move_to: Box<dyn Fn(Vec2<f32>) -> M>,
-    pub on_gesture_change: Box<dyn Fn(Option<Gesture>) -> M>,
-    pub on_pane_title_bar_status_change: Box<dyn Fn(C::FloatingPaneIndex, InteractionStatus) -> M>,
-}
-
-impl<'a, M, T, R, C> FloatingPanes<'a, M, T, R, C>
-where
-    M: 'a,
-    T: 'a,
-    R: 'a + WidgetRenderer,
-    C: 'a + FloatingPanesBehaviour<'a, M, T, R>,
-{
-    pub fn new(
-        state: &'a FloatingPanesState,
-        behaviour_state: &'a C::FloatingPanesBehaviourState,
-        behaviour: C,
-        on_layout_change: Box<dyn Fn() -> M>,
-        on_pane_move_to: Box<dyn Fn(C::FloatingPaneIndex, Vec2<f32>) -> M>,
-        on_pane_resize: Box<dyn Fn(C::FloatingPaneIndex, Vec2<FloatingPaneLength>) -> M>,
-        on_background_move_to: Box<dyn Fn(Vec2<f32>) -> M>,
-        on_gesture_change: Box<dyn Fn(Option<Gesture>) -> M>,
-        on_pane_title_bar_status_change: Box<dyn Fn(C::FloatingPaneIndex, InteractionStatus) -> M>,
-    ) -> Self {
         Self {
-            state,
-            behaviour_state,
-            behaviour,
-            width: Length::Shrink,
-            height: Length::Shrink,
-            extents: [f32::INFINITY, f32::INFINITY].into(),
-            // style: None,
-            children: Default::default(),
-            on_layout_change,
-            on_pane_move_to,
-            on_pane_resize,
-            on_background_move_to,
-            on_gesture_change,
-            on_pane_title_bar_status_change,
+            // direction: axis,
+            children: Vec::new(),
+            // cross_alignment: CrossAxisAlignment::Center,
+            // main_alignment: MainAxisAlignment::Start,
+            // fill_major_axis: false,
+            // gap: DEFAULT_GAP,
         }
     }
 
-    pub fn width(mut self, width: Length) -> Self {
-        self.width = width;
-        self
-    }
-
-    pub fn height(mut self, height: Length) -> Self {
-        self.height = height;
-        self
-    }
-
-    pub fn max_width(mut self, max_width: f32) -> Self {
-        self.extents[0] = max_width;
-        self
-    }
-
-    pub fn max_height(mut self, max_height: f32) -> Self {
-        self.extents[1] = max_height;
-        self
-    }
-
-    pub fn extents(mut self, extents: Vec2<f32>) -> Self {
-        self.extents = extents;
-        self
-    }
-
-    // pub fn style<T>(mut self, style: T) -> Self
-    // where T: Into<<R as WidgetRenderer>::StyleFloatingPanes> {
-    //     self.style = Some(style.into());
+    // /// Builder-style method for specifying the children's [`CrossAxisAlignment`].
+    // pub fn cross_axis_alignment(mut self, alignment: CrossAxisAlignment) -> Self {
+    //     self.cross_alignment = alignment;
     //     self
     // }
 
-    pub fn insert(mut self, index: C::FloatingPaneIndex, child: FloatingPane<'a, M, T, R, C>) -> Self {
-        self.children.insert(index, child);
+    // /// Builder-style method for specifying the children's [`MainAxisAlignment`].
+    // pub fn main_axis_alignment(mut self, alignment: MainAxisAlignment) -> Self {
+    //     self.main_alignment = alignment;
+    //     self
+    // }
+
+    // /// Builder-style method for setting whether the container must expand
+    // /// to fill the available space on its main axis.
+    // pub fn must_fill_main_axis(mut self, fill: bool) -> Self {
+    //     self.fill_major_axis = fill;
+    //     self
+    // }
+
+    // /// Builder-style method for setting a gap along the
+    // /// major axis between any two elements in logical pixels.
+    // ///
+    // /// By default this is [`DEFAULT_GAP`].
+    // ///
+    // /// Equivalent to the css [gap] property.
+    // ///
+    // /// This gap is between any two children, including spacers.
+    // /// As such, when adding a spacer, you add both the spacer's size (or computed flex size)
+    // /// and the gap between the spacer and its neighbors.
+    // /// As such, if you're adding lots of spacers to a flex parent, you may want to set
+    // /// its gap to zero to make the layout more predictable.
+    // ///
+    // /// [gap]: https://developer.mozilla.org/en-US/docs/Web/CSS/gap
+    // // TODO: Semantics - should this include fixed spacers?
+    // pub fn with_gap(mut self, gap: Length) -> Self {
+    //     self.gap = gap;
+    //     self
+    // }
+
+    /// Builder-style variant of [`Flex::add_child`].
+    ///
+    /// Convenient for assembling a group of widgets in a single expression.
+    pub fn with_child(mut self, child: NewWidget<impl Widget + ?Sized>, params: FloatingPaneParams) -> Self {
+        let child = Child { content: child.erased().to_pod(), params, position: Default::default() };
+        self.children.push(child);
         self
     }
 
-    // Use typed layouts instead
-    // pub fn get_content_layout_from_child_layout(child_layout: Layout<'_>) -> Layout<'_> {
-    //     child_layout.children().nth(0).unwrap().children().nth(1).unwrap().children().nth(0).unwrap()
+    /// Returns the number of children (widgets and spacers) this flex container has.
+    pub fn len(&self) -> usize {
+        self.children.len()
+    }
+
+    /// Returns `true` if this flex container has no children (widgets or spacers).
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+// --- MARK: WIDGETMUT
+impl FloatingPanes {
+    // /// Set the flex direction (see [`Axis`]).
+    // pub fn set_direction(this: &mut WidgetMut<'_, Self>, direction: Axis) {
+    //     this.widget.direction = direction;
+    //     this.ctx.request_layout();
     // }
 
-    pub fn get_layout_index_from_pane_index(&self, pane_index: &C::FloatingPaneIndex) -> Option<usize> {
-        self.children.get_index_of(pane_index)
-    }
-}
-
-impl<'a, M, T, R, C> FloatingPanes<'a, M, T, R, C>
-where
-    M: 'a,
-    T: 'a + Catalog + iced::widget::text::Catalog + iced::widget::container::Catalog,
-    <T as iced::widget::text::Catalog>::Class<'a>: From<iced::widget::text::StyleFn<'a, T>>,
-    <T as iced::widget::container::Catalog>::Class<'a>: From<iced::widget::container::StyleFn<'a, T>>,
-    R: 'a + WidgetRenderer,
-    C: 'a + FloatingPanesBehaviour<'a, M, T, R>,
-{
-    pub fn update_pending_gestures(
-        &mut self,
-        cursor_position: Vec2<f32>,
-        layout: FloatingPanesLayout,
-        shell: &mut Shell<'_, M>,
-    ) {
-        // Update the interaction status of title bars
-        for ((_, (pane_index, pane)), pane_layout) in self.children.iter_mut().enumerate().zip(layout.panes())
-        {
-            let content_layout = pane_layout.content();
-            let pane_bounds = pane_layout.bounds();
-            let cursor_on_pane = pane_bounds.contains(cursor_position.into_array().into());
-            let cursor_on_title =
-                cursor_on_pane && !content_layout.bounds().contains(cursor_position.into_array().into());
-
-            let new_title_bar_status =
-                if cursor_on_title { InteractionStatus::Hovered } else { InteractionStatus::Idle };
-
-            if new_title_bar_status != pane.state.title_bar_status {
-                shell.publish((self.on_pane_title_bar_status_change)(*pane_index, new_title_bar_status));
-                shell.publish((self.on_layout_change)());
-            }
-        }
-
-        let gesture = self.children.iter_mut().enumerate().zip(layout.panes()).find_map({
-            move |((pane_index, (_, pane)), pane_layout)| {
-                let resize_directions = pane.get_pane_resize_directions(pane_layout, cursor_position);
-
-                if !resize_directions.is_none() {
-                    Some(Gesture::ResizePane {
-                        pending: true,
-                        pane_index,
-                        grab_state: GrabStateResize {
-                            grab_element_position: pane.state.position,
-                            grab_element_size: Into::<[f32; 2]>::into(pane_layout.bounds().size()).into(),
-                            grab_mouse_position: cursor_position,
-                        },
-                        directions: resize_directions,
-                    })
-                } else {
-                    None
-                }
-            }
-        });
-
-        shell.publish((self.on_gesture_change)(gesture));
-    }
-}
-
-impl<'a, M, T, R, C> Widget<M, T, R> for FloatingPanes<'a, M, T, R, C>
-where
-    M: 'a,
-    T: 'a + Catalog + iced::widget::text::Catalog + iced::widget::container::Catalog,
-    <T as iced::widget::text::Catalog>::Class<'a>: From<iced::widget::text::StyleFn<'a, T>>,
-    <T as iced::widget::container::Catalog>::Class<'a>: From<iced::widget::container::StyleFn<'a, T>>,
-    R: 'a + WidgetRenderer,
-    C: 'a + FloatingPanesBehaviour<'a, M, T, R>,
-{
-    fn size(&self) -> Size<Length> {
-        Size::new(self.width, self.height)
-    }
-
-    fn children(&self) -> Vec<Tree> {
-        self.children.values().map(|child| Tree::new(&child.element_tree)).collect()
-    }
-
-    fn diff(&self, tree: &mut Tree) {
-        let child_trees = self.children.values().map(|child| &child.element_tree).collect::<Vec<_>>();
-        tree.diff_children(&child_trees);
-    }
-
-    fn mouse_interaction(
-        &self,
-        tree: &Tree,
-        layout: Layout<'_>,
-        cursor: iced_core::mouse::Cursor,
-        viewport: &Rectangle,
-        renderer: &R,
-    ) -> iced_core::mouse::Interaction {
-        self.children
-            .values()
-            .zip(&tree.children)
-            .zip(layout.children())
-            .map(|((child, state), layout)| {
-                child.element_tree.as_widget().mouse_interaction(state, layout, cursor, viewport, renderer)
-            })
-            .max()
-            .unwrap_or_default()
-    }
-
-    fn layout(&self, tree: &mut Tree, renderer: &R, limits: &Limits) -> Node {
-        let limits = limits
-            .max_width(self.extents[0])
-            .max_height(self.extents[1])
-            .width(self.width)
-            .height(self.height);
-        let tree: FloatingPanesTreeMut = tree.into();
-
-        Node::with_children(
-            Size::new(self.extents[0], self.extents[1]),
-            self.children
-                .iter()
-                .zip(tree.panes())
-                .map(|((_, child), pane_tree)| {
-                    let layout = child.element_tree.as_widget().layout(pane_tree.into(), renderer, &limits);
-                    layout.move_to(child.state.position.into_array())
-                })
-                .collect::<Vec<_>>(),
-        )
-        .move_to(self.state.panes_offset.into_array())
-    }
-
-    fn draw(
-        &self,
-        tree: &Tree,
-        renderer: &mut R,
-        theme: &T,
-        style: &iced_core::renderer::Style,
-        layout: Layout<'_>,
-        cursor: Cursor,
-        viewport: &Rectangle,
-    ) {
-        <R as WidgetRenderer>::draw(renderer, self, tree, theme, style, layout, cursor, viewport)
-    }
-
-    // fn hash_layout(&self, state: &mut Hasher) {
-    //     struct Marker;
-    //     std::any::TypeId::of::<Marker>().hash(state);
-
-    //     self.state.hash(state);
-    //     self.width.hash(state);
-    //     self.height.hash(state);
-    //     self.extents.hash(state);
-
-    //     for (_, child) in &self.children {
-    //         child.state.hash(state);
-    //         child.element_tree.hash_layout(state);
-    //     }
-
-    //     C::hash_panes(&self, state);
+    // /// Set the children's [`CrossAxisAlignment`].
+    // pub fn set_cross_axis_alignment(this: &mut WidgetMut<'_, Self>, alignment: CrossAxisAlignment) {
+    //     this.widget.cross_alignment = alignment;
+    //     this.ctx.request_layout();
     // }
 
-    fn operate(
-        &self,
-        tree: &mut Tree,
-        layout: Layout<'_>,
-        renderer: &R,
-        operation: &mut dyn iced_core::widget::Operation,
+    // /// Set the children's [`MainAxisAlignment`].
+    // pub fn set_main_axis_alignment(this: &mut WidgetMut<'_, Self>, alignment: MainAxisAlignment) {
+    //     this.widget.main_alignment = alignment;
+    //     this.ctx.request_layout();
+    // }
+
+    // /// Set whether the container must expand to fill the available space on
+    // /// its main axis.
+    // pub fn set_must_fill_main_axis(this: &mut WidgetMut<'_, Self>, fill: bool) {
+    //     this.widget.fill_major_axis = fill;
+    //     this.ctx.request_layout();
+    // }
+
+    // /// Set the spacing along the major axis between any two elements in logical pixels.
+    // ///
+    // /// Equivalent to the css [gap] property.
+    // ///
+    // /// This gap is between any two children, including spacers.
+    // /// As such, using a non-zero gap and also adding spacers may lead to counter-intuitive results.
+    // /// You should usually pick one or the other.
+    // ///
+    // /// [gap]: https://developer.mozilla.org/en-US/docs/Web/CSS/gap
+    // pub fn set_gap(this: &mut WidgetMut<'_, Self>, gap: Length) {
+    //     this.widget.gap = gap;
+    //     this.ctx.request_layout();
+    // }
+
+    /// Insert a non-flex child widget at the given index.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the index is larger than the number of children.
+    pub fn insert_child(
+        this: &mut WidgetMut<'_, Self>,
+        idx: usize,
+        child: NewWidget<impl Widget + ?Sized>,
+        params: FloatingPaneParams,
     ) {
-        operation.container(None, layout.bounds(), &mut |operation| {
-            self.children.values().zip(&mut tree.children).zip(layout.children()).for_each(
-                |((child, state), layout)| {
-                    child.element_tree.as_widget().operate(state, layout, renderer, operation);
-                },
-            );
-        });
+        let child = Child { content: child.erased().to_pod(), params, position: Default::default() };
+        this.widget.children.insert(idx, child);
+        this.ctx.children_changed();
     }
 
-    fn on_event(
-        &mut self,
-        tree: &mut Tree,
-        event: Event,
-        layout: Layout<'_>,
-        cursor: Cursor,
-        renderer: &R,
-        clipboard: &mut dyn Clipboard,
-        shell: &mut Shell<'_, M>,
-        viewport: &Rectangle,
-    ) -> Status {
-        let layout: FloatingPanesLayout = layout.into();
-
-        if C::on_event(self, tree, event.clone(), layout, cursor, renderer, clipboard, shell, viewport)
-            == Status::Captured
-        {
-            return Status::Captured;
-        }
-
-        // Set to `true`, if the event should not be propagated to child panes.
-        let mut status = Status::Ignored;
-
-        // TODO: Make it possible to bind keyboard/mouse buttons to pan regardless of whether the
-        // cursor is on top of a pane.
-        match &event {
-            Event::Mouse(mouse::Event::CursorMoved { position: Point { x, y } }) => {
-                let cursor_position: Vec2<f32> = [*x, *y].into();
-
-                match self.state.gesture.clone() {
-                    Some(Gesture::GrabPane { pane_index, grab_state }) => {
-                        if let Some((node_index, _pane)) = self.children.get_index_mut(pane_index) {
-                            let pane_position = cursor_position.as_::<f32>()
-                                + grab_state.grab_element_position
-                                - grab_state.grab_mouse_position;
-                            shell.publish((self.on_pane_move_to)(*node_index, pane_position));
-                            shell.publish((self.on_layout_change)());
-                        }
-                    }
-                    Some(Gesture::GrabBackground(grab_state)) => {
-                        let background_position = cursor_position.as_::<f32>()
-                            + grab_state.grab_element_position
-                            - grab_state.grab_mouse_position;
-                        shell.publish((self.on_background_move_to)(background_position));
-                        shell.publish((self.on_layout_change)());
-                    }
-                    Some(Gesture::ResizePane { pending: false, pane_index, grab_state, directions }) => {
-                        if let Some((node_index, pane)) = self.children.get_index_mut(pane_index) {
-                            let mut pane_size = pane.state.size;
-                            let mut pane_position = pane.state.position;
-
-                            for component_index in 0..2 {
-                                if let FloatingPaneLength::Fixed(pane_size) = &mut pane_size[component_index]
-                                {
-                                    let original_element_size = grab_state.grab_element_size[component_index];
-                                    let original_element_position =
-                                        grab_state.grab_element_position[component_index];
-                                    let original_mouse_position =
-                                        grab_state.grab_mouse_position[component_index];
-                                    let current_mouse_position = cursor_position[component_index];
-                                    let mouse_offset = current_mouse_position - original_mouse_position;
-                                    let new_element_size: f32 = std::cmp::max(
-                                        OrderedFloat(
-                                            original_element_size
-                                                + mouse_offset
-                                                    * match directions[component_index] {
-                                                        PaneResizeDirection::None => 0.0,
-                                                        PaneResizeDirection::Negative => -1.0,
-                                                        PaneResizeDirection::Positive => 1.0,
-                                                    },
-                                        ),
-                                        OrderedFloat(pane.min_size[component_index]),
-                                    )
-                                    .into();
-                                    let size_delta = new_element_size - original_element_size;
-
-                                    pane_position[component_index] = original_element_position
-                                        + size_delta
-                                            * match directions[component_index] {
-                                                PaneResizeDirection::None | PaneResizeDirection::Positive => {
-                                                    0.0
-                                                }
-                                                PaneResizeDirection::Negative => -1.0,
-                                            };
-                                    *pane_size = new_element_size;
-                                }
-                            }
-
-                            shell.publish((self.on_pane_move_to)(*node_index, pane_position));
-                            shell.publish((self.on_pane_resize)(*node_index, pane_size));
-                            shell.publish((self.on_layout_change)());
-                        }
-                    }
-                    _ => {
-                        self.update_pending_gestures(cursor_position, layout, shell);
-                    }
-                }
-            }
-            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
-                if let Some(cursor_position) = cursor.position() =>
-            {
-                let pane_to_focus_and_gesture = self.children.iter_mut().enumerate().find_map({
-                    let panes_state = &self.state;
-                    move |(pane_index, (node_index, pane))| {
-                        if let Some(Gesture::ResizePane { pane_index, grab_state, directions, .. }) =
-                            panes_state.gesture.clone()
-                        {
-                            Some((
-                                None,
-                                Gesture::ResizePane { pending: false, pane_index, grab_state, directions },
-                            ))
-                        } else if pane.state.title_bar_status == InteractionStatus::Hovered {
-                            Some((
-                                Some(*node_index),
-                                Gesture::GrabPane {
-                                    pane_index,
-                                    grab_state: GrabStateMove {
-                                        grab_mouse_position: [cursor_position.x, cursor_position.y].into(),
-                                        grab_element_position: pane.state.position,
-                                    },
-                                },
-                            ))
-                        } else {
-                            None
-                        }
-                    }
-                });
-
-                let (pane_to_focus, mut gesture) = pane_to_focus_and_gesture
-                    .map(|(pane_to_focus, gesture)| (pane_to_focus, Some(gesture)))
-                    .unwrap_or((None, None));
-
-                if gesture.is_none() {
-                    let mouse_on_top_of_pane =
-                        layout.panes().any(move |pane_layout| cursor.is_over(pane_layout.bounds()));
-
-                    if !mouse_on_top_of_pane {
-                        gesture = Some(Gesture::GrabBackground(GrabStateMove {
-                            grab_mouse_position: [cursor_position.x, cursor_position.y].into(),
-                            grab_element_position: self.state.panes_offset,
-                        }));
-                    }
-                }
-
-                if let Some(pane_to_focus) = pane_to_focus {
-                    shell.publish((self.on_pane_title_bar_status_change)(
-                        pane_to_focus,
-                        InteractionStatus::Focused,
-                    ));
-                }
-
-                if self.state.gesture != gesture {
-                    shell.publish((self.on_gesture_change)(gesture));
-                }
-
-                // else {
-                //     shell.publish((self.on_layout_change)());
-                // }
-            }
-            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
-                if let Some(cursor_position) = cursor.position() =>
-            {
-                let cursor_position: Vec2<f32> = [cursor_position.x, cursor_position.y].into();
-                self.update_pending_gestures(cursor_position, layout, shell);
-            }
-            _ => (),
-        }
-
-        if status == Status::Ignored {
-            status = self.children.iter_mut().zip(layout.panes()).fold(
-                Status::Ignored,
-                |status, ((_, pane), pane_layout)| {
-                    status.merge(pane.element_tree.as_widget_mut().on_event(
-                        tree,
-                        event.clone(),
-                        pane_layout.into(),
-                        cursor,
-                        renderer,
-                        clipboard,
-                        shell,
-                        viewport,
-                    ))
-                },
-            );
-        }
-
-        status
+    /// Remove the child at `idx`.
+    ///
+    /// This child can be a widget or a spacer.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the index is larger than the number of children.
+    pub fn remove_child(this: &mut WidgetMut<'_, Self>, idx: usize) {
+        let child = this.widget.children.remove(idx);
+        this.ctx.remove_child(child.content);
+        this.ctx.request_layout();
     }
 
-    fn overlay<'b>(
-        &'b mut self,
-        state: &'b mut Tree,
-        layout: Layout<'_>,
-        renderer: &R,
-        translation: Vector,
-    ) -> Option<overlay::Element<'b, M, T, R>> {
-        C::overlay(self, state, layout.into(), renderer, translation)
+    /// Returns a mutable reference to the child widget at `idx`.
+    ///
+    /// Returns `None` if the child at `idx` is a spacer.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the index is larger than the number of children.
+    pub fn child_mut<'t>(this: &'t mut WidgetMut<'_, Self>, idx: usize) -> WidgetMut<'t, dyn Widget> {
+        let content = &mut this.widget.children[idx].content;
+        this.ctx.get_mut(content)
     }
-}
 
-impl<'a, M, T, R, C> From<FloatingPanes<'a, M, T, R, C>> for Element<'a, M, T, R>
-where
-    M: 'a,
-    T: 'a + Catalog + iced::widget::text::Catalog + iced::widget::container::Catalog,
-    <T as iced::widget::text::Catalog>::Class<'a>: From<iced::widget::text::StyleFn<'a, T>>,
-    <T as iced::widget::container::Catalog>::Class<'a>: From<iced::widget::container::StyleFn<'a, T>>,
-    R: 'a + WidgetRenderer,
-    C: 'a + FloatingPanesBehaviour<'a, M, T, R>,
-{
-    fn from(other: FloatingPanes<'a, M, T, R, C>) -> Self {
-        Element::new(other)
-    }
-}
-
-/// Good practice: Rendering is made to be generic over the backend using this trait, which
-/// is to be implemented on the specific `Renderer`.
-pub trait WidgetRenderer:
-    iced_core::Renderer
-    + iced_core::text::Renderer
-    + iced_graphics::geometry::Renderer
-    // + iced_runtime::column::Renderer
-    // + iced_runtime::widget::container::Renderer
-    + Sized
-{
-    // type StyleFloatingPane: StyleFloatingPaneBounds<Self>;
-    // type StyleFloatingPanes;
-
-    fn draw<'a, M: 'a, T: 'a, C: 'a + FloatingPanesBehaviour<'a, M, T, Self>>(
-        &mut self,
-        element: &FloatingPanes<'a, M, T, Self, C>,
-        tree: &Tree,
-        theme: &T,
-        style: &iced_core::renderer::Style,
-        layout: Layout<'_>,
-        cursor: Cursor,
-        viewport: &Rectangle,
-    );
-}
-
-impl<R> WidgetRenderer for R
-where R: iced_core::Renderer + iced_core::text::Renderer + iced_graphics::geometry::Renderer + Sized
-{
-    // type StyleFloatingPane = Box<dyn FloatingPaneStyleSheet>;
-    // type StyleFloatingPanes = Box<dyn FloatingPanesStyleSheet>;
-
-    fn draw<'a, M: 'a, T: 'a, C: 'a + FloatingPanesBehaviour<'a, M, T, Self>>(
-        &mut self,
-        element: &FloatingPanes<'a, M, T, Self, C>,
-        tree: &Tree,
-        theme: &T,
-        style: &iced_core::renderer::Style,
-        layout: Layout<'_>,
-        cursor: Cursor,
-        viewport: &Rectangle,
+    /// Updates the flex parameters for the child at `idx`,
+    ///
+    /// # Panics
+    ///
+    /// Panics if the element at `idx` is not a widget.
+    pub fn update_child_params(
+        this: &mut WidgetMut<'_, Self>,
+        idx: usize,
+        params: impl Into<FloatingPaneParams>,
     ) {
-        let mouse_interaction =
-            element.state.gesture.as_ref().map(Gesture::get_mouse_interaction).unwrap_or_default();
-        // let mut frame = self.new_frame(viewport.size());
-
-        // // TODO
-        // frame.fill_rectangle(Point::ORIGIN, viewport.size(), Color::from_rgb(0.5, 0.5, 0.0));
-        // self.draw_geometry(frame.into_geometry());
-
-        // let background_primitive = PrimitiveEnum::Quad(Quad {
-        //     bounds: Rectangle::new(Point::ORIGIN, layout.bounds().size()),
-        //     // background: Background::Color(
-        //     //     element
-        //     //         .style
-        //     //         .as_ref()
-        //     //         .map(|style| style.style().background_color)
-        //     //         .unwrap_or(Color::TRANSPARENT),
-        //     // ),
-        //     border: iced::Border::default(),
-        //     shadow: iced::Shadow::default(),
-        // });
-
-        let ContentDrawResult {
-            override_parent_cursor,
-            // output: (panes_primitive, content_mouse_interaction),
-        } = C::draw_panes(element, tree, self, theme, style, layout.into(), cursor, viewport);
-
-        // if override_parent_cursor {
-        //     mouse_interaction = content_mouse_interaction;
-        // } else {
-        //     mouse_interaction = std::cmp::max(mouse_interaction, content_mouse_interaction);
+        let child = &mut this.widget.children[idx];
+        child.params = params.into();
+        // let child_val = std::mem::replace(child, Child::FixedSpacer(Length::ZERO, 0.0));
+        // let widget = match child_val {
+        //     Child::Fixed { widget, .. } | Child::Flex { widget, .. } => widget,
+        //     _ => {
+        //         panic!("Can't update flex parameters of a spacer element");
+        //     }
         // };
+        // let new_child = new_flex_child(params.into(), widget);
+        // *child = new_child;
+        this.ctx.children_changed();
+    }
 
-        // let primitives = vec![background_primitive, panes_primitive];
+    /// Remove all children from the container.
+    pub fn clear(this: &mut WidgetMut<'_, Self>) {
+        if !this.widget.children.is_empty() {
+            this.ctx.request_layout();
 
-        // (background_primitive /* Originally `primitives` */, mouse_interaction)
+            for child in this.widget.children.drain(..) {
+                this.ctx.remove_child(child.content);
+            }
+        }
     }
 }
 
-/// The theme catalog of a [`Container`].
-pub trait Catalog {
-    /// The item class of the [`Catalog`].
-    type Class<'a>;
+// fn get_spacing(alignment: MainAxisAlignment, extra: f64, child_count: usize) -> (f64, f64) {
+//     let space_before;
+//     let space_between;
+//     match alignment {
+//         _ if child_count == 0 => {
+//             space_before = 0.;
+//             space_between = 0.;
+//         }
+//         MainAxisAlignment::Start => {
+//             space_before = 0.;
+//             space_between = 0.;
+//         }
+//         MainAxisAlignment::End => {
+//             space_before = extra;
+//             space_between = 0.;
+//         }
+//         MainAxisAlignment::Center => {
+//             space_before = extra / 2.;
+//             space_between = 0.;
+//         }
+//         MainAxisAlignment::SpaceBetween => {
+//             let equal_space = extra / (child_count - 1).max(1) as f64;
+//             space_before = 0.;
+//             space_between = equal_space;
+//         }
+//         MainAxisAlignment::SpaceEvenly => {
+//             let equal_space = extra / (child_count + 1) as f64;
+//             space_before = equal_space;
+//             space_between = equal_space;
+//         }
+//         MainAxisAlignment::SpaceAround => {
+//             let equal_space = extra / (2 * child_count) as f64;
+//             space_before = equal_space;
+//             space_between = equal_space * 2.;
+//         }
+//     }
+//     (space_before, space_between)
+// }
 
-    /// The default class produced by the [`Catalog`].
-    fn default<'a>() -> <Self as Catalog>::Class<'a>;
+impl HasProperty<Background> for FloatingPanes {}
+impl HasProperty<BorderColor> for FloatingPanes {}
+impl HasProperty<BorderWidth> for FloatingPanes {}
+impl HasProperty<CornerRadius> for FloatingPanes {}
+impl HasProperty<Padding> for FloatingPanes {}
 
-    /// The [`Style`] of a class with the given status.
-    fn style(&self, class: &<Self as Catalog>::Class<'_>) -> FloatingPaneStyle;
-}
+// --- MARK: IMPL WIDGET
+impl Widget for FloatingPanes {
+    type Action = NoAction;
 
-/// A styling function for a [`Container`].
-pub type StyleFn<'a, T> = Box<dyn Fn(&T) -> FloatingPaneStyle + 'a>;
-
-impl Catalog for Theme {
-    type Class<'a> = StyleFn<'a, Theme>;
-
-    fn default<'a>() -> <Self as Catalog>::Class<'a> {
-        Box::new(classes::transparent)
+    fn accepts_pointer_interaction(&self) -> bool {
+        false
     }
 
-    fn style(&self, class: &<Self as Catalog>::Class<'_>) -> FloatingPaneStyle {
-        class(self)
+    fn register_children(&mut self, ctx: &mut RegisterCtx<'_>) {
+        for child in self.children.iter_mut() {
+            ctx.register_child(&mut child.content);
+        }
+    }
+
+    fn property_changed(&mut self, ctx: &mut UpdateCtx<'_>, property_type: TypeId) {
+        Background::prop_changed(ctx, property_type);
+        BorderColor::prop_changed(ctx, property_type);
+        BorderWidth::prop_changed(ctx, property_type);
+        CornerRadius::prop_changed(ctx, property_type);
+        Padding::prop_changed(ctx, property_type);
+    }
+
+    fn layout(
+        &mut self,
+        ctx: &mut LayoutCtx<'_>,
+        props: &mut PropertiesMut<'_>,
+        bc: &BoxConstraints,
+    ) -> Size {
+        // SETUP
+        let border = props.get::<BorderWidth>();
+        let padding = props.get::<Padding>();
+
+        let bc = *bc;
+        let bc = border.layout_down(bc);
+        let bc = padding.layout_down(bc);
+
+        // we loosen our constraints when passing to children.
+        let loosened_bc = bc.loosen();
+
+        for child in &mut self.children {
+            let child_size = ctx.run_layout(&mut child.content, &loosened_bc);
+            // let child_baseline = ctx.child_baseline_offset(widget);
+            ctx.place_child(&mut child.content, child.position);
+        }
+
+        bc.max()
+    }
+
+    fn paint(&mut self, ctx: &mut PaintCtx<'_>, props: &PropertiesRef<'_>, scene: &mut Scene) {
+        let border_width = props.get::<BorderWidth>();
+        let border_radius = props.get::<CornerRadius>();
+        let bg = props.get::<Background>();
+        let border_color = props.get::<BorderColor>();
+
+        let bg_rect = border_width.bg_rect(ctx.size(), border_radius);
+        let border_rect = border_width.border_rect(ctx.size(), border_radius);
+
+        let brush = bg.get_peniko_brush_for_rect(bg_rect.rect());
+        fill(scene, &bg_rect, &brush);
+        stroke(scene, &border_rect, border_color.color, border_width.width);
+
+        // paint the baseline if we're debugging layout
+        if ctx.debug_paint_enabled() && ctx.baseline_offset() != 0.0 {
+            let color = ctx.debug_color();
+            let my_baseline = ctx.size().height - ctx.baseline_offset();
+            let line = Line::new((0.0, my_baseline), (ctx.size().width, my_baseline));
+
+            let stroke_style = Stroke::new(1.0).with_dashes(0., [4.0, 4.0]);
+            scene.stroke(&stroke_style, Affine::IDENTITY, color, None, &line);
+        }
+    }
+
+    fn accessibility_role(&self) -> Role {
+        Role::GenericContainer
+    }
+
+    fn accessibility(&mut self, _ctx: &mut AccessCtx<'_>, _props: &PropertiesRef<'_>, _node: &mut Node) {}
+
+    fn children_ids(&self) -> ChildrenIds {
+        self.children.iter().map(|widget| widget.content.id()).collect()
+    }
+
+    fn make_trace_span(&self, id: WidgetId) -> Span {
+        trace_span!("Flex", id = id.trace())
     }
 }
 
-// TODO: Rename to `Style` for consistency with Iced widgets.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct FloatingPaneStyle {
-    pub title_background: Option<Background>,
-    pub title_text_color: Color,
-    pub body_background: Option<Background>,
-}
+// --- MARK: TESTS
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use xilem::masonry::properties::types::AsUnit;
+    use xilem::masonry::theme::{ACCENT_COLOR, default_property_set};
+    use xilem::masonry::widgets::Label;
 
-pub mod classes {
-    use super::FloatingPaneStyle;
+    // #[test]
+    // fn test_main_axis_alignment_spacing() {
+    //     let apply_align = |align, extra, child_count| {
+    //         let (space_before, space_between) = get_spacing(align, extra, child_count);
+    //         let space_after = extra - space_before - space_between * child_count.saturating_sub(1) as f64;
+    //         (space_before, space_between, space_after)
+    //     };
 
-    pub fn transparent<Theme>(_theme: &Theme) -> FloatingPaneStyle {
-        FloatingPaneStyle::default()
-    }
-}
+    //     // Formatting note: in the comments below:
+    //     // `[-]` represents a child.
+    //     // a number represents a non-zero amount of space.
 
-/*
-#[derive(Clone, Copy, Debug, Default)]
-pub struct FloatingPanesStyle {
-    pub background_color: Color,
-}
+    //     let align = MainAxisAlignment::Start;
+    //     let (before, _, after) = apply_align(align, 10., 1);
+    //     // Spacing: [-] 10
+    //     assert_eq!(before, 0.);
+    //     assert_eq!(after, 10.);
 
-pub trait FloatingPanesStyleSheet {
-    fn style(&self) -> FloatingPanesStyle;
-}
-    */
+    //     let (before, between, after) = apply_align(align, 10., 2);
+    //     // Spacing: [-][-] 10
+    //     assert_eq!(before, 0.);
+    //     assert_eq!(between, 0.);
+    //     assert_eq!(after, 10.);
 
-typed_layout! {
-    type_name: FloatingPanes,
-}
+    //     let align = MainAxisAlignment::End;
+    //     let (before, _, after) = apply_align(align, 10., 1);
+    //     // Spacing: 10 [-]
+    //     assert_eq!(before, 10.);
+    //     assert_eq!(after, 0.);
 
-typed_layout! {
-    type_name: FloatingPane,
-    traverse: [
-        {
-            parent_type_name: FloatingPanes,
-            fn_name: pane_with_index,
-            fn_args: [pane_index: usize],
-            layout_fn: |parent: Layout<'a>, pane_index: usize| {
-                parent.children().nth(pane_index).unwrap()
-            },
-            tree_ref_fn: |parent: &'a Tree, pane_index: usize| {
-                &parent.children[pane_index]
-            },
-            tree_mut_fn: |parent: &'a mut Tree, pane_index: usize| {
-                &mut parent.children[pane_index]
-            },
-        },
-    ],
-    children_of: {
-        parent_type_name: FloatingPanes,
-        fn_name: panes,
-    },
-}
+    //     let (before, between, after) = apply_align(align, 10., 2);
+    //     // Spacing: 10 [-][-]
+    //     assert_eq!(before, 10.);
+    //     assert_eq!(between, 0.);
+    //     assert_eq!(after, 0.);
 
-typed_layout! {
-    type_name: FloatingPaneContent,
-    traverse: [
-        {
-            parent_type_name: FloatingPane,
-            fn_name: content,
-            fn_args: [],
-            layout_fn: |parent: Layout<'a>| {
-                parent
-                    .children().nth(0).unwrap()
-                    .children().nth(1).unwrap()
-                    .children().nth(0).unwrap()
-            },
-            tree_ref_fn: |parent: &'a Tree| {
-                &parent
-                    .children[0]
-                    .children[1]
-                    .children[0]
-            },
-            tree_mut_fn: |parent: &'a mut Tree| {
-                &mut parent
-                    .children[0]
-                    .children[1]
-                    .children[0]
-            },
-        },
-    ],
+    //     let align = MainAxisAlignment::Center;
+    //     let (before, _, after) = apply_align(align, 10., 1);
+    //     // Spacing: 5 [-] 5
+    //     assert_eq!(before, 5.);
+    //     assert_eq!(after, 5.);
+
+    //     let (before, between, after) = apply_align(align, 10., 3);
+    //     // Spacing: 5 [-][-][-] 5
+    //     assert_eq!(before, 5.);
+    //     assert_eq!(between, 0.);
+    //     assert_eq!(after, 5.);
+
+    //     let (before, between, after) = apply_align(align, 5., 2);
+    //     // Spacing: 2.5 [-][-] 2.5
+    //     assert_eq!(before, 2.5);
+    //     assert_eq!(between, 0.);
+    //     assert_eq!(after, 2.5);
+
+    //     let align = MainAxisAlignment::SpaceBetween;
+    //     let (before, _, after) = apply_align(align, 10., 1);
+    //     // Spacing: [-] 10
+    //     assert_eq!(before, 0.);
+    //     assert_eq!(after, 10.);
+
+    //     let (before, between, after) = apply_align(align, 10., 2);
+    //     // Spacing: [-] 10 [-]
+    //     assert_eq!(before, 0.);
+    //     assert_eq!(between, 10.);
+    //     assert_eq!(after, 0.);
+
+    //     let (before, between, after) = apply_align(align, 30., 5);
+    //     // Spacing: [-] 7.5 [-] 7.5 [-] 7.5 [-] 7.5 [-]
+    //     assert_eq!(before, 0.);
+    //     assert_eq!(between, 7.5);
+    //     assert_eq!(after, 0.);
+
+    //     let align = MainAxisAlignment::SpaceEvenly;
+    //     let (before, _, after) = apply_align(align, 10., 1);
+    //     // Spacing: 5 [-] 5
+    //     assert_eq!(before, 5.);
+    //     assert_eq!(after, 5.);
+
+    //     let (before, between, after) = apply_align(align, 10., 3);
+    //     // Spacing: 2.5 [-] 2.5 [-] 2.5 [-] 2.5
+    //     assert_eq!(before, 2.5);
+    //     assert_eq!(between, 2.5);
+    //     assert_eq!(after, 2.5);
+
+    //     let align = MainAxisAlignment::SpaceAround;
+    //     let (before, _, after) = apply_align(align, 10., 1);
+    //     // Spacing: 5 [-] 5
+    //     assert_eq!(before, 5.);
+    //     assert_eq!(after, 5.);
+
+    //     let (before, between, after) = apply_align(align, 10., 2);
+    //     // Spacing: 2.5 [-] 5 [-] 2.5
+    //     assert_eq!(before, 2.5);
+    //     assert_eq!(between, 5.);
+    //     assert_eq!(after, 2.5);
+
+    //     let (before, between, after) = apply_align(align, 35., 5);
+    //     // Spacing: 3.5 [-] 7 [-] 7 [-] 7 [-] 7 [-] 3.5
+    //     assert_eq!(before, 3.5);
+    //     assert_eq!(between, 7.);
+    //     assert_eq!(after, 3.5);
+    // }
+
+    // #[test]
+    // fn invalid_flex_params() {
+    //     use masonry_testing::assert_debug_panics;
+    //     assert_debug_panics!(FlexParams::new(0.0, None), "Flex value should be > 0.0");
+    //     assert_debug_panics!(FlexParams::new(-0.0, None), "Flex value should be > 0.0");
+    //     assert_debug_panics!(FlexParams::new(-1.0, None), "Flex value should be > 0.0");
+    // }
+
+    // use xilem::masonry::testing::{TestHarness, assert_render_snapshot};
+
+    // #[test]
+    // fn flex_row_fixed_size_only() {
+    //     let widget = NewWidget::new_with_props(
+    //         Flex::row()
+    //             .with_child(Label::new("hello").with_auto_id())
+    //             .with_child(Label::new("world").with_auto_id())
+    //             .with_child(Label::new("foo").with_auto_id())
+    //             .with_child(Label::new("bar").with_auto_id()),
+    //         (BorderWidth::all(2.0), BorderColor::new(ACCENT_COLOR)).into(),
+    //     );
+
+    //     let window_size = Size::new(200.0, 150.0);
+    //     let mut harness = TestHarness::create_with_size(default_property_set(), widget, window_size);
+
+    //     harness.edit_root_widget(|mut flex| {
+    //         Flex::set_main_axis_alignment(&mut flex, MainAxisAlignment::Start);
+    //     });
+    //     assert_render_snapshot!(harness, "flex_row_fixed_children_start");
+
+    //     harness.edit_root_widget(|mut flex| {
+    //         Flex::set_main_axis_alignment(&mut flex, MainAxisAlignment::Center);
+    //     });
+    //     assert_render_snapshot!(harness, "flex_row_fixed_children_center");
+
+    //     harness.edit_root_widget(|mut flex| {
+    //         Flex::set_main_axis_alignment(&mut flex, MainAxisAlignment::End);
+    //     });
+    //     assert_render_snapshot!(harness, "flex_row_fixed_children_end");
+
+    //     harness.edit_root_widget(|mut flex| {
+    //         Flex::set_main_axis_alignment(&mut flex, MainAxisAlignment::SpaceBetween);
+    //     });
+    //     assert_render_snapshot!(harness, "flex_row_fixed_children_spaceBetween");
+
+    //     harness.edit_root_widget(|mut flex| {
+    //         Flex::set_main_axis_alignment(&mut flex, MainAxisAlignment::SpaceEvenly);
+    //     });
+    //     assert_render_snapshot!(harness, "flex_row_fixed_children_spaceEvenly");
+
+    //     harness.edit_root_widget(|mut flex| {
+    //         Flex::set_main_axis_alignment(&mut flex, MainAxisAlignment::SpaceAround);
+    //     });
+    //     assert_render_snapshot!(harness, "flex_row_fixed_children_spaceAround");
+    // }
+
+    // // TODO - Reduce copy-pasting?
+    // #[test]
+    // fn flex_row_cross_axis_snapshots() {
+    //     let widget = NewWidget::new_with_props(
+    //         Flex::row()
+    //             .with_child(Label::new("hello").with_auto_id())
+    //             .with_flex_child(Label::new("world").with_auto_id(), 1.0)
+    //             .with_child(Label::new("foo").with_auto_id())
+    //             .with_flex_child(
+    //                 Label::new("bar").with_auto_id(),
+    //                 FlexParams::new(2.0, CrossAxisAlignment::Start),
+    //             ),
+    //         (BorderWidth::all(2.0), BorderColor::new(ACCENT_COLOR)).into(),
+    //     );
+
+    //     let window_size = Size::new(200.0, 150.0);
+    //     let mut harness = TestHarness::create_with_size(default_property_set(), widget, window_size);
+
+    //     harness.edit_root_widget(|mut flex| {
+    //         Flex::set_cross_axis_alignment(&mut flex, CrossAxisAlignment::Start);
+    //     });
+    //     assert_render_snapshot!(harness, "flex_row_cross_axis_start");
+
+    //     harness.edit_root_widget(|mut flex| {
+    //         Flex::set_cross_axis_alignment(&mut flex, CrossAxisAlignment::Center);
+    //     });
+    //     assert_render_snapshot!(harness, "flex_row_cross_axis_center");
+
+    //     harness.edit_root_widget(|mut flex| {
+    //         Flex::set_cross_axis_alignment(&mut flex, CrossAxisAlignment::End);
+    //     });
+    //     assert_render_snapshot!(harness, "flex_row_cross_axis_end");
+
+    //     harness.edit_root_widget(|mut flex| {
+    //         Flex::set_cross_axis_alignment(&mut flex, CrossAxisAlignment::Baseline);
+    //     });
+    //     assert_render_snapshot!(harness, "flex_row_cross_axis_baseline");
+
+    //     harness.edit_root_widget(|mut flex| {
+    //         Flex::set_cross_axis_alignment(&mut flex, CrossAxisAlignment::Fill);
+    //     });
+    //     assert_render_snapshot!(harness, "flex_row_cross_axis_fill");
+    // }
+
+    // #[test]
+    // fn flex_row_main_axis_snapshots() {
+    //     let widget = NewWidget::new_with_props(
+    //         Flex::row()
+    //             .with_child(Label::new("hello").with_auto_id())
+    //             .with_flex_child(Label::new("world").with_auto_id(), 1.0)
+    //             .with_child(Label::new("foo").with_auto_id())
+    //             .with_flex_child(
+    //                 Label::new("bar").with_auto_id(),
+    //                 FlexParams::new(2.0, CrossAxisAlignment::Start),
+    //             ),
+    //         (BorderWidth::all(2.0), BorderColor::new(ACCENT_COLOR)).into(),
+    //     );
+
+    //     let window_size = Size::new(200.0, 150.0);
+    //     let mut harness = TestHarness::create_with_size(default_property_set(), widget, window_size);
+
+    //     // MAIN AXIS ALIGNMENT
+
+    //     harness.edit_root_widget(|mut flex| {
+    //         Flex::set_main_axis_alignment(&mut flex, MainAxisAlignment::Start);
+    //     });
+    //     assert_render_snapshot!(harness, "flex_row_main_axis_start");
+
+    //     harness.edit_root_widget(|mut flex| {
+    //         Flex::set_main_axis_alignment(&mut flex, MainAxisAlignment::Center);
+    //     });
+    //     assert_render_snapshot!(harness, "flex_row_main_axis_center");
+
+    //     harness.edit_root_widget(|mut flex| {
+    //         Flex::set_main_axis_alignment(&mut flex, MainAxisAlignment::End);
+    //     });
+    //     assert_render_snapshot!(harness, "flex_row_main_axis_end");
+
+    //     harness.edit_root_widget(|mut flex| {
+    //         Flex::set_main_axis_alignment(&mut flex, MainAxisAlignment::SpaceBetween);
+    //     });
+    //     assert_render_snapshot!(harness, "flex_row_main_axis_spaceBetween");
+
+    //     harness.edit_root_widget(|mut flex| {
+    //         Flex::set_main_axis_alignment(&mut flex, MainAxisAlignment::SpaceEvenly);
+    //     });
+    //     assert_render_snapshot!(harness, "flex_row_main_axis_spaceEvenly");
+
+    //     harness.edit_root_widget(|mut flex| {
+    //         Flex::set_main_axis_alignment(&mut flex, MainAxisAlignment::SpaceAround);
+    //     });
+    //     assert_render_snapshot!(harness, "flex_row_main_axis_spaceAround");
+
+    //     // FILL MAIN AXIS
+    //     // TODO - This doesn't seem to do anything?
+
+    //     harness.edit_root_widget(|mut flex| {
+    //         Flex::set_must_fill_main_axis(&mut flex, true);
+    //     });
+    //     assert_render_snapshot!(harness, "flex_row_fill_main_axis");
+    // }
+
+    // #[test]
+    // fn flex_col_cross_axis_snapshots() {
+    //     let widget = NewWidget::new_with_props(
+    //         Flex::column()
+    //             .with_child(Label::new("hello").with_auto_id())
+    //             .with_flex_child(Label::new("world").with_auto_id(), 1.0)
+    //             .with_child(Label::new("foo").with_auto_id())
+    //             .with_flex_child(
+    //                 Label::new("bar").with_auto_id(),
+    //                 FlexParams::new(2.0, CrossAxisAlignment::Start),
+    //             ),
+    //         (BorderWidth::all(2.0), BorderColor::new(ACCENT_COLOR)).into(),
+    //     );
+
+    //     let window_size = Size::new(200.0, 150.0);
+    //     let mut harness = TestHarness::create_with_size(default_property_set(), widget, window_size);
+
+    //     harness.edit_root_widget(|mut flex| {
+    //         Flex::set_cross_axis_alignment(&mut flex, CrossAxisAlignment::Start);
+    //     });
+    //     assert_render_snapshot!(harness, "flex_col_cross_axis_start");
+
+    //     harness.edit_root_widget(|mut flex| {
+    //         Flex::set_cross_axis_alignment(&mut flex, CrossAxisAlignment::Center);
+    //     });
+    //     assert_render_snapshot!(harness, "flex_col_cross_axis_center");
+
+    //     harness.edit_root_widget(|mut flex| {
+    //         Flex::set_cross_axis_alignment(&mut flex, CrossAxisAlignment::End);
+    //     });
+    //     assert_render_snapshot!(harness, "flex_col_cross_axis_end");
+
+    //     harness.edit_root_widget(|mut flex| {
+    //         Flex::set_cross_axis_alignment(&mut flex, CrossAxisAlignment::Baseline);
+    //     });
+    //     assert_render_snapshot!(harness, "flex_col_cross_axis_baseline");
+
+    //     harness.edit_root_widget(|mut flex| {
+    //         Flex::set_cross_axis_alignment(&mut flex, CrossAxisAlignment::Fill);
+    //     });
+    //     assert_render_snapshot!(harness, "flex_col_cross_axis_fill");
+    // }
+
+    // #[test]
+    // fn flex_col_main_axis_snapshots() {
+    //     let widget = NewWidget::new_with_props(
+    //         Flex::column()
+    //             .with_child(Label::new("hello").with_auto_id())
+    //             .with_flex_child(Label::new("world").with_auto_id(), 1.0)
+    //             .with_child(Label::new("foo").with_auto_id())
+    //             .with_flex_child(
+    //                 Label::new("bar").with_auto_id(),
+    //                 FlexParams::new(2.0, CrossAxisAlignment::Start),
+    //             ),
+    //         (BorderWidth::all(2.0), BorderColor::new(ACCENT_COLOR)).into(),
+    //     );
+
+    //     let window_size = Size::new(200.0, 150.0);
+    //     let mut harness = TestHarness::create_with_size(default_property_set(), widget, window_size);
+
+    //     // MAIN AXIS ALIGNMENT
+
+    //     harness.edit_root_widget(|mut flex| {
+    //         Flex::set_main_axis_alignment(&mut flex, MainAxisAlignment::Start);
+    //     });
+    //     assert_render_snapshot!(harness, "flex_col_main_axis_start");
+
+    //     harness.edit_root_widget(|mut flex| {
+    //         Flex::set_main_axis_alignment(&mut flex, MainAxisAlignment::Center);
+    //     });
+    //     assert_render_snapshot!(harness, "flex_col_main_axis_center");
+
+    //     harness.edit_root_widget(|mut flex| {
+    //         Flex::set_main_axis_alignment(&mut flex, MainAxisAlignment::End);
+    //     });
+    //     assert_render_snapshot!(harness, "flex_col_main_axis_end");
+
+    //     harness.edit_root_widget(|mut flex| {
+    //         Flex::set_main_axis_alignment(&mut flex, MainAxisAlignment::SpaceBetween);
+    //     });
+    //     assert_render_snapshot!(harness, "flex_col_main_axis_spaceBetween");
+
+    //     harness.edit_root_widget(|mut flex| {
+    //         Flex::set_main_axis_alignment(&mut flex, MainAxisAlignment::SpaceEvenly);
+    //     });
+    //     assert_render_snapshot!(harness, "flex_col_main_axis_spaceEvenly");
+
+    //     harness.edit_root_widget(|mut flex| {
+    //         Flex::set_main_axis_alignment(&mut flex, MainAxisAlignment::SpaceAround);
+    //     });
+    //     assert_render_snapshot!(harness, "flex_col_main_axis_spaceAround");
+
+    //     // FILL MAIN AXIS
+    //     // TODO - This doesn't seem to do anything?
+
+    //     harness.edit_root_widget(|mut flex| {
+    //         Flex::set_must_fill_main_axis(&mut flex, true);
+    //     });
+    //     assert_render_snapshot!(harness, "flex_col_fill_main_axis");
+    // }
+
+    // #[test]
+    // fn edit_flex_container() {
+    //     let image_1 = {
+    //         let widget = Flex::column()
+    //             .with_child(Label::new("a").with_auto_id())
+    //             .with_child(Label::new("b").with_auto_id())
+    //             .with_child(Label::new("c").with_auto_id())
+    //             .with_child(Label::new("d").with_auto_id())
+    //             .with_auto_id();
+    //         // -> abcd
+
+    //         let window_size = Size::new(200.0, 150.0);
+    //         let mut harness = TestHarness::create_with_size(default_property_set(), widget, window_size);
+
+    //         harness.edit_root_widget(|mut flex| {
+    //             Flex::remove_child(&mut flex, 1);
+    //             // -> acd
+    //             Flex::add_child(&mut flex, Label::new("x").with_auto_id());
+    //             // -> acdx
+    //             Flex::add_flex_child(&mut flex, Label::new("y").with_auto_id(), 2.0);
+    //             // -> acdxy
+    //             Flex::add_spacer(&mut flex, 5.px());
+    //             // -> acdxy_
+    //             Flex::add_flex_spacer(&mut flex, 1.0);
+    //             // -> acdxy__
+    //             Flex::insert_child(&mut flex, 2, Label::new("i").with_auto_id());
+    //             // -> acidxy__
+    //             Flex::insert_flex_child(&mut flex, 2, Label::new("j").with_auto_id(), 2.0);
+    //             // -> acjidxy__
+    //             Flex::insert_spacer(&mut flex, 2, 5.px());
+    //             // -> ac_jidxy__
+    //             Flex::insert_flex_spacer(&mut flex, 2, 1.0);
+    //             // -> ac__jidxy__
+    //         });
+
+    //         harness.render()
+    //     };
+
+    //     let image_2 = {
+    //         let widget = Flex::column()
+    //             .with_child(Label::new("a").with_auto_id())
+    //             .with_child(Label::new("c").with_auto_id())
+    //             .with_flex_spacer(1.0)
+    //             .with_spacer(5.px())
+    //             .with_flex_child(Label::new("j").with_auto_id(), 2.0)
+    //             .with_child(Label::new("i").with_auto_id())
+    //             .with_child(Label::new("d").with_auto_id())
+    //             .with_child(Label::new("x").with_auto_id())
+    //             .with_flex_child(Label::new("y").with_auto_id(), 2.0)
+    //             .with_spacer(5.px())
+    //             .with_flex_spacer(1.0)
+    //             .with_auto_id();
+
+    //         let window_size = Size::new(200.0, 150.0);
+    //         let mut harness = TestHarness::create_with_size(default_property_set(), widget, window_size);
+    //         harness.render()
+    //     };
+
+    //     // We don't use assert_eq because we don't want rich assert
+    //     assert!(image_1 == image_2);
+    // }
+
+    // #[test]
+    // fn get_flex_child() {
+    //     let widget = Flex::column()
+    //         .with_child(Label::new("hello").with_auto_id())
+    //         .with_child(Label::new("world").with_auto_id())
+    //         .with_spacer(1.px())
+    //         .with_auto_id();
+
+    //     let window_size = Size::new(200.0, 150.0);
+    //     let mut harness = TestHarness::create_with_size(default_property_set(), widget, window_size);
+    //     harness.edit_root_widget(|mut flex| {
+    //         let mut child = Flex::child_mut(&mut flex, 1).unwrap();
+    //         assert_eq!(child.try_downcast::<Label>().unwrap().widget.text().to_string(), "world");
+    //         drop(child);
+
+    //         assert!(Flex::child_mut(&mut flex, 2).is_none());
+    //     });
+
+    //     // TODO - test out-of-bounds access?
+    // }
+
+    // #[test]
+    // fn divide_by_zero() {
+    //     let widget = Flex::column().with_flex_spacer(0.0).with_auto_id();
+
+    //     // Running layout should not panic when the flex sum is zero.
+    //     let window_size = Size::new(200.0, 150.0);
+    //     let mut harness = TestHarness::create_with_size(default_property_set(), widget, window_size);
+    //     harness.render();
+    // }
 }

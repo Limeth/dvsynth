@@ -1,9 +1,9 @@
 use iced::widget::{checkbox, container, pick_list, text_input};
 
-use crate::{
-    Spacing,
-    widgets::{floating_panes, node},
-};
+// use crate::{
+//     Spacing,
+//     widgets::{floating_panes, node},
+// };
 
 pub mod consts {
     use super::*;
@@ -12,16 +12,16 @@ pub mod consts {
     pub const TEXT_SIZE_TITLE: u16 = 16;
     pub const SPACING_VERTICAL: u16 = 4;
     pub const SPACING_HORIZONTAL: u16 = SPACING_VERTICAL * 2;
-    pub const SPACING: Spacing = Spacing::from_axes(SPACING_HORIZONTAL, SPACING_VERTICAL);
+    //     pub const SPACING: Spacing = Spacing::from_axes(SPACING_HORIZONTAL, SPACING_VERTICAL);
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash, PartialOrd, Ord, Default)]
-pub enum InteractionStatus {
-    #[default]
-    Idle,
-    Hovered,
-    Focused,
-}
+// #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash, PartialOrd, Ord, Default)]
+// pub enum InteractionStatus {
+//     #[default]
+//     Idle,
+//     Hovered,
+//     Focused,
+// }
 
 /*
 pub trait Themeable: Sized {
