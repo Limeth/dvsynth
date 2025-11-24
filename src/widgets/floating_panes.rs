@@ -1,7 +1,7 @@
 use std::any::TypeId;
 
 use tracing::{Span, trace_span};
-use vek::Vec2;
+use xilem::Vec2;
 use xilem::masonry::accesskit::{Node, Role};
 use xilem::masonry::core::{
     EventCtx, HasProperty, PointerButtonEvent, PointerEvent, PointerUpdate, QueryCtx,
@@ -56,10 +56,11 @@ pub struct FloatingPanes {
     // cross_alignment: CrossAxisAlignment,
     // main_alignment: MainAxisAlignment,
     // fill_major_axis: bool,
+    // gap: Length,
     children: Vec<Child>,
     gesture: Option<Gesture>,
-    background_position: Point,
-    // gap: Length,
+    /// Offset of all child panes in the local coordinates of this `FloatingPanes` widget.
+    children_offset: Vec2,
 }
 
 /// Optional parameters for an item in a [`Flex`] container (row or column).
@@ -74,7 +75,8 @@ pub struct FloatingPanes {
 #[derive(Default, Debug, Clone, PartialEq)]
 pub struct FloatingPaneParams {
     pub title: String,
-    pub position: Point,
+    /// Position of the pane in the local coordinates of the `FloatingPanes` widget.
+    pub position_local: Point,
 }
 
 // TODO: Make generic over widget type
@@ -86,15 +88,27 @@ struct Child {
     // extra_data: Point,
 }
 
+impl Child {
+    pub fn layout_bounding_rect(&self, children_offset: Vec2) -> Rect {
+        Rect::from_origin_size(self.params.position_local + children_offset, self.calculated_size)
+    }
+}
+
+impl Default for FloatingPanes {
+    fn default() -> Self {
+        FloatingPanes::new()
+    }
+}
+
 // --- MARK: IMPL FLEX
 impl FloatingPanes {
     /// Create a new `Flex` oriented along the provided axis.
     pub fn new() -> Self {
         Self {
-            // direction: axis,
             children: Vec::new(),
             gesture: None,
-            background_position: Point::ZERO,
+            children_offset: Vec2::ZERO,
+            // direction: axis,
             // cross_alignment: CrossAxisAlignment::Center,
             // main_alignment: MainAxisAlignment::Start,
             // fill_major_axis: false,
@@ -326,15 +340,15 @@ impl HasProperty<Padding> for FloatingPanes {}
 
 #[derive(Default, Debug, Clone, PartialEq)]
 pub struct GrabStateMove {
-    pub grab_element_position: Point,
-    pub grab_mouse_position: Point,
+    pub grab_element_offset: Vec2,
+    pub grab_start_position_local: Point,
 }
 
 #[derive(Default, Debug, Clone, PartialEq)]
 pub struct GrabStateResize {
-    pub grab_element_position: Point,
+    pub grab_element_position_local: Point,
     pub grab_element_size: Point,
-    pub grab_mouse_position: Point,
+    pub grab_mouse_position_local: Point,
 }
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
@@ -345,14 +359,17 @@ pub enum PaneResizeDirection {
 }
 
 #[derive(Debug, Hash, Clone, Copy, PartialEq)]
-pub struct PaneResizeDirections(Vec2<PaneResizeDirection>);
+pub struct PaneResizeDirections {
+    x: PaneResizeDirection,
+    y: PaneResizeDirection,
+}
 
 impl PaneResizeDirections {
     pub const NONE: Self =
-        PaneResizeDirections(Vec2 { x: PaneResizeDirection::None, y: PaneResizeDirection::None });
+        PaneResizeDirections { x: PaneResizeDirection::None, y: PaneResizeDirection::None };
 
     pub fn is_none(&self) -> bool {
-        self.0.x == PaneResizeDirection::None && self.0.y == PaneResizeDirection::None
+        self.x == PaneResizeDirection::None && self.y == PaneResizeDirection::None
     }
 }
 
@@ -388,35 +405,55 @@ impl Widget for FloatingPanes {
         match event {
             PointerEvent::Down(PointerButtonEvent {
                 button: Some(PointerButton::Primary), state, ..
-            }) => {
-                if self.gesture.is_none() {
+            }) if self.gesture.is_none() => {
+                let local_point = ctx.local_position(state.position);
+                if let Some((hovered_pane_index, child)) =
+                    self.children.iter().enumerate().find(|(_, child)| {
+                        child.layout_bounding_rect(self.children_offset).contains(local_point)
+                    })
+                {
+                    self.gesture = Some(Gesture::GrabPane {
+                        pane_index: hovered_pane_index,
+                        grab_state: GrabStateMove {
+                            grab_element_offset: child.params.position_local.to_vec2(),
+                            grab_start_position_local: local_point,
+                        },
+                    });
+                } else {
                     self.gesture = Some(Gesture::GrabBackground(GrabStateMove {
-                        grab_element_position: self.background_position,
-                        grab_mouse_position: state.logical_point(),
+                        grab_element_offset: self.children_offset,
+                        grab_start_position_local: local_point,
                     }));
-                    ctx.set_handled();
                 }
+                ctx.set_handled();
             }
-            PointerEvent::Up(PointerButtonEvent { button: Some(PointerButton::Primary), state, .. }) => {
-                match &self.gesture {
-                    Some(Gesture::GrabBackground(GrabStateMove {
-                        grab_element_position,
-                        grab_mouse_position,
-                    })) => {
-                        self.gesture = None;
-                        ctx.set_handled();
-                    }
-                    _ => (),
-                }
+            PointerEvent::Up(PointerButtonEvent { button: Some(PointerButton::Primary), .. })
+                if self.gesture.is_some() =>
+            {
+                self.gesture = None;
+                ctx.set_handled();
             }
             PointerEvent::Move(PointerUpdate { current, .. }) => match &self.gesture {
                 Some(Gesture::GrabBackground(GrabStateMove {
-                    grab_element_position,
-                    grab_mouse_position,
+                    grab_element_offset,
+                    grab_start_position_local,
                 })) => {
-                    self.background_position = current.logical_point() + grab_element_position.to_vec2()
-                        - grab_mouse_position.to_vec2();
+                    self.children_offset = ctx.local_position(current.position).to_vec2()
+                        + *grab_element_offset
+                        - grab_start_position_local.to_vec2();
                     ctx.request_layout();
+                    ctx.set_handled();
+                }
+                Some(Gesture::GrabPane {
+                    pane_index,
+                    grab_state: GrabStateMove { grab_element_offset, grab_start_position_local },
+                }) => {
+                    if let Some(grabbed_pane) = self.children.get_mut(*pane_index) {
+                        grabbed_pane.params.position_local = ctx.local_position(current.position)
+                            + *grab_element_offset
+                            - grab_start_position_local.to_vec2();
+                        ctx.request_layout();
+                    }
                     ctx.set_handled();
                 }
                 _ => (),
@@ -458,8 +495,9 @@ impl Widget for FloatingPanes {
 
         for child in &mut self.children {
             child.calculated_size = ctx.run_layout(&mut child.content, &loosened_bc);
+            let position = child.layout_bounding_rect(self.children_offset).origin();
             // let child_baseline = ctx.child_baseline_offset(widget);
-            ctx.place_child(&mut child.content, child.params.position + self.background_position.to_vec2());
+            ctx.place_child(&mut child.content, position);
         }
 
         bc.max()
@@ -482,10 +520,7 @@ impl Widget for FloatingPanes {
         scene.push_clip_layer(Affine::IDENTITY, &bg_rect);
 
         for child in &self.children {
-            let child_bg_rect = Rect::from_origin_size(
-                child.params.position + self.background_position.to_vec2(),
-                child.calculated_size,
-            );
+            let child_bg_rect = child.layout_bounding_rect(self.children_offset);
             // TODO: customizable background
             let brush = Background::Color(AlphaColor::from_rgb8(0x3F, 0x3F, 0x1F))
                 .get_peniko_brush_for_rect(child_bg_rect);
@@ -509,7 +544,7 @@ impl Widget for FloatingPanes {
             Some(Gesture::GrabBackground(_) | Gesture::GrabPane { .. }) => CursorIcon::Grabbing,
             Some(Gesture::ResizePane { directions, .. }) => {
                 use PaneResizeDirection::*;
-                match (directions.0.x, directions.0.y) {
+                match (directions.x, directions.y) {
                     (Negative, None) => CursorIcon::WResize,
                     (Positive, None) => CursorIcon::EResize,
                     (None, Negative) => CursorIcon::NResize,

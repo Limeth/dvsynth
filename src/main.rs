@@ -273,12 +273,13 @@ impl ApplicationState {
                 floating_panes((
                     label("Foo").floating_pane(FloatingPaneParams {
                         title: "Foo's Title".into(),
-                        position: (0.0, 100.0).into(),
+                        position_local: (0.0, 100.0).into(),
                     }),
-                    label("Bar").floating_pane(FloatingPaneParams {
-                        title: "Bar's Title".into(),
-                        position: (100.0, 0.0).into(),
-                    }),
+                    flex(Axis::Vertical, (label("Bar"), text_button("press me", |_| println!("yeet"))))
+                        .floating_pane(FloatingPaneParams {
+                            title: "Bar's Title".into(),
+                            position_local: (100.0, 0.0).into(),
+                        }),
                 ))
                 .prop(Background::Color(AlphaColor::from_rgb8(0x1F, 0x1F, 0x1F))),
             ),
