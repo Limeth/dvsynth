@@ -490,11 +490,14 @@ impl Widget for FloatingPanes {
         let bc = border.layout_down(bc);
         let bc = padding.layout_down(bc);
 
-        // we loosen our constraints when passing to children.
-        let loosened_bc = bc.loosen();
+        // // we loosen our constraints when passing to children.
+        // let loosened_bc = bc.loosen();
 
         for child in &mut self.children {
-            child.calculated_size = ctx.run_layout(&mut child.content, &loosened_bc);
+            let child_bc = BoxConstraints::UNBOUNDED;
+            // TODO: Resizeable panes.
+            // child_bc = BoxConstraints::new(Size::new(50.0, 100.0), Size::new(50.0, 100.0));
+            child.calculated_size = ctx.run_layout(&mut child.content, &child_bc);
             let position = child.layout_bounding_rect(self.children_offset).origin();
             // let child_baseline = ctx.child_baseline_offset(widget);
             ctx.place_child(&mut child.content, position);
