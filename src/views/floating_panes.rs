@@ -10,7 +10,7 @@ use xilem::core::{
     AppendVec, ElementSplice, MessageContext, MessageResult, Mut, SuperElement, View, ViewElement, ViewId,
     ViewMarker, ViewPathTracker, ViewSequence,
 };
-use xilem::{AnyWidgetView, Pod, ViewCtx, WidgetView};
+use xilem::{AnyWidgetView, Pod, ViewCtx, WidgetView, WidgetViewSequence};
 
 pub fn floating_panes<State, Action, Seq: FloatingPaneSequence<State, Action>>(
     sequence: Seq,
@@ -131,7 +131,12 @@ where
         // .main_axis_alignment(self.main_axis_alignment);
         let seq_state = self.sequence.seq_build(ctx, &mut elements, app_state);
         for child in elements.drain() {
-            widget = widget.with_child(child.content.new_widget, child.params);
+            widget = widget.with_child(
+                child.content.new_widget,
+                child.channels_in.into_iter().map(|pod| pod.new_widget).collect(),
+                child.channels_out.into_iter().map(|pod| pod.new_widget).collect(),
+                child.params,
+            );
         }
         let pod = ctx.create_pod(widget);
         let state = FloatingPaneState { seq_state, scratch: elements };
@@ -192,14 +197,16 @@ where
     }
 }
 
-/// A child element of a [`Flex`] view.
+/// A child element of a [`FloatingPanes`] view.
 pub struct FloatingPaneElement {
     params: FloatingPaneParams,
     content: Pod<dyn Widget>,
+    channels_in: Vec<Pod<dyn Widget>>,
+    channels_out: Vec<Pod<dyn Widget>>,
 }
 
-/// A mutable reference to a [`FlexElement`], used internally by Xilem traits.
-pub struct FlexElementMut<'w> {
+/// A mutable reference to a [`FloatingPaneElement`], used internally by Xilem traits.
+pub struct FloatingPaneElementMut<'w> {
     parent: WidgetMut<'w, widgets::FloatingPanes>,
     idx: usize,
 }
@@ -221,7 +228,7 @@ impl<'w, 's> FlexSplice<'w, 's> {
 }
 
 impl ViewElement for FloatingPaneElement {
-    type Mut<'w> = FlexElementMut<'w>;
+    type Mut<'w> = FloatingPaneElementMut<'w>;
 }
 
 impl SuperElement<Self, ViewCtx> for FloatingPaneElement {
@@ -235,7 +242,7 @@ impl SuperElement<Self, ViewCtx> for FloatingPaneElement {
     ) -> (Self::Mut<'_>, R) {
         let r = {
             let parent = this.parent.reborrow_mut();
-            let reborrow = FlexElementMut { idx: this.idx, parent };
+            let reborrow = FloatingPaneElementMut { idx: this.idx, parent };
             f(reborrow)
         };
         (this, r)
@@ -244,7 +251,12 @@ impl SuperElement<Self, ViewCtx> for FloatingPaneElement {
 
 impl<W: Widget + FromDynWidget + ?Sized> SuperElement<Pod<W>, ViewCtx> for FloatingPaneElement {
     fn upcast(_: &mut ViewCtx, child: Pod<W>) -> Self {
-        Self { content: child.erased(), params: Default::default() }
+        Self {
+            content: child.erased(),
+            channels_in: Default::default(),
+            channels_out: Default::default(),
+            params: Default::default(),
+        }
     }
 
     fn with_downcast_val<R>(
@@ -252,7 +264,7 @@ impl<W: Widget + FromDynWidget + ?Sized> SuperElement<Pod<W>, ViewCtx> for Float
         f: impl FnOnce(Mut<'_, Pod<W>>) -> R,
     ) -> (Mut<'_, Self>, R) {
         let ret = {
-            let mut child = widgets::FloatingPanes::child_mut(&mut this.parent, this.idx);
+            let mut child = widgets::FloatingPanes::child_content_mut(&mut this.parent, this.idx);
             let downcast = child.downcast();
             f(downcast)
         };
@@ -267,6 +279,8 @@ impl ElementSplice<FloatingPaneElement> for FlexSplice<'_, '_> {
             &mut self.element,
             self.idx,
             element.content.new_widget,
+            element.channels_in.into_iter().map(|pod| pod.new_widget).collect(),
+            element.channels_out.into_iter().map(|pod| pod.new_widget).collect(),
             element.params,
         );
         self.idx += 1;
@@ -279,6 +293,8 @@ impl ElementSplice<FloatingPaneElement> for FlexSplice<'_, '_> {
                 &mut self.element,
                 self.idx,
                 element.content.new_widget,
+                element.channels_in.into_iter().map(|pod| pod.new_widget).collect(),
+                element.channels_out.into_iter().map(|pod| pod.new_widget).collect(),
                 element.params,
             );
             self.idx += 1;
@@ -287,7 +303,7 @@ impl ElementSplice<FloatingPaneElement> for FlexSplice<'_, '_> {
     }
 
     fn mutate<R>(&mut self, f: impl FnOnce(Mut<'_, FloatingPaneElement>) -> R) -> R {
-        let child = FlexElementMut { parent: self.element.reborrow_mut(), idx: self.idx };
+        let child = FloatingPaneElementMut { parent: self.element.reborrow_mut(), idx: self.idx };
         let ret = f(child);
         self.idx += 1;
         ret
@@ -295,7 +311,7 @@ impl ElementSplice<FloatingPaneElement> for FlexSplice<'_, '_> {
 
     fn delete<R>(&mut self, f: impl FnOnce(Mut<'_, FloatingPaneElement>) -> R) -> R {
         let ret = {
-            let child = FlexElementMut { parent: self.element.reborrow_mut(), idx: self.idx };
+            let child = FloatingPaneElementMut { parent: self.element.reborrow_mut(), idx: self.idx };
             f(child)
         };
         widgets::FloatingPanes::remove_child(&mut self.element, self.idx);
@@ -334,33 +350,21 @@ pub trait FloatingPaneSequence<State, Action = ()>:
 impl<Seq, State, Action> FloatingPaneSequence<State, Action> for Seq where Seq: ViewSequence<State, Action, ViewCtx, FloatingPaneElement>
 {}
 
-/// A trait which extends a [`WidgetView`] with methods to provide parameters for a flex item, or being able to use it interchangeably with a spacer.
 pub trait FloatingPaneExt<State, Action>: WidgetView<State, Action> {
-    /// Applies [`impl Into<FlexParams>`](`FlexParams`) to this view, can be used as child of a [`Flex`] [`View`]
-    ///
-    /// # Examples
-    /// ```
-    /// use xilem::masonry::properties::types::AsUnit;
-    /// use xilem::{view::{Axis, text_button, label, flex, CrossAxisAlignment, FlexSpacer, FlexExt}};
-    /// # use xilem::{WidgetView};
-    ///
-    /// # fn view<State: 'static>() -> impl WidgetView<State> {
-    /// flex(Axis::Vertical, (
-    ///     text_button("click me", |_| ()).flex(2.0),
-    ///     FlexSpacer::Fixed(2.px()),
-    ///     label("a label").flex(CrossAxisAlignment::Fill),
-    ///     FlexSpacer::Fixed(2.px()),
-    /// ))
-    /// # }
-    ///
-    /// ```
-    fn floating_pane(self, params: impl Into<FloatingPaneParams>) -> FloatingPaneItem<Self, State, Action>
+    fn floating_pane<ChannelViewsIn, ChannelViewsOut>(
+        self,
+        channel_views_in: ChannelViewsIn,
+        channel_views_out: ChannelViewsOut,
+        params: impl Into<FloatingPaneParams>,
+    ) -> FloatingPaneItem<Self, ChannelViewsIn, ChannelViewsOut, State, Action>
     where
+        ChannelViewsIn: WidgetViewSequence<State, Action>,
+        ChannelViewsOut: WidgetViewSequence<State, Action>,
         State: 'static,
         Action: 'static,
         Self: Sized,
     {
-        floating_pane_item(self, params)
+        floating_pane_item(self, channel_views_in, channel_views_out, params)
     }
 
     // /// Turns this [`WidgetView`] into an [`AnyFlexChild`],
@@ -390,8 +394,10 @@ pub trait FloatingPaneExt<State, Action>: WidgetView<State, Action> {
 impl<State, Action, V: WidgetView<State, Action>> FloatingPaneExt<State, Action> for V {}
 
 /// A `WidgetView` that can be used within a [`Flex`] [`View`].
-pub struct FloatingPaneItem<V, State, Action> {
-    view: V,
+pub struct FloatingPaneItem<ContentView, ChannelViewsIn, ChannelViewsOut, State, Action> {
+    content_view: ContentView,
+    channel_views_in: ChannelViewsIn,
+    channel_views_out: ChannelViewsOut,
     params: FloatingPaneParams,
     phantom: PhantomData<fn() -> (State, Action)>,
 }
@@ -414,16 +420,26 @@ pub struct FloatingPaneItem<V, State, Action> {
 /// # }
 ///
 /// ```
-pub fn floating_pane_item<V, State, Action>(
-    view: V,
+pub fn floating_pane_item<ContentView, ChannelViewsIn, ChannelViewsOut, State, Action>(
+    content_view: ContentView,
+    channel_views_in: ChannelViewsIn,
+    channel_views_out: ChannelViewsOut,
     params: impl Into<FloatingPaneParams>,
-) -> FloatingPaneItem<V, State, Action>
+) -> FloatingPaneItem<ContentView, ChannelViewsIn, ChannelViewsOut, State, Action>
 where
     State: 'static,
     Action: 'static,
-    V: WidgetView<State, Action>,
+    ContentView: WidgetView<State, Action>,
+    ChannelViewsIn: WidgetViewSequence<State, Action>,
+    ChannelViewsOut: WidgetViewSequence<State, Action>,
 {
-    FloatingPaneItem { params: params.into(), view, phantom: PhantomData }
+    FloatingPaneItem {
+        params: params.into(),
+        content_view,
+        channel_views_in,
+        channel_views_out,
+        phantom: PhantomData,
+    }
 }
 
 // impl<State, Action, V> From<FlexItem<V, State, Action>> for AnyFlexChild<State, Action>
@@ -437,26 +453,45 @@ where
 //     }
 // }
 
-impl<V, State, Action> ViewMarker for FloatingPaneItem<V, State, Action> {}
-impl<State, Action, V> View<State, Action, ViewCtx> for FloatingPaneItem<V, State, Action>
+impl<ContentView, ChannelViewsIn, ChannelViewsOut, State, Action> ViewMarker
+    for FloatingPaneItem<ContentView, ChannelViewsIn, ChannelViewsOut, State, Action>
+{
+}
+
+impl<ContentView, ChannelViewsIn, ChannelViewsOut, State, Action> View<State, Action, ViewCtx>
+    for FloatingPaneItem<ContentView, ChannelViewsIn, ChannelViewsOut, State, Action>
 where
     State: 'static,
     Action: 'static,
-    V: WidgetView<State, Action>,
+    ContentView: WidgetView<State, Action>,
+    ChannelViewsIn: WidgetViewSequence<State, Action>,
+    ChannelViewsOut: WidgetViewSequence<State, Action>,
 {
     type Element = FloatingPaneElement;
 
-    type ViewState = V::ViewState;
+    type ViewState = (ContentView::ViewState, ChannelViewsIn::SeqState, ChannelViewsOut::SeqState);
 
     fn build(&self, ctx: &mut ViewCtx, app_state: &mut State) -> (Self::Element, Self::ViewState) {
-        let (pod, state) = self.view.build(ctx, app_state);
-        (FloatingPaneElement { content: pod.erased(), params: self.params.clone() }, state)
+        let (content_pod, content_state) = self.content_view.build(ctx, app_state);
+        let mut channel_pods_in = AppendVec::default();
+        let channel_states_in = self.channel_views_in.seq_build(ctx, &mut channel_pods_in, app_state);
+        let mut channel_pods_out = AppendVec::default();
+        let channel_states_out = self.channel_views_out.seq_build(ctx, &mut channel_pods_out, app_state);
+        (
+            FloatingPaneElement {
+                content: content_pod.erased(),
+                channels_in: channel_pods_in.drain().collect(),
+                channels_out: channel_pods_out.drain().collect(),
+                params: self.params.clone(),
+            },
+            (content_state, channel_states_in, channel_states_out),
+        )
     }
 
     fn rebuild(
         &self,
         prev: &Self,
-        view_state: &mut Self::ViewState,
+        (content_state, channel_states_in, channel_states_out): &mut Self::ViewState,
         ctx: &mut ViewCtx,
         mut element: Mut<'_, Self::Element>,
         app_state: &mut State,
@@ -469,30 +504,51 @@ where
                     self.params.clone(),
                 );
             }
-            let mut child = widgets::FloatingPanes::child_mut(&mut element.parent, element.idx);
-            self.view.rebuild(&prev.view, view_state, ctx, child.downcast(), app_state);
+
+            let mut content = widgets::FloatingPanes::child_content_mut(&mut element.parent, element.idx);
+
+            self.content_view.rebuild(&prev.content_view, content_state, ctx, content.downcast(), app_state);
+            self.channel_views_in.seq_rebuild(
+                &prev.channel_views_in,
+                channel_states_in,
+                ctx,
+                &mut child
+                    .channels_in
+                    .iter_mut()
+                    .map(|child| element.parent.ctx.get_mut(child))
+                    .collect::<Vec<_>>(),
+                // elements,
+                app_state,
+            );
+            self.channel_views_out.seq_rebuild(
+                &prev.channel_views_out,
+                channel_states_out,
+                ctx,
+                &mut child.channels_out.iter_mut().map(|child| element.parent.ctx.get_mut(child)).collect(),
+                app_state,
+            );
         }
     }
 
     fn teardown(
         &self,
-        view_state: &mut Self::ViewState,
+        (content_state, channel_states_in, channel_states_out): &mut Self::ViewState,
         ctx: &mut ViewCtx,
         mut element: Mut<'_, Self::Element>,
     ) {
-        let mut child = widgets::FloatingPanes::child_mut(&mut element.parent, element.idx);
-        self.view.teardown(view_state, ctx, child.downcast());
+        let mut child = widgets::FloatingPanes::child_content_mut(&mut element.parent, element.idx);
+        self.content_view.teardown(content_state, ctx, child.downcast());
     }
 
     fn message(
         &self,
-        view_state: &mut Self::ViewState,
+        (content_state, channel_states_in, channel_states_out): &mut Self::ViewState,
         message: &mut MessageContext,
         mut element: Mut<'_, Self::Element>,
         app_state: &mut State,
     ) -> MessageResult<Action> {
-        let mut child = widgets::FloatingPanes::child_mut(&mut element.parent, element.idx);
-        self.view.message(view_state, message, child.downcast(), app_state)
+        let mut child = widgets::FloatingPanes::child_content_mut(&mut element.parent, element.idx);
+        self.content_view.message(content_state, message, child.downcast(), app_state)
     }
 }
 

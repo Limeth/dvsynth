@@ -21,6 +21,7 @@ use xilem::masonry::properties::types::{CrossAxisAlignment, MainAxisAlignment};
 use xilem::masonry::properties::{Background, BorderColor, BorderWidth, CornerRadius, Padding};
 use xilem::masonry::theme::DEFAULT_GAP;
 use xilem::masonry::util::{debug_panic, fill, include_screenshot, stroke};
+use xilem::masonry::widgets::IndexedStack;
 use xilem::view::PointerButton;
 use xilem::winit::window::CursorIcon;
 
@@ -63,15 +64,6 @@ pub struct FloatingPanes {
     children_offset: Vec2,
 }
 
-/// Optional parameters for an item in a [`Flex`] container (row or column).
-///
-/// Generally, when you would like to add a flexible child to a container,
-/// you can simply call [`with_flex_child`](Flex::with_flex_child) or [`add_flex_child`](Flex::add_flex_child),
-/// passing the child and the desired flex factor as a `f64`, which has an impl of
-/// `Into<FlexParams>`.
-///
-/// You can also add spacers and flexible spacers using e.g. [`with_spacer`](Flex::with_spacer).
-/// Spacers are children which take up space but don't paint anything.
 #[derive(Default, Debug, Clone, PartialEq)]
 pub struct FloatingPaneParams {
     pub title: String,
@@ -79,11 +71,13 @@ pub struct FloatingPaneParams {
     pub position_local: Point,
 }
 
-// TODO: Make generic over widget type
-struct Child {
-    content: WidgetPod<dyn Widget>,
-    params: FloatingPaneParams,
-    calculated_size: Size,
+// TODO: Make generic over widget types?
+pub struct Child {
+    pub content: WidgetPod<dyn Widget>,
+    pub channels_in: Vec<WidgetPod<dyn Widget>>,
+    pub channels_out: Vec<WidgetPod<dyn Widget>>,
+    pub params: FloatingPaneParams,
+    pub calculated_size: Size,
     // TODO: Should this be part of FloatingPaneParams?
     // extra_data: Point,
 }
@@ -158,8 +152,20 @@ impl FloatingPanes {
     /// Builder-style variant of [`Flex::add_child`].
     ///
     /// Convenient for assembling a group of widgets in a single expression.
-    pub fn with_child(mut self, child: NewWidget<impl Widget + ?Sized>, params: FloatingPaneParams) -> Self {
-        let child = Child { content: child.erased().to_pod(), params, calculated_size: Size::ZERO };
+    pub fn with_child(
+        mut self,
+        content: NewWidget<impl Widget + ?Sized>,
+        channels_in: Vec<NewWidget<impl Widget + ?Sized>>,
+        channels_out: Vec<NewWidget<impl Widget + ?Sized>>,
+        params: FloatingPaneParams,
+    ) -> Self {
+        let child = Child {
+            content: content.erased().to_pod(),
+            channels_in: channels_in.into_iter().map(|channel| channel.erased().to_pod()).collect(),
+            channels_out: channels_out.into_iter().map(|channel| channel.erased().to_pod()).collect(),
+            params,
+            calculated_size: Size::ZERO,
+        };
         self.children.push(child);
         self
     }
@@ -224,10 +230,18 @@ impl FloatingPanes {
     pub fn insert_child(
         this: &mut WidgetMut<'_, Self>,
         idx: usize,
-        child: NewWidget<impl Widget + ?Sized>,
+        content: NewWidget<impl Widget + ?Sized>,
+        channels_in: Vec<NewWidget<impl Widget + ?Sized>>,
+        channels_out: Vec<NewWidget<impl Widget + ?Sized>>,
         params: FloatingPaneParams,
     ) {
-        let child = Child { content: child.erased().to_pod(), params, calculated_size: Size::ZERO };
+        let child = Child {
+            content: content.erased().to_pod(),
+            channels_in: channels_in.into_iter().map(|channel| channel.erased().to_pod()).collect(),
+            channels_out: channels_out.into_iter().map(|channel| channel.erased().to_pod()).collect(),
+            params,
+            calculated_size: Size::ZERO,
+        };
         this.widget.children.insert(idx, child);
         this.ctx.children_changed();
     }
@@ -247,12 +261,10 @@ impl FloatingPanes {
 
     /// Returns a mutable reference to the child widget at `idx`.
     ///
-    /// Returns `None` if the child at `idx` is a spacer.
-    ///
     /// # Panics
     ///
     /// Panics if the index is larger than the number of children.
-    pub fn child_mut<'t>(this: &'t mut WidgetMut<'_, Self>, idx: usize) -> WidgetMut<'t, dyn Widget> {
+    pub fn child_content_mut<'t>(this: &'t mut WidgetMut<'_, Self>, idx: usize) -> WidgetMut<'t, dyn Widget> {
         let content = &mut this.widget.children[idx].content;
         this.ctx.get_mut(content)
     }
