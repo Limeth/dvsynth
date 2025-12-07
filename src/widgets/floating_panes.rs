@@ -25,6 +25,8 @@ use xilem::masonry::widgets::IndexedStack;
 use xilem::view::PointerButton;
 use xilem::winit::window::CursorIcon;
 
+use crate::node::ChannelDirection;
+
 /// A container with either horizontal or vertical layout.
 ///
 /// This widget is the foundation of most layouts, and is highly configurable.
@@ -85,6 +87,20 @@ pub struct Child {
 impl Child {
     pub fn layout_bounding_rect(&self, children_offset: Vec2) -> Rect {
         Rect::from_origin_size(self.params.position_local + children_offset, self.calculated_size)
+    }
+
+    pub fn get_channels(&self, direction: ChannelDirection) -> &Vec<WidgetPod<dyn Widget>> {
+        match direction {
+            ChannelDirection::In => &self.channels_in,
+            ChannelDirection::Out => &self.channels_out,
+        }
+    }
+
+    pub fn get_channels_mut(&mut self, direction: ChannelDirection) -> &mut Vec<WidgetPod<dyn Widget>> {
+        match direction {
+            ChannelDirection::In => &mut self.channels_in,
+            ChannelDirection::Out => &mut self.channels_out,
+        }
     }
 }
 
@@ -259,6 +275,30 @@ impl FloatingPanes {
         this.ctx.request_layout();
     }
 
+    pub fn insert_child_channel(
+        this: &mut WidgetMut<'_, Self>,
+        pane_index: usize,
+        channel_direction: ChannelDirection,
+        channel_index: usize,
+        label: NewWidget<impl Widget + ?Sized>,
+    ) {
+        let channels = this.widget.children[pane_index].get_channels_mut(channel_direction);
+        channels.insert(channel_index, label.erased().to_pod());
+        this.ctx.children_changed();
+    }
+
+    pub fn remove_child_channel(
+        this: &mut WidgetMut<'_, Self>,
+        pane_index: usize,
+        channel_direction: ChannelDirection,
+        channel_index: usize,
+    ) {
+        let channels = this.widget.children[pane_index].get_channels_mut(channel_direction);
+        let channel = channels.remove(channel_index);
+        this.ctx.remove_child(channel);
+        this.ctx.request_layout();
+    }
+
     /// Returns a mutable reference to the child widget at `idx`.
     ///
     /// # Panics
@@ -266,6 +306,16 @@ impl FloatingPanes {
     /// Panics if the index is larger than the number of children.
     pub fn child_content_mut<'t>(this: &'t mut WidgetMut<'_, Self>, idx: usize) -> WidgetMut<'t, dyn Widget> {
         let content = &mut this.widget.children[idx].content;
+        this.ctx.get_mut(content)
+    }
+
+    pub fn child_channel_label_mut<'t>(
+        this: &'t mut WidgetMut<'_, Self>,
+        pane_idx: usize,
+        channel_direction: ChannelDirection,
+        channel_index: usize,
+    ) -> WidgetMut<'t, dyn Widget> {
+        let content = &mut this.widget.children[pane_idx].get_channels_mut(channel_direction)[channel_index];
         this.ctx.get_mut(content)
     }
 

@@ -1,5 +1,7 @@
 use std::marker::PhantomData;
 
+use crate::graph::ChannelIdentifier;
+use crate::node::ChannelDirection;
 use crate::widgets;
 pub use crate::widgets::FloatingPaneParams;
 use xilem::masonry::core::{Axis, FromDynWidget, Widget, WidgetMut};
@@ -18,62 +20,10 @@ pub fn floating_panes<State, Action, Seq: FloatingPaneSequence<State, Action>>(
     FloatingPanes { sequence, phantom: PhantomData }
 }
 
-/// The [`View`] created by [`flex`] from a sequence.
-///
-/// See `flex` documentation for more context.
 #[must_use = "View values do nothing unless provided to Xilem."]
 pub struct FloatingPanes<Seq, State, Action = ()> {
     sequence: Seq,
-    // axis: Axis,
-    // cross_axis_alignment: CrossAxisAlignment,
-    // main_axis_alignment: MainAxisAlignment,
-    // fill_major_axis: bool,
-    // gap: Length,
     phantom: PhantomData<fn() -> (State, Action)>,
-}
-
-impl<Seq, State, Action> FloatingPanes<Seq, State, Action> {
-    // /// Set the flex direction (see [`Axis`]).
-    // pub fn direction(mut self, axis: Axis) -> Self {
-    //     self.axis = axis;
-    //     self
-    // }
-    // /// Set the children's [`CrossAxisAlignment`].
-    // pub fn cross_axis_alignment(mut self, axis: CrossAxisAlignment) -> Self {
-    //     self.cross_axis_alignment = axis;
-    //     self
-    // }
-    // /// Set the children's [`MainAxisAlignment`].
-    // pub fn main_axis_alignment(mut self, axis: MainAxisAlignment) -> Self {
-    //     self.main_axis_alignment = axis;
-    //     self
-    // }
-    // /// Set whether the container must expand to fill the available space on
-    // /// its main axis.
-    // pub fn must_fill_major_axis(mut self, fill_major_axis: bool) -> Self {
-    //     self.fill_major_axis = fill_major_axis;
-    //     self
-    // }
-
-    // /// Set the spacing along the major axis between any two elements in logical pixels.
-    // ///
-    // /// Equivalent to the css [gap] property.
-    // ///
-    // /// This gap is between any two children, including spacers.
-    // /// As such, when adding a spacer, you add both the spacer's size (or computed flex size)
-    // /// and the gap between the spacer and its neighbors.
-    // /// As such, if you're adding lots of spacers to a flex parent, you may want to set
-    // /// its gap to zero to make the layout more predictable.
-    // ///
-    // /// Leave unset to use the default spacing which is [`DEFAULT_GAP`].
-    // ///
-    // /// [gap]: https://developer.mozilla.org/en-US/docs/Web/CSS/gap
-    // /// [`DEFAULT_GAP`]: masonry::theme::DEFAULT_GAP
-    // #[track_caller]
-    // pub fn gap(mut self, gap: Length) -> Self {
-    //     self.gap = gap;
-    //     self
-    // }
 }
 
 mod hidden {
@@ -167,7 +117,7 @@ where
         // if prev.gap != self.gap {
         //     widgets::FloatingPanes::set_gap(&mut element, self.gap);
         // }
-        let mut splice = FlexSplice::new(element, scratch);
+        let mut splice = FloatingPanesSplice::new(element, scratch);
         self.sequence.seq_rebuild(&prev.sequence, seq_state, ctx, &mut splice, app_state);
         debug_assert!(scratch.is_empty());
     }
@@ -178,7 +128,7 @@ where
         ctx: &mut ViewCtx,
         element: Mut<'_, Self::Element>,
     ) {
-        let mut splice = FlexSplice::new(element, scratch);
+        let mut splice = FloatingPanesSplice::new(element, scratch);
         self.sequence.seq_teardown(seq_state, ctx, &mut splice);
         debug_assert!(scratch.is_empty());
     }
@@ -190,7 +140,7 @@ where
         element: Mut<'_, Self::Element>,
         app_state: &mut State,
     ) -> MessageResult<Action> {
-        let mut splice = FlexSplice::new(element, scratch);
+        let mut splice = FloatingPanesSplice::new(element, scratch);
         let result = self.sequence.seq_message(seq_state, message, &mut splice, app_state);
         debug_assert!(scratch.is_empty());
         result
@@ -203,28 +153,6 @@ pub struct FloatingPaneElement {
     content: Pod<dyn Widget>,
     channels_in: Vec<Pod<dyn Widget>>,
     channels_out: Vec<Pod<dyn Widget>>,
-}
-
-/// A mutable reference to a [`FloatingPaneElement`], used internally by Xilem traits.
-pub struct FloatingPaneElementMut<'w> {
-    parent: WidgetMut<'w, widgets::FloatingPanes>,
-    idx: usize,
-}
-
-struct FlexSplice<'w, 's> {
-    idx: usize,
-    element: WidgetMut<'w, widgets::FloatingPanes>,
-    scratch: &'s mut AppendVec<FloatingPaneElement>,
-}
-
-impl<'w, 's> FlexSplice<'w, 's> {
-    fn new(
-        element: WidgetMut<'w, widgets::FloatingPanes>,
-        scratch: &'s mut AppendVec<FloatingPaneElement>,
-    ) -> Self {
-        debug_assert!(scratch.is_empty());
-        Self { idx: 0, element, scratch }
-    }
 }
 
 impl ViewElement for FloatingPaneElement {
@@ -273,7 +201,92 @@ impl<W: Widget + FromDynWidget + ?Sized> SuperElement<Pod<W>, ViewCtx> for Float
     }
 }
 
-impl ElementSplice<FloatingPaneElement> for FlexSplice<'_, '_> {
+/// A mutable reference to a [`FloatingPaneElement`], used internally by Xilem traits.
+pub struct FloatingPaneElementMut<'w> {
+    parent: WidgetMut<'w, widgets::FloatingPanes>,
+    idx: usize,
+}
+
+impl<'w> FloatingPaneElementMut<'w> {
+    pub fn reborrow_mut(&mut self) -> FloatingPaneElementMut<'_> {
+        FloatingPaneElementMut { parent: self.parent.reborrow_mut(), idx: self.idx }
+    }
+}
+
+/// A child element of a [`FloatingPanes`] view.
+pub struct ChannelElement {
+    label: Pod<dyn Widget>,
+}
+
+impl ViewElement for ChannelElement {
+    type Mut<'w> = ChannelElementMut<'w>;
+}
+
+impl SuperElement<Self, ViewCtx> for ChannelElement {
+    fn upcast(_ctx: &mut ViewCtx, child: Self) -> Self {
+        child
+    }
+
+    fn with_downcast_val<R>(
+        mut this: Mut<'_, Self>,
+        f: impl FnOnce(Mut<'_, Self>) -> R,
+    ) -> (Self::Mut<'_>, R) {
+        let r = {
+            let parent = this.pane.parent.reborrow_mut();
+            let reborrow = ChannelElementMut { pane: FloatingPaneElementMut { parent, ..this.pane }, ..this };
+            f(reborrow)
+        };
+        (this, r)
+    }
+}
+
+impl<W: Widget + FromDynWidget + ?Sized> SuperElement<Pod<W>, ViewCtx> for ChannelElement {
+    fn upcast(_: &mut ViewCtx, child: Pod<W>) -> Self {
+        Self { label: child.erased() }
+    }
+
+    fn with_downcast_val<R>(
+        mut this: Mut<'_, Self>,
+        f: impl FnOnce(Mut<'_, Pod<W>>) -> R,
+    ) -> (Mut<'_, Self>, R) {
+        let ret = {
+            let mut child = widgets::FloatingPanes::child_channel_label_mut(
+                &mut this.pane.parent,
+                this.pane.idx,
+                this.channel_direction,
+                this.channel_idx,
+            );
+            let downcast = child.downcast();
+            f(downcast)
+        };
+
+        (this, ret)
+    }
+}
+
+pub struct ChannelElementMut<'w> {
+    pane: FloatingPaneElementMut<'w>,
+    channel_direction: ChannelDirection,
+    channel_idx: usize,
+}
+
+struct FloatingPanesSplice<'w, 's> {
+    idx: usize,
+    element: WidgetMut<'w, widgets::FloatingPanes>,
+    scratch: &'s mut AppendVec<FloatingPaneElement>,
+}
+
+impl<'w, 's> FloatingPanesSplice<'w, 's> {
+    fn new(
+        element: WidgetMut<'w, widgets::FloatingPanes>,
+        scratch: &'s mut AppendVec<FloatingPaneElement>,
+    ) -> Self {
+        debug_assert!(scratch.is_empty());
+        Self { idx: 0, element, scratch }
+    }
+}
+
+impl ElementSplice<FloatingPaneElement> for FloatingPanesSplice<'_, '_> {
     fn insert(&mut self, element: FloatingPaneElement) {
         widgets::FloatingPanes::insert_child(
             &mut self.element,
@@ -327,6 +340,94 @@ impl ElementSplice<FloatingPaneElement> for FlexSplice<'_, '_> {
     }
 }
 
+struct ChannelsSplice<'e, 's, const in_out: bool> {
+    element: FloatingPaneElementMut<'e>,
+    channel_idx: usize,
+    scratch: &'s mut AppendVec<ChannelElement>,
+}
+
+impl<'e, 's, const in_out: bool> ChannelsSplice<'e, 's, in_out> {
+    fn new(element: FloatingPaneElementMut<'e>, scratch: &'s mut AppendVec<ChannelElement>) -> Self {
+        debug_assert!(scratch.is_empty());
+        Self { channel_idx: 0, element, scratch }
+    }
+}
+
+impl<const in_out: bool> ElementSplice<ChannelElement> for ChannelsSplice<'_, '_, in_out> {
+    fn insert(&mut self, element: ChannelElement) {
+        widgets::FloatingPanes::insert_child_channel(
+            &mut self.element.parent,
+            self.element.idx,
+            if in_out { ChannelDirection::Out } else { ChannelDirection::In },
+            self.channel_idx,
+            element.label.new_widget,
+        );
+        self.channel_idx += 1;
+    }
+
+    fn with_scratch<R>(&mut self, f: impl FnOnce(&mut AppendVec<ChannelElement>) -> R) -> R {
+        let ret = f(self.scratch);
+        for element in self.scratch.drain() {
+            widgets::FloatingPanes::insert_child_channel(
+                &mut self.element.parent,
+                self.element.idx,
+                match in_out {
+                    false => ChannelDirection::In,
+                    true => ChannelDirection::Out,
+                },
+                self.channel_idx,
+                element.label.new_widget,
+            );
+            self.channel_idx += 1;
+        }
+        ret
+    }
+
+    fn mutate<R>(&mut self, f: impl FnOnce(Mut<'_, ChannelElement>) -> R) -> R {
+        let child = ChannelElementMut {
+            pane: FloatingPaneElementMut { parent: self.element.parent.reborrow_mut(), ..self.element },
+            channel_direction: match in_out {
+                false => ChannelDirection::In,
+                true => ChannelDirection::Out,
+            },
+            channel_idx: self.channel_idx,
+        };
+        let ret = f(child);
+        self.channel_idx += 1;
+        ret
+    }
+
+    fn delete<R>(&mut self, f: impl FnOnce(Mut<'_, ChannelElement>) -> R) -> R {
+        let channel_direction = match in_out {
+            false => ChannelDirection::In,
+            true => ChannelDirection::Out,
+        };
+        let ret = {
+            let child = ChannelElementMut {
+                pane: FloatingPaneElementMut { parent: self.element.parent.reborrow_mut(), ..self.element },
+                channel_direction,
+                channel_idx: self.channel_idx,
+            };
+            f(child)
+        };
+        widgets::FloatingPanes::remove_child_channel(
+            &mut self.element.parent,
+            self.element.idx,
+            channel_direction,
+            self.channel_idx,
+        );
+        ret
+    }
+
+    fn skip(&mut self, n: usize) {
+        self.channel_idx += n;
+    }
+
+    fn index(&self) -> usize {
+        self.channel_idx
+    }
+}
+
 /// An ordered sequence of views for a [`Flex`] view.
 /// See [`ViewSequence`] for more technical details.
 ///
@@ -358,8 +459,8 @@ pub trait FloatingPaneExt<State, Action>: WidgetView<State, Action> {
         params: impl Into<FloatingPaneParams>,
     ) -> FloatingPaneItem<Self, ChannelViewsIn, ChannelViewsOut, State, Action>
     where
-        ChannelViewsIn: WidgetViewSequence<State, Action>,
-        ChannelViewsOut: WidgetViewSequence<State, Action>,
+        ChannelViewsIn: ViewSequence<State, Action, ViewCtx, ChannelElement>,
+        ChannelViewsOut: ViewSequence<State, Action, ViewCtx, ChannelElement>,
         State: 'static,
         Action: 'static,
         Self: Sized,
@@ -430,8 +531,8 @@ where
     State: 'static,
     Action: 'static,
     ContentView: WidgetView<State, Action>,
-    ChannelViewsIn: WidgetViewSequence<State, Action>,
-    ChannelViewsOut: WidgetViewSequence<State, Action>,
+    ChannelViewsIn: ViewSequence<State, Action, ViewCtx, ChannelElement>,
+    ChannelViewsOut: ViewSequence<State, Action, ViewCtx, ChannelElement>,
 {
     FloatingPaneItem {
         params: params.into(),
@@ -464,8 +565,8 @@ where
     State: 'static,
     Action: 'static,
     ContentView: WidgetView<State, Action>,
-    ChannelViewsIn: WidgetViewSequence<State, Action>,
-    ChannelViewsOut: WidgetViewSequence<State, Action>,
+    ChannelViewsIn: ViewSequence<State, Action, ViewCtx, ChannelElement>,
+    ChannelViewsOut: ViewSequence<State, Action, ViewCtx, ChannelElement>,
 {
     type Element = FloatingPaneElement;
 
@@ -480,8 +581,8 @@ where
         (
             FloatingPaneElement {
                 content: content_pod.erased(),
-                channels_in: channel_pods_in.drain().collect(),
-                channels_out: channel_pods_out.drain().collect(),
+                channels_in: channel_pods_in.drain().map(|channel| channel.label).collect(),
+                channels_out: channel_pods_out.drain().map(|channel| channel.label).collect(),
                 params: self.params.clone(),
             },
             (content_state, channel_states_in, channel_states_out),
@@ -505,26 +606,36 @@ where
                 );
             }
 
-            let mut content = widgets::FloatingPanes::child_content_mut(&mut element.parent, element.idx);
+            {
+                let mut content = widgets::FloatingPanes::child_content_mut(&mut element.parent, element.idx);
 
-            self.content_view.rebuild(&prev.content_view, content_state, ctx, content.downcast(), app_state);
+                self.content_view.rebuild(
+                    &prev.content_view,
+                    content_state,
+                    ctx,
+                    content.downcast(),
+                    app_state,
+                );
+            }
+
             self.channel_views_in.seq_rebuild(
                 &prev.channel_views_in,
                 channel_states_in,
                 ctx,
-                &mut child
-                    .channels_in
-                    .iter_mut()
-                    .map(|child| element.parent.ctx.get_mut(child))
-                    .collect::<Vec<_>>(),
-                // elements,
+                &mut ChannelsSplice::<false>::new(
+                    element.reborrow_mut(),
+                    &mut Default::default(), /* TODO reuse scratch vec */
+                ),
                 app_state,
             );
             self.channel_views_out.seq_rebuild(
                 &prev.channel_views_out,
                 channel_states_out,
                 ctx,
-                &mut child.channels_out.iter_mut().map(|child| element.parent.ctx.get_mut(child)).collect(),
+                &mut ChannelsSplice::<true>::new(
+                    element.reborrow_mut(),
+                    &mut Default::default(), /* TODO reuse scratch vec */
+                ),
                 app_state,
             );
         }
