@@ -47,6 +47,7 @@ tokio = { version = "1.48.0", features = ["full"] }
 transient = "0.4.1"
 xilem = "0.4.0"
 tracing = "0.1.41"
+itertools = "0.14.0"
 
 [package.metadata.docs.rs]
 rustdoc-args = [ "--html-in-header", "doc/katex.html" ]

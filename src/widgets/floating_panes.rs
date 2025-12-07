@@ -1,5 +1,8 @@
 use std::any::TypeId;
+use std::{f64, iter};
 
+use iced::Vector;
+use itertools::chain;
 use tracing::{Span, trace_span};
 use xilem::Vec2;
 use xilem::masonry::accesskit::{Node, Role};
@@ -527,6 +530,8 @@ impl Widget for FloatingPanes {
     fn register_children(&mut self, ctx: &mut RegisterCtx<'_>) {
         for child in self.children.iter_mut() {
             ctx.register_child(&mut child.content);
+            child.channels_in.iter_mut().for_each(|channel| ctx.register_child(channel));
+            child.channels_out.iter_mut().for_each(|channel| ctx.register_child(channel));
         }
     }
 
@@ -563,6 +568,29 @@ impl Widget for FloatingPanes {
             let position = child.layout_bounding_rect(self.children_offset).origin();
             // let child_baseline = ctx.child_baseline_offset(widget);
             ctx.place_child(&mut child.content, position);
+
+            let channel_bc =
+                BoxConstraints::new(Size::ZERO, Size::new(child.calculated_size.width, f64::INFINITY));
+
+            {
+                let mut channel_position = position;
+
+                for channel_in in &mut child.channels_in {
+                    let channel_size = ctx.run_layout(channel_in, &channel_bc);
+                    ctx.place_child(channel_in, channel_position);
+                    channel_position.y += channel_size.height;
+                }
+            }
+
+            {
+                let mut channel_position = position;
+
+                for channel_out in &mut child.channels_out {
+                    let channel_size = ctx.run_layout(channel_out, &channel_bc);
+                    ctx.place_child(channel_out, channel_position);
+                    channel_position.y += channel_size.height;
+                }
+            }
         }
 
         bc.max()
@@ -582,7 +610,7 @@ impl Widget for FloatingPanes {
         stroke(scene, &border_rect, border_color.color, border_width.width);
 
         // Clip children drawn outside the layout area.
-        scene.push_clip_layer(Affine::IDENTITY, &bg_rect);
+        // scene.push_clip_layer(Affine::IDENTITY, &bg_rect);
 
         for child in &self.children {
             let child_bg_rect = child.layout_bounding_rect(self.children_offset);
@@ -632,7 +660,16 @@ impl Widget for FloatingPanes {
     fn accessibility(&mut self, _ctx: &mut AccessCtx<'_>, _props: &PropertiesRef<'_>, _node: &mut Node) {}
 
     fn children_ids(&self) -> ChildrenIds {
-        self.children.iter().map(|widget| widget.content.id()).collect()
+        self.children
+            .iter()
+            .flat_map(|widget| {
+                chain![
+                    iter::once(widget.content.id()),
+                    widget.channels_in.iter().map(|channel| channel.id()),
+                    widget.channels_out.iter().map(|channel| channel.id()),
+                ]
+            })
+            .collect()
     }
 
     fn make_trace_span(&self, id: WidgetId) -> Span {

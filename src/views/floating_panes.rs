@@ -340,25 +340,25 @@ impl ElementSplice<FloatingPaneElement> for FloatingPanesSplice<'_, '_> {
     }
 }
 
-struct ChannelsSplice<'e, 's, const in_out: bool> {
+struct ChannelsSplice<'e, 's, const IN_OUT: bool> {
     element: FloatingPaneElementMut<'e>,
     channel_idx: usize,
     scratch: &'s mut AppendVec<ChannelElement>,
 }
 
-impl<'e, 's, const in_out: bool> ChannelsSplice<'e, 's, in_out> {
+impl<'e, 's, const IN_OUT: bool> ChannelsSplice<'e, 's, IN_OUT> {
     fn new(element: FloatingPaneElementMut<'e>, scratch: &'s mut AppendVec<ChannelElement>) -> Self {
         debug_assert!(scratch.is_empty());
         Self { channel_idx: 0, element, scratch }
     }
 }
 
-impl<const in_out: bool> ElementSplice<ChannelElement> for ChannelsSplice<'_, '_, in_out> {
+impl<const IN_OUT: bool> ElementSplice<ChannelElement> for ChannelsSplice<'_, '_, IN_OUT> {
     fn insert(&mut self, element: ChannelElement) {
         widgets::FloatingPanes::insert_child_channel(
             &mut self.element.parent,
             self.element.idx,
-            if in_out { ChannelDirection::Out } else { ChannelDirection::In },
+            if IN_OUT { ChannelDirection::Out } else { ChannelDirection::In },
             self.channel_idx,
             element.label.new_widget,
         );
@@ -371,7 +371,7 @@ impl<const in_out: bool> ElementSplice<ChannelElement> for ChannelsSplice<'_, '_
             widgets::FloatingPanes::insert_child_channel(
                 &mut self.element.parent,
                 self.element.idx,
-                match in_out {
+                match IN_OUT {
                     false => ChannelDirection::In,
                     true => ChannelDirection::Out,
                 },
@@ -386,7 +386,7 @@ impl<const in_out: bool> ElementSplice<ChannelElement> for ChannelsSplice<'_, '_
     fn mutate<R>(&mut self, f: impl FnOnce(Mut<'_, ChannelElement>) -> R) -> R {
         let child = ChannelElementMut {
             pane: FloatingPaneElementMut { parent: self.element.parent.reborrow_mut(), ..self.element },
-            channel_direction: match in_out {
+            channel_direction: match IN_OUT {
                 false => ChannelDirection::In,
                 true => ChannelDirection::Out,
             },
@@ -398,7 +398,7 @@ impl<const in_out: bool> ElementSplice<ChannelElement> for ChannelsSplice<'_, '_
     }
 
     fn delete<R>(&mut self, f: impl FnOnce(Mut<'_, ChannelElement>) -> R) -> R {
-        let channel_direction = match in_out {
+        let channel_direction = match IN_OUT {
             false => ChannelDirection::In,
             true => ChannelDirection::Out,
         };

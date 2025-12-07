@@ -281,8 +281,8 @@ impl ApplicationState {
                     ),
                     flex(Axis::Vertical, (label("Bar"), text_button("press me", |_| println!("yeet"))))
                         .floating_pane(
-                            (),
-                            (),
+                            (label("in 1"),),
+                            (label("out 1"), text_button("out 2", |_| println!("yeet"))),
                             FloatingPaneParams {
                                 title: "Bar's Title".into(),
                                 position_local: (100.0, 0.0).into(),
