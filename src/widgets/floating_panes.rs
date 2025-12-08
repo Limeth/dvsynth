@@ -88,8 +88,12 @@ pub struct Child {
 }
 
 impl Child {
+    pub fn layout_origin(&self, children_offset: Vec2) -> Point {
+        self.params.position_local + children_offset
+    }
+
     pub fn layout_bounding_rect(&self, children_offset: Vec2) -> Rect {
-        Rect::from_origin_size(self.params.position_local + children_offset, self.calculated_size)
+        Rect::from_origin_size(self.layout_origin(children_offset), self.calculated_size)
     }
 
     pub fn get_channels(&self, direction: ChannelDirection) -> &Vec<WidgetPod<dyn Widget>> {
@@ -570,27 +574,25 @@ impl Widget for FloatingPanes {
             ctx.place_child(&mut child.content, position);
 
             let channel_bc =
-                BoxConstraints::new(Size::ZERO, Size::new(child.calculated_size.width, f64::INFINITY));
+                BoxConstraints::new(Size::ZERO, Size::new(child.calculated_size.width / 2.0, f64::INFINITY));
 
-            {
-                let mut channel_position = position;
+            let mut layout_channels = |channels: &mut [_], offset: Vec2| {
+                let mut channel_position = child.calculated_size.height;
 
-                for channel_in in &mut child.channels_in {
-                    let channel_size = ctx.run_layout(channel_in, &channel_bc);
-                    ctx.place_child(channel_in, channel_position);
-                    channel_position.y += channel_size.height;
+                for channel in channels {
+                    let channel_size = ctx.run_layout(channel, &channel_bc);
+                    ctx.place_child(channel, position + offset + Vec2::new(0.0, channel_position));
+                    channel_position += channel_size.height;
                 }
-            }
 
-            {
-                let mut channel_position = position;
+                channel_position
+            };
 
-                for channel_out in &mut child.channels_out {
-                    let channel_size = ctx.run_layout(channel_out, &channel_bc);
-                    ctx.place_child(channel_out, channel_position);
-                    channel_position.y += channel_size.height;
-                }
-            }
+            child.calculated_size.height = std::cmp::max_by(
+                layout_channels(&mut child.channels_in, Vec2::ZERO),
+                layout_channels(&mut child.channels_out, Vec2::new(child.calculated_size.width / 2.0, 0.0)),
+                |lhs, rhs| lhs.total_cmp(rhs),
+            );
         }
 
         bc.max()
@@ -610,7 +612,7 @@ impl Widget for FloatingPanes {
         stroke(scene, &border_rect, border_color.color, border_width.width);
 
         // Clip children drawn outside the layout area.
-        // scene.push_clip_layer(Affine::IDENTITY, &bg_rect);
+        scene.push_clip_layer(Affine::IDENTITY, &bg_rect);
 
         for child in &self.children {
             let child_bg_rect = child.layout_bounding_rect(self.children_offset);
